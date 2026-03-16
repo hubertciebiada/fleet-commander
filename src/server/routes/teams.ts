@@ -825,6 +825,14 @@ const teamsRoutes: FastifyPluginCallback = (
           });
         }
 
+        // Guard: cannot change phase on a terminal-status team
+        if (['done', 'failed'].includes(team.status)) {
+          return reply.code(409).send({
+            error: 'Conflict',
+            message: `Cannot set phase on a ${team.status} team. Use restart to reactivate.`,
+          });
+        }
+
         const previousPhase = team.phase;
         const updated = db.updateTeam(teamId, { phase });
 

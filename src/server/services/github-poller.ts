@@ -92,7 +92,7 @@ class GitHubPoller {
    * Execute a single poll cycle. Iterates over all active projects,
    * then checks teams within each project.
    */
-  poll(): void {
+  async poll(): Promise<void> {
     const db = getDatabase();
 
     // Get all active projects — skip paused/archived
@@ -123,7 +123,7 @@ class GitHubPoller {
         }
 
         if (team.prNumber) {
-          this.pollPR(team.prNumber, team.id, githubRepo);
+          await this.pollPR(team.prNumber, team.id, githubRepo);
         } else if (team.branchName) {
           this.detectPR(team.branchName, team.id, githubRepo);
         }
@@ -141,7 +141,7 @@ class GitHubPoller {
   // Private: poll an existing PR
   // -------------------------------------------------------------------------
 
-  private pollPR(prNumber: number, teamId: number, githubRepo: string): void {
+  private async pollPR(prNumber: number, teamId: number, githubRepo: string): Promise<void> {
     // Use gh pr view to get PR status, CI checks, merge state, and auto-merge
     const result = this.execGH(
       `gh pr view ${prNumber} --repo ${githubRepo} ` +
@@ -173,16 +173,18 @@ class GitHubPoller {
     const checksJson = JSON.stringify(checks);
     const title = data.title ?? `PR #${prNumber}`;
 
-    // Count unique CI failures
+    // Count unique CI failures — cumulative (only goes up or resets to 0 on green)
     let ciFailCount = existing?.ciFailCount ?? 0;
-    if (ciStatus === 'failing') {
-      const failedChecks = checks
-        .filter((c) => c.conclusion === 'FAILURE')
-        .map((c) => c.name || c.context || 'unknown');
-      ciFailCount = new Set(failedChecks).size;
-    } else if (ciStatus === 'passing') {
+    if (ciStatus === 'passing') {
       // Reset failure count when CI is green
       ciFailCount = 0;
+    } else if (ciStatus === 'failing') {
+      const currentUniqueFailures = new Set(
+        checks
+          .filter((c) => c.conclusion === 'FAILURE')
+          .map((c) => c.name || c.context || 'unknown')
+      ).size;
+      ciFailCount = Math.max(existing?.ciFailCount ?? 0, currentUniqueFailures);
     }
 
     const prData = {
@@ -221,6 +223,47 @@ class GitHubPoller {
         console.log(
           `[GitHubPoller] PR #${prNumber} updated — state=${state} ci=${ciStatus} merge=${mergeState} (repo: ${githubRepo})`
         );
+
+        // Notify the team via stdin when CI status changes
+        if (existing.ciStatus !== ciStatus) {
+          try {
+            const { getTeamManager } = await import('./team-manager.js');
+            const manager = getTeamManager();
+
+            if (ciStatus === 'passing') {
+              manager.sendMessage(teamId,
+                `[Fleet Commander] CI GREEN — All checks passed on PR #${prNumber}. Auto-merge is ${autoMerge ? 'enabled' : 'not enabled'}.`
+              );
+            } else if (ciStatus === 'failing') {
+              const failedCheckNames = checks
+                .filter((c) => c.conclusion === 'FAILURE')
+                .map((c) => c.name || c.context || 'unknown')
+                .join(', ');
+              manager.sendMessage(teamId,
+                `[Fleet Commander] CI RED — Failed checks on PR #${prNumber}: ${failedCheckNames}. Fix count: ${ciFailCount}/${config.maxUniqueCiFailures} unique failures before blocked.`
+              );
+            } else if (ciStatus === 'pending') {
+              manager.sendMessage(teamId,
+                `[Fleet Commander] CI running on PR #${prNumber}...`
+              );
+            }
+          } catch (err) {
+            console.error(`[GitHubPoller] Failed to send CI notification to team ${teamId}:`, err);
+          }
+        }
+
+        // Notify team when PR is merged
+        if (isMerged && existing.state !== 'merged') {
+          try {
+            const { getTeamManager } = await import('./team-manager.js');
+            const manager = getTeamManager();
+            manager.sendMessage(teamId,
+              `[Fleet Commander] PR #${prNumber} MERGED — Your work is complete. You may finish up and exit.`
+            );
+          } catch (err) {
+            console.error(`[GitHubPoller] Failed to send merge notification to team ${teamId}:`, err);
+          }
+        }
       }
     } else {
       // First time we see this PR — insert it
@@ -272,19 +315,64 @@ class GitHubPoller {
       db.updatePullRequest(prNumber, {
         mergedAt: new Date().toISOString(),
       });
+
+      // Send a final message, then close stdin to signal CC to exit gracefully
+      try {
+        const { getTeamManager } = await import('./team-manager.js');
+        const manager = getTeamManager();
+        manager.sendMessage(teamId,
+          `[Fleet Commander] PR #${prNumber} merged successfully. Issue work is complete. Please finish up — this session will close shortly.`
+        );
+
+        // Give CC 30 seconds to finish its current turn, then close stdin
+        setTimeout(() => {
+          const stdin = manager.getStdinPipe(teamId);
+          if (stdin && !stdin.destroyed) {
+            stdin.end();
+            console.log(`[GitHubPoller] Sent graceful close to team ${teamId} after PR merge`);
+          }
+        }, 30_000);
+      } catch (err) {
+        console.error(`[GitHubPoller] Failed to send graceful close to team ${teamId}:`, err);
+      }
     }
 
-    // If CI has exceeded the maximum unique failure threshold, mark team as blocked
+    // If CI has exceeded the maximum unique failure threshold, mark team as blocked + stuck
     if (
       ciFailCount >= config.maxUniqueCiFailures &&
       ciStatus === 'failing'
     ) {
       const team = db.getTeam(teamId);
       if (team && team.phase !== 'blocked') {
-        db.updateTeam(teamId, { phase: 'blocked' });
-        console.log(
-          `[GitHubPoller] Team ${teamId} marked blocked — ${ciFailCount} unique CI failures`
+        const previousStatus = team.status;
+        db.updateTeam(teamId, { phase: 'blocked', status: 'stuck' });
+
+        sseBroker.broadcast(
+          'team_status_changed',
+          {
+            team_id: teamId,
+            status: 'stuck',
+            previous_status: previousStatus,
+            phase: 'blocked',
+            reason: `${ciFailCount} unique CI failures`,
+          },
+          teamId,
         );
+
+        console.log(
+          `[GitHubPoller] Team ${teamId} marked blocked+stuck — ${ciFailCount} unique CI failures`
+        );
+
+        // Tell the team they are blocked
+        try {
+          const { getTeamManager } = await import('./team-manager.js');
+          const manager = getTeamManager();
+          manager.sendMessage(teamId,
+            `[Fleet Commander] BLOCKED — ${ciFailCount} unique CI failure types on PR #${prNumber}. Human intervention needed.`
+          );
+        } catch (err) {
+          console.error(`[GitHubPoller] Failed to send blocked notification to team ${teamId}:`, err);
+        }
       }
     }
   }

@@ -58,7 +58,7 @@ export interface EventCollectorDb {
 
 /** SSE broker interface for broadcasting events */
 export interface SseBroker {
-  broadcast(event: SSEEventType, data: unknown): void;
+  broadcast(event: SSEEventType, data: unknown, teamId?: number): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +146,11 @@ export function processEvent(
     db.updateTeam(teamId, {
       status: 'running',
     });
+    sse.broadcast('team_status_changed', {
+      team_id: teamId,
+      status: 'running',
+      previous_status: team.status,
+    }, teamId);
   }
 
   // ── State transition: launching -> running only on session_start/subagent_start

@@ -621,10 +621,22 @@ export class TeamManager {
       throw new Error(`Team ${teamId} not found`);
     }
 
-    // Resolve project for repo path
-    const project = team.projectId ? db.getProject(team.projectId) : undefined;
+    // Resolve project for repo path and queue limit check
+    if (!team.projectId) {
+      throw new Error(`Team ${teamId} has no project`);
+    }
+    const project = db.getProject(team.projectId);
     if (!project) {
       throw new Error(`Project for team ${teamId} not found (projectId: ${team.projectId})`);
+    }
+
+    // Check queue limit — if too many teams are active, queue the resume instead
+    const activeCount = db.getActiveTeamCountByProject(team.projectId);
+    if (activeCount >= project.maxActiveTeams) {
+      db.updateTeam(teamId, { status: 'queued' });
+      console.log(`[TeamManager] Resume queued for team ${teamId} (${activeCount}/${project.maxActiveTeams} active)`);
+      this.broadcastSnapshot();
+      return db.getTeam(teamId)!;
     }
 
     // Verify worktree still exists
@@ -1175,6 +1187,14 @@ export class TeamManager {
       console.error(`[TeamManager] Failed to send message to team ${teamId}:`, err);
       return false;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // getStdinPipe — expose stdin pipe for external graceful shutdown
+  // -------------------------------------------------------------------------
+
+  getStdinPipe(teamId: number): Writable | undefined {
+    return this.stdinPipes.get(teamId);
   }
 
   // -------------------------------------------------------------------------

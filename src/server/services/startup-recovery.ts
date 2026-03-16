@@ -103,6 +103,26 @@ export async function recoverOnStartup(): Promise<void> {
       }
     }
   }
+
+  // -------------------------------------------------------------------
+  // 3. Process queued teams — dequeue any that can now run
+  // -------------------------------------------------------------------
+  for (const project of projects) {
+    const queued = db.getQueuedTeamsByProject(project.id);
+    if (queued.length > 0) {
+      console.log(
+        `[recovery] ${queued.length} queued teams for project "${project.name}" — triggering queue processing`
+      );
+      try {
+        const { getTeamManager } = await import('./team-manager.js');
+        getTeamManager().processQueue(project.id).catch((err) => {
+          console.error(`[recovery] processQueue failed for project "${project.name}":`, err);
+        });
+      } catch (err) {
+        console.error(`[recovery] Failed to import TeamManager for queue processing:`, err);
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

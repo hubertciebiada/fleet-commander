@@ -2,13 +2,14 @@
 // Fleet Commander — Stuck Detector Service
 //
 // Periodically checks active teams for idle/stuck transitions based on the
-// time since their last event. Also marks teams as blocked when their PR
-// exceeds the maximum unique CI failure threshold.
+// time since their last event.
+//
+// CI failure → blocked logic is handled exclusively by github-poller.ts
+// (single source of truth for CI status).
 //
 // State machine transitions (from docs/state-machines.md):
 //   running -> idle   after IDLE_THRESHOLD_MIN  (5 min default)
 //   idle    -> stuck  after STUCK_THRESHOLD_MIN (15 min default)
-//   phase   -> blocked when CI fail count >= MAX_UNIQUE_CI_FAILURES (3)
 // =============================================================================
 
 import { getDatabase } from '../db.js';
@@ -86,31 +87,6 @@ class StuckDetector {
         }
       }
 
-      // --- CI failure threshold -> blocked phase --------------------------
-
-      if (team.prNumber) {
-        const pr = db.getPullRequest(team.prNumber);
-
-        if (
-          pr &&
-          pr.ciFailCount >= config.maxUniqueCiFailures &&
-          team.phase !== 'blocked' &&
-          (team.status === 'running' || team.status === 'idle')
-        ) {
-          db.updateTeam(team.id, { phase: 'blocked', status: 'stuck' });
-
-          sseBroker.broadcast(
-            'team_status_changed',
-            {
-              team_id: team.id,
-              status: 'stuck',
-              phase: 'blocked',
-              reason: `${pr.ciFailCount} unique CI failures`,
-            },
-            team.id,
-          );
-        }
-      }
     }
   }
 }
