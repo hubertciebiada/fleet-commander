@@ -38,18 +38,35 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
       retryDelayRef.current = 1000; // Reset backoff on successful connection
     };
 
-    source.onmessage = (event) => {
+    // Handle all SSE messages — both named events (event: xxx) and unnamed.
+    // Named events require addEventListener; onmessage only catches unnamed.
+    // We listen for each known named event type AND onmessage as a fallback.
+    const namedEventTypes = [
+      'snapshot', 'team_status_changed', 'team_event', 'pr_updated',
+      'team_launched', 'team_stopped', 'cost_updated', 'usage_updated',
+      'project_added', 'project_updated', 'project_removed',
+      'heartbeat', 'teams', 'team_update',
+    ];
+
+    const handleSSEMessage = (event: MessageEvent) => {
       if (!mountedRef.current) return;
       setLastEvent(new Date());
       try {
         const parsed = JSON.parse(event.data);
-        const type = parsed.type ?? 'message';
+        const type = parsed.type ?? event.type ?? 'message';
         onEventRef.current?.(type, parsed);
       } catch {
         // Non-JSON message — still invoke callback with raw data
         onEventRef.current?.('message', event.data);
       }
     };
+
+    for (const eventType of namedEventTypes) {
+      source.addEventListener(eventType, handleSSEMessage as EventListener);
+    }
+
+    // Also keep onmessage for any unnamed events
+    source.onmessage = handleSSEMessage;
 
     source.onerror = () => {
       if (!mountedRef.current) return;

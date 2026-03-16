@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import { useSSE } from '../hooks/useSSE';
 import type { TeamDashboardRow } from '../../shared/types';
 
@@ -28,6 +28,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       const res = await fetch('/api/teams');
       if (res.ok) {
         const teams = (await res.json()) as TeamDashboardRow[];
+        console.log('[FleetContext] Teams fetched via REST:', teams.length, teams.map(t => ({ id: t.id, status: t.status })));
         setAllTeams(teams);
       }
     } catch {
@@ -36,10 +37,12 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleSSEEvent = useCallback((type: string, data: unknown) => {
+    console.log('[FleetContext] SSE event received:', type);
     if (type === 'teams' || type === 'snapshot') {
       // Full team list update
       const payload = data as { teams?: TeamDashboardRow[] };
       if (Array.isArray(payload.teams)) {
+        console.log('[FleetContext] Teams loaded from SSE:', payload.teams.length, payload.teams.map(t => ({ id: t.id, status: t.status })));
         setAllTeams(payload.teams);
       }
     } else if (type === 'team_update') {
@@ -65,6 +68,11 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   }, [fetchTeams]);
 
   const { connected, lastEvent } = useSSE({ onEvent: handleSSEEvent });
+
+  // Fetch teams on mount as a fallback in case the SSE snapshot is missed
+  useEffect(() => {
+    fetchTeams();
+  }, [fetchTeams]);
 
   // Filter teams by selected project
   const teams = useMemo(() => {

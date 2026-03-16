@@ -587,8 +587,20 @@ export class TeamManager {
     const buffer = this.outputBuffers.get(teamId);
     if (!buffer) return;
 
-    const handleData = (data: Buffer) => {
+    // Resolve the worktree name for log prefixes
+    const db = getDatabase();
+    const team = db.getTeam(teamId);
+    const logPrefix = team ? team.worktreeName : `team-${teamId}`;
+
+    const handleData = (stream: string) => (data: Buffer) => {
       const text = data.toString('utf-8');
+      // Log every chunk to server console for debugging
+      for (const line of text.split('\n')) {
+        if (line.trim()) {
+          console.log(`[CC:${logPrefix}:${stream}] ${line}`);
+        }
+      }
+
       const newLines = text.split('\n');
 
       for (const line of newLines) {
@@ -604,10 +616,10 @@ export class TeamManager {
     };
 
     if (child.stdout) {
-      child.stdout.on('data', handleData);
+      child.stdout.on('data', handleData('stdout'));
     }
     if (child.stderr) {
-      child.stderr.on('data', handleData);
+      child.stderr.on('data', handleData('stderr'));
     }
   }
 

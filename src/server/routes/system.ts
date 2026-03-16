@@ -191,6 +191,36 @@ const systemRoutes: FastifyPluginCallback = (
   );
 
   // -------------------------------------------------------------------------
+  // GET /api/debug/teams — raw database state for debugging
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/debug/teams',
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const db = getDatabase();
+        const allTeams = db.getTeams();
+        const dashboard = db.getTeamDashboard();
+        const activeTeams = db.getActiveTeams();
+
+        return reply.code(200).send({
+          rawTeams: allTeams,
+          dashboardTeams: dashboard,
+          activeTeams,
+          teamCount: allTeams.length,
+          dashboardCount: dashboard.length,
+          activeCount: activeTeams.length,
+        });
+      } catch (err: unknown) {
+        _request.log.error(err, 'Failed to get debug teams');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // GET /api/system/browse-dirs — list subdirectories for path picker
   // -------------------------------------------------------------------------
   fastify.get(
