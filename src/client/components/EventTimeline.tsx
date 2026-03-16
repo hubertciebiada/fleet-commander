@@ -1,6 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useApi } from '../hooks/useApi';
 import type { Event } from '../../shared/types';
+import {
+  PlayIcon,
+  SquareIcon,
+  CircleStopIcon,
+  ArrowRightIcon,
+  ArrowLeftIcon,
+  AlertTriangleIcon,
+  SettingsIcon,
+  XCircleIcon,
+  RefreshCwIcon,
+  DollarSignIcon,
+  CircleDotIcon,
+} from './Icons';
 
 // ---------------------------------------------------------------------------
 // Relative time formatting
@@ -25,22 +38,22 @@ function timeAgo(isoString: string): string {
 // Event type icon mapping
 // ---------------------------------------------------------------------------
 
-const EVENT_ICONS: Record<string, string> = {
-  SessionStart: '\u25B6',    // play triangle
-  SessionEnd: '\u25A0',      // stop square
-  Stop: '\u23F9',            // stop button
-  SubagentStart: '\u2192',   // right arrow
-  SubagentStop: '\u2190',    // left arrow
-  Notification: '\u26A0',    // warning
-  PostToolUse: '\u2699',     // gear
-  PostToolUseFailure: '\u2717', // ballot X
-  PreCompact: '\u21BB',      // clockwise arrow
-  ToolUse: '\u2699',         // gear
-  CostUpdate: '\u0024',      // dollar sign
+const EVENT_ICONS: Record<string, React.ReactNode> = {
+  SessionStart: <PlayIcon size={14} />,
+  SessionEnd: <SquareIcon size={14} />,
+  Stop: <CircleStopIcon size={14} />,
+  SubagentStart: <ArrowRightIcon size={14} />,
+  SubagentStop: <ArrowLeftIcon size={14} />,
+  Notification: <AlertTriangleIcon size={14} />,
+  PostToolUse: <SettingsIcon size={14} />,
+  PostToolUseFailure: <XCircleIcon size={14} />,
+  PreCompact: <RefreshCwIcon size={14} />,
+  ToolUse: <SettingsIcon size={14} />,
+  CostUpdate: <DollarSignIcon size={14} />,
 };
 
-function getEventIcon(hookType: string): string {
-  return EVENT_ICONS[hookType] ?? '\u2022'; // bullet fallback
+function getEventIcon(hookType: string): React.ReactNode {
+  return EVENT_ICONS[hookType] ?? <CircleDotIcon size={14} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +140,7 @@ export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
             className="flex items-start gap-3 px-1 py-2 border-b border-dark-border/50 last:border-b-0"
           >
             {/* Event type icon */}
-            <span className="text-dark-muted text-sm mt-0.5 w-5 text-center shrink-0">
+            <span className="text-dark-muted text-sm mt-0.5 w-5 flex items-center justify-center shrink-0">
               {getEventIcon(evt.hookType)}
             </span>
 

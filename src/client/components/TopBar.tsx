@@ -3,6 +3,7 @@ import { useFleet } from '../context/FleetContext';
 import { LaunchDialog } from './LaunchDialog';
 import { ProjectSelector } from './ProjectSelector';
 import { useApi } from '../hooks/useApi';
+import { RocketIcon } from './Icons';
 
 // Status colors from PRD
 const STATUS_COLORS: Record<string, string> = {
@@ -116,9 +117,10 @@ export function TopBar() {
           {/* Launch Team button */}
           <button
             onClick={() => setLaunchOpen(true)}
-            className="ml-2 px-3 py-1 text-xs font-medium rounded border border-dark-accent/40 text-dark-accent hover:bg-dark-accent/10 transition-colors"
+            className="ml-2 px-3 py-1 text-xs font-medium rounded border border-dark-accent/40 text-dark-accent hover:bg-dark-accent/10 transition-colors inline-flex items-center gap-1.5"
             title="Launch a new team"
           >
+            <RocketIcon size={14} />
             Launch Team
           </button>
         </div>

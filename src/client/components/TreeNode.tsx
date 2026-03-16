@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { StatusBadge } from './StatusBadge';
 import { PRBadge } from './PRBadge';
+import { PlayIcon } from './Icons';
 import type { TeamStatus } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -161,7 +162,7 @@ export function TreeNode({ node, depth, onLaunch }: TreeNodeProps) {
             className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-1.5 py-0.5 text-xs rounded border border-dark-border text-dark-muted hover:text-[#3FB950] hover:border-[#3FB950]/50"
             title={`Launch team for #${node.number}`}
           >
-            {'\u25B6'}
+            <PlayIcon size={12} />
           </button>
         )}
       </div>

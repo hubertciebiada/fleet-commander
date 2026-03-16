@@ -1,16 +1,17 @@
 import { NavLink } from 'react-router-dom';
+import { LayoutGridIcon, GitBranchIcon, BarChart3Icon, FolderGit2Icon } from './Icons';
 
 interface NavItem {
   to: string;
   label: string;
-  icon: string;
+  icon: React.ReactNode;
 }
 
 const items: NavItem[] = [
-  { to: '/', label: 'Fleet Grid', icon: '\u229E' },       // ⊞
-  { to: '/issues', label: 'Issue Tree', icon: '\uD83C\uDF33' },  // 🌳
-  { to: '/usage', label: 'Usage View', icon: '%' },
-  { to: '/projects', label: 'Projects', icon: 'P' },
+  { to: '/', label: 'Fleet Grid', icon: <LayoutGridIcon /> },
+  { to: '/issues', label: 'Issue Tree', icon: <GitBranchIcon /> },
+  { to: '/usage', label: 'Usage View', icon: <BarChart3Icon /> },
+  { to: '/projects', label: 'Projects', icon: <FolderGit2Icon /> },
 ];
 
 export function SideNav() {
