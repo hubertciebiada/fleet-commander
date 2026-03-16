@@ -84,6 +84,7 @@ export interface PullRequest {
   ciFailCount: number;
   checksJson: string | null;
   autoMerge: boolean;
+  mergedAt: string | null;
   updatedAt: string;
 }
 

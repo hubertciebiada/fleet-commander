@@ -99,11 +99,11 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
   useEffect(() => {
     if (!open) return;
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && phase !== 'executing') handleClose();
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [open, onClose]);
+  }, [open, phase, handleClose]);
 
   // -------------------------------------------------------------------
   // Selection helpers
@@ -177,7 +177,6 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={handleBackdropClick}
-      aria-hidden="true"
     >
       <div
         ref={dialogRef}

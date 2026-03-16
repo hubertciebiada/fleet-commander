@@ -296,7 +296,6 @@ export function AddProjectDialog({ open, onClose, onAdded }: AddProjectDialogPro
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={handleBackdropClick}
-      aria-hidden="true"
     >
       <div
         ref={dialogRef}

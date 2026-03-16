@@ -78,6 +78,7 @@ export function TopBar() {
   const pills = [
     { label: 'Running', count: counts.running || 0, color: STATUS_COLORS.running },
     { label: 'Queued', count: counts.queued || 0, color: STATUS_COLORS.queued },
+    { label: 'Launching', count: counts.launching || 0, color: STATUS_COLORS.launching },
     { label: 'Stuck', count: counts.stuck || 0, color: STATUS_COLORS.stuck },
     { label: 'Idle', count: counts.idle || 0, color: STATUS_COLORS.idle },
     { label: 'Done', count: counts.done || 0, color: STATUS_COLORS.done },

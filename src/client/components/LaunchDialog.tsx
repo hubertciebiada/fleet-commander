@@ -151,21 +151,20 @@ function LaunchLog({ teamId, issueNumber, onClose }: LaunchLogProps) {
     outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [outputLines]);
 
+  // Keep a stable ref to onClose so the timer effect only re-runs on teamStatus changes
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
   // Auto-close 3 seconds after team reaches 'running'
   useEffect(() => {
     if (teamStatus === 'running' && !autoCloseTimerRef.current) {
-      autoCloseTimerRef.current = setTimeout(() => {
-        onClose();
-      }, 3000);
+      autoCloseTimerRef.current = setTimeout(() => onCloseRef.current(), 3000);
     }
 
     return () => {
-      if (autoCloseTimerRef.current) {
-        clearTimeout(autoCloseTimerRef.current);
-        autoCloseTimerRef.current = null;
-      }
+      if (autoCloseTimerRef.current) { clearTimeout(autoCloseTimerRef.current); autoCloseTimerRef.current = null; }
     };
-  }, [teamStatus, onClose]);
+  }, [teamStatus]);
 
   // Status indicator color
   const statusColor = (() => {
@@ -525,7 +524,6 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
           onClick={handleBackdropClick}
-          aria-hidden="true"
         >
           <div
             ref={dialogRef}
@@ -564,7 +562,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
             ) : (
               <div className="px-5 py-4 space-y-4">
                 {/* Project selector */}
-                {projects.length > 0 && (
+                {projects.length > 0 ? (
                   <div>
                     <label className="block text-sm text-dark-muted mb-1">
                       Project <span className="text-[#F85149]">*</span>
@@ -582,6 +580,10 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                         </option>
                       ))}
                     </select>
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 rounded border border-[#D29922]/30 bg-[#D29922]/10 text-[#D29922] text-sm">
+                    Add a project first
                   </div>
                 )}
 
@@ -715,7 +717,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
               {!showingLog && (
                 <button
                   onClick={batchMode ? handleLaunchBatch : handleLaunch}
-                  disabled={loading}
+                  disabled={loading || projects.length === 0}
                   className="px-4 py-1.5 text-sm font-medium rounded border border-dark-accent/40 text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {loading

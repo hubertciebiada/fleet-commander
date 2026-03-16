@@ -6,10 +6,22 @@
 # Usage: ./scripts/install.sh [/path/to/target/repo]
 #   If no path given, auto-detects the git repo root from current directory.
 
-set -e
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ── Validate required template files ───────────────────────────────
+if [ ! -f "$FC_ROOT/templates/workflow.md" ]; then
+  echo "ERROR: templates/workflow.md not found"
+  exit 1
+fi
+if [ ! -f "$FC_ROOT/templates/next-issue.md" ]; then
+  echo "ERROR: templates/next-issue.md not found"
+  exit 1
+fi
+if [ ! -f "$FC_ROOT/hooks/settings.json.example" ]; then
+  echo "ERROR: hooks/settings.json.example not found"
+  exit 1
+fi
 
 # Target repo: argument or auto-detect
 TARGET="${1:-$(git rev-parse --show-toplevel 2>/dev/null || echo "")}"
@@ -146,11 +158,11 @@ if [ -f "$WORKFLOW_TARGET" ]; then
     BACKUP="$WORKFLOW_TARGET.backup.$(date +%Y%m%d_%H%M%S)"
     cp "$WORKFLOW_TARGET" "$BACKUP"
     echo "  ⚠ Backed up existing workflow to $(basename "$BACKUP")"
-    echo "$NEW_WORKFLOW_CONTENT" > "$WORKFLOW_TARGET"
+    printf '%s\n' "$NEW_WORKFLOW_CONTENT" > "$WORKFLOW_TARGET"
     echo "  Installed workflow template to $WORKFLOW_TARGET"
   fi
 else
-  echo "$NEW_WORKFLOW_CONTENT" > "$WORKFLOW_TARGET"
+  printf '%s\n' "$NEW_WORKFLOW_CONTENT" > "$WORKFLOW_TARGET"
   echo "  Installed workflow template to $WORKFLOW_TARGET"
 fi
 echo "    PROJECT_NAME=$PROJECT_NAME  project_slug=$project_slug  BASE_BRANCH=$BASE_BRANCH"

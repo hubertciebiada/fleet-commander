@@ -1,5 +1,3 @@
-import type { CIStatus } from '../../shared/types';
-
 /** CI status icon and color map */
 const CI_ICONS: Record<string, { icon: string; color: string }> = {
   passing: { icon: '\u2713', color: '#3FB950' },
@@ -18,7 +16,7 @@ export function PRBadge({ prNumber, ciStatus }: PRBadgeProps) {
     return <span className="text-dark-muted text-sm">{'\u2014'}</span>;
   }
 
-  const ci = CI_ICONS[(ciStatus as CIStatus) ?? 'none'] ?? CI_ICONS.none;
+  const ci = CI_ICONS[ciStatus ?? 'none'] ?? CI_ICONS.none;
 
   return (
     <span className="inline-flex items-center gap-1.5">

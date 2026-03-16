@@ -53,7 +53,7 @@ case "$WORKTREE_ROOT" in
 esac
 
 # Allow explicit override via environment variable
-TEAM_NAME="${CLAUDE_WORKTREE_NAME:-$TEAM_NAME}"
+TEAM_NAME="${FLEET_TEAM_ID:-${CLAUDE_WORKTREE_NAME:-$TEAM_NAME}}"
 
 # ── Extract fields from hook stdin JSON ───────────────────────────
 # We use grep+sed for POSIX portability (no jq dependency).

@@ -78,7 +78,7 @@ export function TeamRow({ team, selected, onClick }: TeamRowProps) {
       {/* Duration */}
       <td className="px-4 whitespace-nowrap">
         <span className="text-sm text-dark-muted">
-          {formatDuration(team.durationMin)}
+          {formatDuration(team.durationMin ?? 0)}
         </span>
       </td>
 

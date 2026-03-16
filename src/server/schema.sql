@@ -137,7 +137,6 @@ SELECT
   COALESCE(SUM(c.cost_usd), 0) AS total_cost,
   COUNT(DISTINCT c.session_id) AS session_count,
   (SELECT COUNT(*) FROM events e WHERE e.team_id = t.id) AS event_count,
-  pr.pr_number AS pr_number,
   pr.state AS pr_state,
   pr.ci_status,
   pr.merge_state AS merge_status,

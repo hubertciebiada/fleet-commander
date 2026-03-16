@@ -48,6 +48,9 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     } else if (type === 'cost_updated') {
       // Cost event doesn't trigger a snapshot from the server — refresh manually.
       fetchTeams();
+    } else if (type === 'usage_updated') {
+      // Usage data changed — refresh teams to pick up any related state changes.
+      fetchTeams();
     }
     // Note: team_launched, team_stopped, team_status_changed are NOT handled here
     // because the server already broadcasts a full 'snapshot' after those events.

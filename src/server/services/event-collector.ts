@@ -50,9 +50,9 @@ export interface EventCollectorDb {
     sessionId: string | null;
     agentName: string | null;
     eventType: string;
+    toolName?: string | null;
     payload: string;
-    createdAt: string;
-  }): number;
+  }): { id: number };
   updateTeam(teamId: number, fields: Record<string, unknown>): void;
 }
 
@@ -168,7 +168,7 @@ export function processEvent(
   db.updateTeam(teamId, { lastEventAt: nowIso });
 
   // ── Throttle tool_use events ─────────────────────────────────────
-  if (payload.event === 'tool_use') {
+  if (payload.event.toLowerCase() === 'tool_use') {
     const teamKey = payload.team;
     const lastTime = lastToolUseByTeam.get(teamKey) || 0;
 
@@ -180,20 +180,26 @@ export function processEvent(
 
     // Outside throttle window: allow this event through and record time
     lastToolUseByTeam.set(teamKey, now);
+
+    // Prune stale entries to prevent unbounded growth
+    for (const [k, t] of lastToolUseByTeam) {
+      if (now - t > TOOL_USE_THROTTLE_MS * 2) lastToolUseByTeam.delete(k);
+    }
   }
 
   // ── Normalize event type ─────────────────────────────────────────
   const eventType = normalizeEventType(payload.event);
 
   // ── Insert event into database ───────────────────────────────────
-  const eventId = db.insertEvent({
+  const inserted = db.insertEvent({
     teamId,
     sessionId: payload.session_id || null,
     agentName: payload.agent_type || null,
     eventType,
+    toolName: payload.tool_name || null,
     payload: JSON.stringify(payload),
-    createdAt: payload.timestamp || nowIso,
   });
+  const eventId = inserted.id;
 
   // ── Broadcast via SSE ────────────────────────────────────────────
   sse.broadcast('team_event', {

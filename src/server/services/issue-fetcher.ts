@@ -347,6 +347,7 @@ export class IssueFetcher {
         console.error('[IssueFetcher] Polling fetch failed:', err instanceof Error ? err.message : err);
       }
     }, config.issuePollIntervalMs);
+    if (this.pollTimer.unref) this.pollTimer.unref();
   }
 
   /**

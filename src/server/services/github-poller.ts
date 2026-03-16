@@ -145,7 +145,7 @@ class GitHubPoller {
     // Use gh pr view to get PR status, CI checks, merge state, and auto-merge
     const result = this.execGH(
       `gh pr view ${prNumber} --repo ${githubRepo} ` +
-        `--json number,title,state,mergeStateStatus,statusCheckRollup,autoMergeRequest,headRefName`
+        `--json number,title,state,mergeStateStatus,statusCheckRollup,autoMergeRequest,headRefName,mergedAt`
     );
     if (!result) return; // gh CLI failed — skip this cycle
 
@@ -160,8 +160,9 @@ class GitHubPoller {
     const db = getDatabase();
     const existing = db.getPullRequest(prNumber);
 
-    // Map GitHub state to our state (lowercase)
-    const state = data.state?.toLowerCase() ?? 'open';
+    // Map GitHub state to our state — detect merged via mergedAt field
+    const isMerged = !!(data as any).mergedAt;
+    const state = isMerged ? 'merged' : (data.state?.toLowerCase() ?? 'open');
     const mergeState = data.mergeStateStatus?.toLowerCase() ?? 'unknown';
 
     // Derive CI status from statusCheckRollup

@@ -22,6 +22,12 @@ if (!existsSync('dist/server/index.js')) {
 
 console.log('\n  Fleet Commander → http://localhost:4680\n');
 
+// Start server first, then wait for it to be ready
+const server = spawn('node', ['dist/server/index.js'], {
+  stdio: 'inherit',
+  cwd: root
+});
+
 // Poll health endpoint before opening browser
 async function waitForServer(url, maxWaitMs = 10000) {
   const start = Date.now();
@@ -43,12 +49,6 @@ waitForServer('http://localhost:4680/api/health').then((ok) => {
       execSync(`${cmd} http://localhost:4680`, { stdio: 'ignore', shell: true });
     } catch { /* ignore */ }
   }
-});
-
-// Start server
-const server = spawn('node', ['dist/server/index.js'], {
-  stdio: 'inherit',
-  cwd: root
 });
 
 server.on('exit', (code) => {

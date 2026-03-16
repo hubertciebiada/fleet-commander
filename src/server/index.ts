@@ -9,7 +9,6 @@ import streamRoutes from './routes/stream.js';
 import issueRoutes from './routes/issues.js';
 import teamsRoutes from './routes/teams.js';
 import systemRoutes from './routes/system.js';
-import costsRoutes from './routes/costs.js';
 import usageRoutes from './routes/usage.js';
 import prsRoutes from './routes/prs.js';
 import projectsRoutes from './routes/projects.js';
@@ -47,7 +46,6 @@ async function main() {
   await server.register(issueRoutes);
   await server.register(teamsRoutes);
   await server.register(systemRoutes);
-  await server.register(costsRoutes);
   await server.register(usageRoutes);
   await server.register(prsRoutes);
   await server.register(projectsRoutes);
@@ -74,7 +72,7 @@ async function main() {
   await recoverOnStartup();
 
   // Start all services
-  sseBroker.start();
+  sseBroker.start(config.sseHeartbeatMs);
   const issueFetcher = getIssueFetcher();
   issueFetcher.start();
   stuckDetector.start();

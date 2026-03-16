@@ -86,7 +86,9 @@ export function TeamOutput({ teamId, teamStatus }: TeamOutputProps) {
     poll();
 
     // Stop polling when team is in a terminal state
-    if (teamStatus === 'done' || teamStatus === 'failed') return;
+    if (teamStatus === 'done' || teamStatus === 'failed') {
+      return () => { cancelled = true; };
+    }
 
     const interval = setInterval(poll, 2000);
     return () => {

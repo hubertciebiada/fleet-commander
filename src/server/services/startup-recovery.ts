@@ -55,7 +55,9 @@ export async function recoverOnStartup(): Promise<void> {
     } else {
       // Process is gone.  If it was still launching when we lost track,
       // treat it as a failure; otherwise just mark idle.
-      const newStatus = team.status === 'launching' ? 'failed' : 'idle';
+      const newStatus = team.status === 'launching' ? 'failed'
+        : team.status === 'stuck' ? 'stuck'
+        : 'idle';
       console.log(
         `[recovery] Team ${team.worktreeName} (PID ${team.pid}) dead -> ${newStatus}`
       );

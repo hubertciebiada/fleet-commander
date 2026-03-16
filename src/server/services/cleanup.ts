@@ -70,6 +70,9 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
       // Check DB for this worktree
       const team = db.getTeamByWorktree(dirName);
 
+      // Skip teams belonging to a different project (avoid cross-project collision)
+      if (team && team.projectId !== projectId) continue;
+
       if (!team) {
         items.push({
           type: 'worktree',
@@ -139,7 +142,11 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
         });
       }
     }
+  } catch {
+    // git command failed — skip branch check for project branches
+  }
 
+  try {
     // Also check legacy kea-* pattern
     const keaOutput = execSync(
       `git -C "${repoPath}" branch --list "worktree-kea-*"`,
@@ -168,7 +175,7 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
       }
     }
   } catch {
-    // git command failed — skip branch check
+    // git command failed — skip legacy branch check
   }
 
   return { projectId, projectName: project.name, items };

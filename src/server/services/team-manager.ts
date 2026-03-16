@@ -701,8 +701,8 @@ export class TeamManager {
       throw new Error(`Team ${teamId} not found`);
     }
 
-    // Stop if running
-    if (team.pid && ['launching', 'running', 'idle', 'stuck'].includes(team.status)) {
+    // Stop if running or queued
+    if (['launching', 'running', 'idle', 'stuck', 'queued'].includes(team.status)) {
       await this.stop(teamId);
     }
 
@@ -1085,11 +1085,10 @@ export class TeamManager {
         const team = await this.launch(projectId, issue.number, issue.title, prompt, headless);
         results.push(team);
       } catch (err: unknown) {
-        // Push a synthetic error indicator — don't stop the batch
+        // Log error and continue — don't stop the batch
         const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(
-          `Batch launch failed at issue #${issue.number} (${i + 1}/${issues.length}): ${msg}. ` +
-          `Successfully launched: ${results.length}`,
+        console.error(
+          `[TeamManager] Batch launch failed at issue #${issue.number} (${i + 1}/${issues.length}): ${msg}`,
         );
       }
 
@@ -1176,26 +1175,30 @@ export class TeamManager {
               events.shift();
             }
 
-            // Extract cost from result events and persist to DB
-            if (event.type === 'result' && typeof (event as any).total_cost_usd === 'number') {
+            // Extract cost from result events and persist as usage snapshot
+            if (event.type === 'result' && (event as any).total_cost_usd != null) {
               const costUsd = (event as any).total_cost_usd as number;
-              const usage = (event as any).usage as { input_tokens?: number; output_tokens?: number } | undefined;
+              const usage = (event as any).usage as Record<string, unknown> | undefined;
               const sessionId = (event as any).session_id as string | undefined;
-
-              db.insertCostEntry({
-                teamId,
-                sessionId: sessionId ?? 'unknown',
-                inputTokens: usage?.input_tokens ?? 0,
-                outputTokens: usage?.output_tokens ?? 0,
-                costUsd,
-              });
 
               console.log(`[TeamManager] Team ${teamId} cost: $${costUsd.toFixed(4)}`);
 
-              // Broadcast cost update via SSE
-              sseBroker.broadcast('cost_updated', {
-                team_id: teamId,
-                total_cost_usd: costUsd,
+              db.insertUsageSnapshot({
+                teamId,
+                sessionId: sessionId || undefined,
+                dailyPercent: 0,
+                weeklyPercent: 0,
+                sonnetPercent: 0,
+                extraPercent: 0,
+                rawOutput: JSON.stringify({ total_cost_usd: costUsd, usage }),
+              });
+
+              sseBroker.broadcast('usage_updated', {
+                daily_percent: 0,
+                weekly_percent: 0,
+                sonnet_percent: 0,
+                extra_percent: 0,
+                raw_cost: costUsd,
               }, teamId);
             }
 
@@ -1250,8 +1253,9 @@ export class TeamManager {
         }
 
         const newLines = text.split('\n');
-        for (const line of newLines) {
-          if (line === '' && newLines.indexOf(line) === newLines.length - 1) continue;
+        for (let idx = 0; idx < newLines.length; idx++) {
+          const line = newLines[idx]!;
+          if (line === '' && idx === newLines.length - 1) continue;
           buffer.lines.push(line);
           while (buffer.lines.length > MAX_OUTPUT_LINES) {
             buffer.lines.shift();

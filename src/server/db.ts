@@ -281,10 +281,9 @@ export class FleetDatabase {
       `);
 
       // Add project_id column to teams if it doesn't exist
-      try {
+      const cols = this.db.prepare("PRAGMA table_info(teams)").all() as Array<{ name: string }>;
+      if (!cols.some(c => c.name === 'project_id')) {
         this.db.exec('ALTER TABLE teams ADD COLUMN project_id INTEGER REFERENCES projects(id)');
-      } catch {
-        // Column may already exist — ignore
       }
 
       // Add index on project_id
@@ -1164,6 +1163,7 @@ export class FleetDatabase {
       ciFailCount: row.ci_fail_count as number,
       checksJson: row.checks_json as string | null,
       autoMerge: (row.auto_merge as number) === 1,
+      mergedAt: row.merged_at as string | null,
       updatedAt: row.updated_at as string,
     };
   }

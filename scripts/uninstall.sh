@@ -8,8 +8,6 @@
 #
 # Safe to run on a repo where Fleet Commander was never installed (no-op).
 
-set -e
-
 TARGET="${1:-$(git rev-parse --show-toplevel 2>/dev/null || echo "")}"
 if [ -z "$TARGET" ]; then
   echo "Error: No target repo specified and not in a git repository"

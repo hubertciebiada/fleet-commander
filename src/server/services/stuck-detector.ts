@@ -94,7 +94,8 @@ class StuckDetector {
         if (
           pr &&
           pr.ciFailCount >= config.maxUniqueCiFailures &&
-          team.phase !== 'blocked'
+          team.phase !== 'blocked' &&
+          (team.status === 'running' || team.status === 'idle')
         ) {
           db.updateTeam(team.id, { phase: 'blocked', status: 'stuck' });
 

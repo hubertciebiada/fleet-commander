@@ -92,16 +92,6 @@
           }
         ]
       }
-    ],
-    "TeammateIdle": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/pr-watcher-idle.sh"
-          }
-        ]
-      }
     ]
   }
 }
