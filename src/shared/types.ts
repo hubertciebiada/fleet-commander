@@ -43,10 +43,18 @@ export interface Project {
   updatedAt: string;
 }
 
+/** Install status for the three artifacts deployed by install.sh */
+export interface InstallStatus {
+  hooks: boolean;
+  prompt: boolean;
+  command: boolean;
+}
+
 /** Project with team count for list view */
 export interface ProjectSummary extends Project {
   teamCount: number;
   activeTeamCount: number;
+  installStatus?: InstallStatus;
 }
 
 /** A team of agents working on a single issue in a worktree */

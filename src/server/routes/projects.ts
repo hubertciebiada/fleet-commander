@@ -19,7 +19,7 @@ import { getTeamManager } from '../services/team-manager.js';
 import { getIssueFetcher } from '../services/issue-fetcher.js';
 import { sseBroker } from '../services/sse-broker.js';
 import config from '../config.js';
-import type { ProjectStatus } from '../../shared/types.js';
+import type { ProjectStatus, InstallStatus } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Request body / param / query interfaces
@@ -132,6 +132,18 @@ function uninstallHooks(repoPath: string): void {
   }
 }
 
+/**
+ * Check the install status of all three artifacts deployed by install.sh:
+ * hooks directory, workflow prompt, and next-issue command.
+ */
+function checkInstallStatus(repoPath: string): InstallStatus {
+  return {
+    hooks: fs.existsSync(path.join(repoPath, '.claude', 'hooks', 'fleet-commander')),
+    prompt: fs.existsSync(path.join(repoPath, '.claude', 'prompts', 'fleet-workflow.md')),
+    command: fs.existsSync(path.join(repoPath, '.claude', 'commands', 'next-issue.md')),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -170,7 +182,13 @@ const projectsRoutes: FastifyPluginCallback = (
           ? summaries.filter((p) => p.status === statusFilter)
           : summaries;
 
-        return reply.code(200).send(filtered);
+        // Enrich each project with live install status from the filesystem
+        const enriched = filtered.map((p) => ({
+          ...p,
+          installStatus: checkInstallStatus(p.repoPath),
+        }));
+
+        return reply.code(200).send(enriched);
       } catch (err: unknown) {
         request.log.error(err, 'Failed to list projects');
         return reply.code(500).send({
@@ -249,8 +267,12 @@ const projectsRoutes: FastifyPluginCallback = (
         });
 
         // Install hooks (non-fatal)
-        const hooksOk = installHooks(normalizedPath);
-        if (hooksOk) {
+        installHooks(normalizedPath);
+
+        // Verify all three artifacts were actually installed
+        const status = checkInstallStatus(normalizedPath);
+        const allInstalled = status.hooks && status.prompt && status.command;
+        if (allInstalled) {
           db.updateProject(project.id, { hooksInstalled: true });
         }
 

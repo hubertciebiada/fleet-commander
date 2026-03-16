@@ -147,14 +147,27 @@ export function ProjectsPage() {
                       >
                         {project.status}
                       </span>
-                      {/* Hooks indicator */}
-                      <span
-                        className="text-xs shrink-0"
-                        style={{ color: project.hooksInstalled ? '#3FB950' : '#F85149' }}
-                        title={project.hooksInstalled ? 'Hooks installed' : 'Hooks not installed'}
-                      >
-                        {project.hooksInstalled ? '\u2713 hooks' : '\u2717 hooks'}
-                      </span>
+                      {/* Install status indicators */}
+                      {(() => {
+                        const s = project.installStatus;
+                        const items = s
+                          ? [
+                              { ok: s.hooks, label: 'hooks' },
+                              { ok: s.prompt, label: 'prompt' },
+                              { ok: s.command, label: 'command' },
+                            ]
+                          : [{ ok: project.hooksInstalled, label: 'hooks' }];
+                        return items.map((item) => (
+                          <span
+                            key={item.label}
+                            className="text-xs shrink-0"
+                            style={{ color: item.ok ? '#3FB950' : '#F85149' }}
+                            title={item.ok ? `${item.label} installed` : `${item.label} not installed`}
+                          >
+                            {item.ok ? '\u2713' : '\u2717'} {item.label}
+                          </span>
+                        ));
+                      })()}
                     </div>
                     <div className="flex items-center gap-4 text-xs text-dark-muted">
                       <span className="truncate" title={project.repoPath}>
