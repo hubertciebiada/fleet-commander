@@ -60,6 +60,26 @@ export class TeamManager {
 
     console.log(`[TeamManager] Launch started: project=${project.name} issue=#${issueNumber}`);
 
+    // If no title provided, fetch from GitHub
+    if (!issueTitle && project.githubRepo) {
+      try {
+        const result = execSync(
+          `gh issue view ${issueNumber} --repo ${project.githubRepo} --json title --jq .title`,
+          { encoding: 'utf-8', timeout: 10000 },
+        ).trim();
+        if (result) {
+          issueTitle = result;
+          console.log(`[TeamManager] Fetched issue title from GitHub: "${issueTitle}"`);
+        }
+      } catch {
+        // GitHub fetch failed, use fallback
+        issueTitle = `Issue #${issueNumber}`;
+        console.log(`[TeamManager] GitHub title fetch failed, using fallback: "${issueTitle}"`);
+      }
+    } else if (!issueTitle) {
+      issueTitle = `Issue #${issueNumber}`;
+    }
+
     // Derive a slug from project name (lowercase, alphanumeric + hyphens)
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const worktreeName = `${slug}-${issueNumber}`;
