@@ -14,6 +14,7 @@ import fs from 'fs';
 import config from '../config.js';
 import { getDatabase } from '../db.js';
 import { sseBroker } from './sse-broker.js';
+import type { StreamEvent } from './sse-broker.js';
 import { findGitBash } from '../utils/find-git-bash.js';
 import type { Team } from '../../shared/types.js';
 
@@ -22,6 +23,34 @@ import type { Team } from '../../shared/types.js';
 // ---------------------------------------------------------------------------
 
 const MAX_OUTPUT_LINES = config.outputBufferLines;
+const MAX_PARSED_EVENTS = 200;
+
+// ---------------------------------------------------------------------------
+// summarizeEvent — short text summary for console logging
+// ---------------------------------------------------------------------------
+
+function summarizeEvent(event: StreamEvent): string {
+  switch (event.type) {
+    case 'assistant': {
+      const content = (event.message as any)?.content;
+      if (Array.isArray(content)) {
+        const text = content.find((c: any) => c.type === 'text')?.text ?? '';
+        return text.substring(0, 100) + (text.length > 100 ? '...' : '');
+      }
+      return '';
+    }
+    case 'tool_use': {
+      const tool = (event as any).tool;
+      return `${tool?.name ?? 'unknown'}`;
+    }
+    case 'tool_result':
+      return 'completed';
+    case 'result':
+      return 'session complete';
+    default:
+      return event.type;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Output buffer: circular array of last N lines per team
@@ -38,6 +67,7 @@ interface OutputBuffer {
 export class TeamManager {
   private outputBuffers: Map<number, OutputBuffer> = new Map();
   private childProcesses: Map<number, ChildProcess> = new Map();
+  private parsedEvents: Map<number, StreamEvent[]> = new Map();
 
   // -------------------------------------------------------------------------
   // launch — create worktree, copy hooks, spawn Claude Code
@@ -204,11 +234,25 @@ export class TeamManager {
 
     // ── Step 4: Spawn Claude Code process ──
     const resolvedPrompt = prompt || `${config.defaultPrompt} ${issueNumber}`;
-    const args = ['--worktree', worktreeName, resolvedPrompt];
+
+    // Resolve headless flag — default to true if not specified
+    const isHeadless = headless !== false;
+
+    // Build claude args
+    const args: string[] = [];
+    args.push('--worktree', worktreeName);
+
+    // Only add --output-format for headless mode; interactive terminals need
+    // normal ANSI output so the user can read the Claude Code UI.
+    if (isHeadless) {
+      args.push('--output-format', 'stream-json');  // Structured NDJSON output
+    }
 
     if (config.skipPermissions) {
-      args.unshift('--dangerously-skip-permissions');
+      args.push('--dangerously-skip-permissions');
     }
+
+    args.push(resolvedPrompt);
 
     // Build spawn environment — inherit everything from the server process
     // and auto-detect Git Bash so Claude Code can find it on Windows.
@@ -223,9 +267,6 @@ export class TeamManager {
       spawnEnv['CLAUDE_CODE_GIT_BASH_PATH'] = gitBash;
       console.log(`[TeamManager] CLAUDE_CODE_GIT_BASH_PATH=${gitBash}`);
     }
-
-    // Resolve headless flag — default to true if not specified
-    const isHeadless = headless !== false;
 
     console.log(`[TeamManager] Spawning: ${config.claudeCmd} ${args.join(' ')} (headless=${isHeadless})`);
 
@@ -436,10 +477,12 @@ export class TeamManager {
     }
 
     // Build args with --resume
-    const args = ['--resume', '--worktree', team.worktreeName];
+    const args: string[] = [];
+    args.push('--resume', '--worktree', team.worktreeName);
+    args.push('--output-format', 'stream-json');  // Structured NDJSON output
 
     if (config.skipPermissions) {
-      args.unshift('--dangerously-skip-permissions');
+      args.push('--dangerously-skip-permissions');
     }
 
     // Update status to launching
@@ -603,6 +646,14 @@ export class TeamManager {
   }
 
   // -------------------------------------------------------------------------
+  // getParsedEvents — return parsed NDJSON stream events
+  // -------------------------------------------------------------------------
+
+  getParsedEvents(teamId: number): StreamEvent[] {
+    return this.parsedEvents.get(teamId) ?? [];
+  }
+
+  // -------------------------------------------------------------------------
   // launchBatch — launch multiple teams with optional stagger delay
   // -------------------------------------------------------------------------
 
@@ -670,34 +721,83 @@ export class TeamManager {
     const team = db.getTeam(teamId);
     const logPrefix = team ? team.worktreeName : `team-${teamId}`;
 
-    const handleData = (stream: string) => (data: Buffer) => {
-      const text = data.toString('utf-8');
-      // Log every chunk to server console for debugging
-      for (const line of text.split('\n')) {
-        if (line.trim()) {
-          console.log(`[CC:${logPrefix}:${stream}] ${line}`);
-        }
-      }
-
-      const newLines = text.split('\n');
-
-      for (const line of newLines) {
-        // Skip empty trailing line from split
-        if (line === '' && newLines.indexOf(line) === newLines.length - 1) continue;
-        buffer.lines.push(line);
-
-        // Trim to max
-        while (buffer.lines.length > MAX_OUTPUT_LINES) {
-          buffer.lines.shift();
-        }
-      }
-    };
-
-    if (child.stdout) {
-      child.stdout.on('data', handleData('stdout'));
+    // Initialize parsed events buffer for this team
+    if (!this.parsedEvents.has(teamId)) {
+      this.parsedEvents.set(teamId, []);
     }
+    const events = this.parsedEvents.get(teamId)!;
+
+    // Partial line buffer for handling chunks that split across data events
+    let stdoutPartial = '';
+
+    // stdout: NDJSON from --output-format stream-json
+    if (child.stdout) {
+      child.stdout.on('data', (data: Buffer) => {
+        const text = stdoutPartial + data.toString('utf-8');
+        const lines = text.split('\n');
+
+        // Last element may be incomplete — save it for next chunk
+        stdoutPartial = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          // Store raw line in output buffer
+          buffer.lines.push(line);
+          while (buffer.lines.length > MAX_OUTPUT_LINES) {
+            buffer.lines.shift();
+          }
+
+          // Try to parse as JSON (NDJSON from stream-json output)
+          try {
+            const event: StreamEvent = JSON.parse(trimmed);
+            console.log(`[CC:${logPrefix}] ${event.type}: ${summarizeEvent(event)}`);
+
+            // Store parsed event with timestamp
+            const timestampedEvent: StreamEvent = {
+              ...event,
+              timestamp: new Date().toISOString(),
+            };
+            events.push(timestampedEvent);
+            if (events.length > MAX_PARSED_EVENTS) {
+              events.shift();
+            }
+
+            // Broadcast interesting events via SSE
+            if (['assistant', 'tool_use', 'tool_result', 'result'].includes(event.type)) {
+              sseBroker.broadcast('team_output', {
+                team_id: teamId,
+                event: timestampedEvent,
+              }, teamId);
+            }
+          } catch {
+            // Not valid JSON — raw text output (e.g. startup messages)
+            console.log(`[CC:${logPrefix}:raw] ${trimmed.substring(0, 200)}`);
+          }
+        }
+      });
+    }
+
+    // stderr: always raw text (errors, warnings)
     if (child.stderr) {
-      child.stderr.on('data', handleData('stderr'));
+      child.stderr.on('data', (data: Buffer) => {
+        const text = data.toString('utf-8');
+        for (const line of text.split('\n')) {
+          if (line.trim()) {
+            console.log(`[CC:${logPrefix}:stderr] ${line}`);
+          }
+        }
+
+        const newLines = text.split('\n');
+        for (const line of newLines) {
+          if (line === '' && newLines.indexOf(line) === newLines.length - 1) continue;
+          buffer.lines.push(line);
+          while (buffer.lines.length > MAX_OUTPUT_LINES) {
+            buffer.lines.shift();
+          }
+        }
+      });
     }
   }
 

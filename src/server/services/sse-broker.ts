@@ -2,6 +2,16 @@ import { FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
+// Stream Event — JSON objects from Claude Code's --output-format stream-json
+// ---------------------------------------------------------------------------
+
+export interface StreamEvent {
+  type: string;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
 // SSE Event Types
 // ---------------------------------------------------------------------------
 
@@ -9,6 +19,7 @@ import { randomUUID } from 'crypto';
 export type SSEEventType =
   | 'team_status_changed'
   | 'team_event'
+  | 'team_output'
   | 'pr_updated'
   | 'team_launched'
   | 'team_stopped'
@@ -24,6 +35,7 @@ export type SSEEventType =
 export interface SSEEventPayloads {
   team_status_changed: { team_id: number; status: string; previous_status: string };
   team_event: { team_id: number; event_type: string; event_id: number };
+  team_output: { team_id: number; event: StreamEvent };
   pr_updated: { pr_number: number; team_id: number; ci_status: string; merge_status: string };
   team_launched: { team_id: number; issue_number: number };
   team_stopped: { team_id: number };

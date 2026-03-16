@@ -455,6 +455,46 @@ const teamsRoutes: FastifyPluginCallback = (
   );
 
   // -------------------------------------------------------------------------
+  // GET /api/teams/:id/stream-events — parsed NDJSON stream events from Claude Code
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/teams/:id/stream-events',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseInt(request.params.id, 10);
+        if (isNaN(teamId) || teamId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid team ID',
+          });
+        }
+
+        const db = getDatabase();
+        const team = db.getTeam(teamId);
+        if (!team) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Team ${teamId} not found`,
+          });
+        }
+
+        const manager = getTeamManager();
+        const events = manager.getParsedEvents(teamId);
+        return reply.code(200).send(events);
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to get team stream events');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // GET /api/teams/:id/events — events for this team
   // -------------------------------------------------------------------------
   fastify.get(

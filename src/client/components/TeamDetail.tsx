@@ -4,6 +4,7 @@ import { useApi } from '../hooks/useApi';
 import { StatusBadge } from './StatusBadge';
 import { CIChecks } from './CIChecks';
 import { EventTimeline } from './EventTimeline';
+import { TeamOutput } from './TeamOutput';
 import { CommandInput } from './CommandInput';
 import type { TeamDetail as TeamDetailType } from '../../shared/types';
 
@@ -345,6 +346,14 @@ export function TeamDetail() {
                   Recent Events
                 </h4>
                 <EventTimeline teamId={detail.id} refreshKey={refreshKey} />
+              </section>
+
+              {/* ---- Claude Code Output Stream ---- */}
+              <section>
+                <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1">
+                  Claude Code Output
+                </h4>
+                <TeamOutput teamId={detail.id} />
               </section>
 
               {/* ---- Command Input ---- */}

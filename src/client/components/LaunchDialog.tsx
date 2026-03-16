@@ -49,6 +49,45 @@ function statusLabel(status: TeamStatus): string {
 // LaunchLog — real-time progress view shown after launch
 // ---------------------------------------------------------------------------
 
+interface StreamEvent {
+  type: string;
+  timestamp?: string;
+  message?: { content?: Array<{ type: string; text?: string }> };
+  tool?: { name?: string };
+  [key: string]: unknown;
+}
+
+function getStreamEventColor(type: string): string {
+  switch (type) {
+    case 'assistant':    return 'text-[#58A6FF]';
+    case 'tool_use':     return 'text-[#D29922]';
+    case 'tool_result':  return 'text-[#A371F7]';
+    case 'result':       return 'text-[#3FB950]';
+    default:             return 'text-[#8B949E]';
+  }
+}
+
+function summarizeStreamEvent(event: StreamEvent): string {
+  switch (event.type) {
+    case 'assistant': {
+      const content = event.message?.content;
+      if (Array.isArray(content)) {
+        const text = content.find((c) => c.type === 'text')?.text ?? '';
+        return text.substring(0, 100) + (text.length > 100 ? '...' : '');
+      }
+      return '';
+    }
+    case 'tool_use':
+      return event.tool?.name ?? 'unknown';
+    case 'tool_result':
+      return 'completed';
+    case 'result':
+      return 'session complete';
+    default:
+      return '';
+  }
+}
+
 interface LaunchLogProps {
   teamId: number;
   issueNumber: number;
@@ -59,11 +98,12 @@ function LaunchLog({ teamId, issueNumber, onClose }: LaunchLogProps) {
   const api = useApi();
   const [teamStatus, setTeamStatus] = useState<TeamStatus>('queued');
   const [outputLines, setOutputLines] = useState<string[]>([]);
+  const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Poll team status and output every 2 seconds
+  // Poll team status, output, and stream events every 2 seconds
   useEffect(() => {
     let cancelled = false;
 
@@ -84,6 +124,11 @@ function LaunchLog({ teamId, issueNumber, onClose }: LaunchLogProps) {
         const output = await api.get<{ lines: string[] }>(`teams/${teamId}/output?lines=50`);
         if (cancelled) return;
         setOutputLines(output.lines);
+
+        // Fetch parsed stream events
+        const events = await api.get<StreamEvent[]>(`teams/${teamId}/stream-events`);
+        if (cancelled) return;
+        setStreamEvents(events);
       } catch {
         // Ignore polling errors — will retry
       }
@@ -194,8 +239,26 @@ function LaunchLog({ teamId, issueNumber, onClose }: LaunchLogProps) {
         </div>
       )}
 
-      {/* Output log */}
-      {outputLines.length > 0 && (
+      {/* Stream events (structured NDJSON output) */}
+      {streamEvents.length > 0 && (
+        <div className="bg-[#0D1117] border border-dark-border rounded p-2 max-h-[200px] overflow-y-auto font-mono text-xs">
+          {streamEvents.slice(-30).map((e, i) => (
+            <div key={i} className="py-0.5 leading-relaxed">
+              <span className="text-dark-muted">
+                {e.timestamp?.substring(11, 19) ?? '--:--:--'}
+              </span>
+              {' '}
+              <span className={getStreamEventColor(e.type)}>{e.type}</span>
+              {' '}
+              <span className="text-dark-text">{summarizeStreamEvent(e)}</span>
+            </div>
+          ))}
+          <div ref={outputEndRef} />
+        </div>
+      )}
+
+      {/* Raw output log (fallback when no stream events) */}
+      {streamEvents.length === 0 && outputLines.length > 0 && (
         <div className="bg-dark-base border border-dark-border rounded p-2 max-h-[200px] overflow-y-auto font-mono text-xs text-dark-muted">
           {outputLines.map((line, i) => (
             <div key={i} className="whitespace-pre-wrap break-all leading-relaxed">
