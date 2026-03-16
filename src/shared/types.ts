@@ -94,6 +94,20 @@ export interface CostEntry {
   recordedAt: string;
 }
 
+/** A usage snapshot for tracking usage percentages */
+export interface UsageSnapshot {
+  id: number;
+  teamId: number | null;
+  projectId: number | null;
+  sessionId: string | null;
+  dailyPercent: number;
+  weeklyPercent: number;
+  sonnetPercent: number;
+  extraPercent: number;
+  rawOutput: string | null;
+  recordedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard View (v_team_dashboard)
 // ---------------------------------------------------------------------------

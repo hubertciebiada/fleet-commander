@@ -9,7 +9,7 @@ interface NavItem {
 const items: NavItem[] = [
   { to: '/', label: 'Fleet Grid', icon: '\u229E' },       // ⊞
   { to: '/issues', label: 'Issue Tree', icon: '\uD83C\uDF33' },  // 🌳
-  { to: '/costs', label: 'Cost View', icon: '$' },
+  { to: '/usage', label: 'Usage View', icon: '%' },
 ];
 
 export function SideNav() {

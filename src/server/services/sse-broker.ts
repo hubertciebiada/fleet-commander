@@ -13,6 +13,7 @@ export type SSEEventType =
   | 'team_launched'
   | 'team_stopped'
   | 'cost_updated'
+  | 'usage_updated'
   | 'heartbeat';
 
 /** Payload shapes for each event type */
@@ -23,6 +24,7 @@ export interface SSEEventPayloads {
   team_launched: { team_id: number; issue_number: number };
   team_stopped: { team_id: number };
   cost_updated: { team_id: number; total_cost_usd: number };
+  usage_updated: { daily_percent: number; weekly_percent: number; sonnet_percent: number; extra_percent: number };
   heartbeat: { timestamp: string };
 }
 

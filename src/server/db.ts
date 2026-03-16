@@ -12,6 +12,7 @@ import type {
   Event,
   Command,
   CostEntry,
+  UsageSnapshot,
   TeamDashboardRow,
   TeamStatus,
   TeamPhase,
@@ -122,6 +123,17 @@ export interface CostByDay {
   totalInputTokens: number;
   totalOutputTokens: number;
   entryCount: number;
+}
+
+export interface UsageInsert {
+  teamId?: number;
+  projectId?: number;
+  sessionId?: string;
+  dailyPercent?: number;
+  weeklyPercent?: number;
+  sonnetPercent?: number;
+  extraPercent?: number;
+  rawOutput?: string;
 }
 
 export interface StuckCandidate {
@@ -670,6 +682,73 @@ export class FleetDatabase {
     }));
   }
 
+  // -------------------------------------------------------------------------
+  // Usage Snapshots
+  // -------------------------------------------------------------------------
+
+  insertUsageSnapshot(data: UsageInsert): UsageSnapshot {
+    const stmt = this.db.prepare(`
+      INSERT INTO usage_snapshots (team_id, project_id, session_id, daily_percent, weekly_percent, sonnet_percent, extra_percent, raw_output)
+      VALUES (@teamId, @projectId, @sessionId, @dailyPercent, @weeklyPercent, @sonnetPercent, @extraPercent, @rawOutput)
+    `);
+
+    const info = stmt.run({
+      teamId: data.teamId ?? null,
+      projectId: data.projectId ?? null,
+      sessionId: data.sessionId ?? null,
+      dailyPercent: data.dailyPercent ?? 0,
+      weeklyPercent: data.weeklyPercent ?? 0,
+      sonnetPercent: data.sonnetPercent ?? 0,
+      extraPercent: data.extraPercent ?? 0,
+      rawOutput: data.rawOutput ?? null,
+    });
+
+    const row = this.db.prepare('SELECT * FROM usage_snapshots WHERE id = ?').get(
+      Number(info.lastInsertRowid)
+    ) as Record<string, unknown>;
+    return this.mapUsageRow(row);
+  }
+
+  getLatestUsage(): UsageSnapshot | undefined {
+    const stmt = this.db.prepare(
+      'SELECT * FROM usage_snapshots ORDER BY recorded_at DESC, id DESC LIMIT 1'
+    );
+    const row = stmt.get() as Record<string, unknown> | undefined;
+    return row ? this.mapUsageRow(row) : undefined;
+  }
+
+  getUsageHistory(limit: number = 50): UsageSnapshot[] {
+    const stmt = this.db.prepare(
+      'SELECT * FROM usage_snapshots ORDER BY recorded_at DESC, id DESC LIMIT ?'
+    );
+    const rows = stmt.all(limit) as Record<string, unknown>[];
+    return rows.map((r) => this.mapUsageRow(r));
+  }
+
+  getUsageByProject(projectId?: number): UsageSnapshot[] {
+    if (projectId !== undefined) {
+      const stmt = this.db.prepare(
+        'SELECT * FROM usage_snapshots WHERE project_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1'
+      );
+      const row = stmt.get(projectId) as Record<string, unknown> | undefined;
+      return row ? [this.mapUsageRow(row)] : [];
+    }
+
+    // Latest snapshot per project_id
+    const stmt = this.db.prepare(`
+      SELECT u.* FROM usage_snapshots u
+      INNER JOIN (
+        SELECT project_id, MAX(id) AS max_id
+        FROM usage_snapshots
+        WHERE project_id IS NOT NULL
+        GROUP BY project_id
+      ) latest ON u.id = latest.max_id
+      ORDER BY u.recorded_at DESC
+    `);
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => this.mapUsageRow(r));
+  }
+
   /**
    * Get the file size of the database in bytes.
    */
@@ -810,6 +889,21 @@ export class FleetDatabase {
       message: row.message as string,
       sentAt: row.created_at as string,
       delivered: row.status === 'delivered',
+    };
+  }
+
+  private mapUsageRow(row: Record<string, unknown>): UsageSnapshot {
+    return {
+      id: row.id as number,
+      teamId: row.team_id as number | null,
+      projectId: row.project_id as number | null,
+      sessionId: row.session_id as string | null,
+      dailyPercent: row.daily_percent as number,
+      weeklyPercent: row.weekly_percent as number,
+      sonnetPercent: row.sonnet_percent as number,
+      extraPercent: row.extra_percent as number,
+      rawOutput: row.raw_output as string | null,
+      recordedAt: row.recorded_at as string,
     };
   }
 

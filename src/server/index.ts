@@ -10,6 +10,7 @@ import issueRoutes from './routes/issues.js';
 import teamsRoutes from './routes/teams.js';
 import systemRoutes from './routes/system.js';
 import costsRoutes from './routes/costs.js';
+import usageRoutes from './routes/usage.js';
 import prsRoutes from './routes/prs.js';
 import { sseBroker } from './services/sse-broker.js';
 import { getIssueFetcher } from './services/issue-fetcher.js';
@@ -46,6 +47,7 @@ async function main() {
   await server.register(teamsRoutes);
   await server.register(systemRoutes);
   await server.register(costsRoutes);
+  await server.register(usageRoutes);
   await server.register(prsRoutes);
 
   // Static file serving for production builds

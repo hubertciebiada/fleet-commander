@@ -6,7 +6,7 @@ import { StatusBar } from './components/StatusBar';
 import { TeamDetail } from './components/TeamDetail';
 import { FleetGridView } from './views/FleetGridView';
 import { IssueTreeView } from './views/IssueTreeView';
-import { CostViewPage } from './views/CostViewPage';
+import { UsageViewPage } from './views/UsageViewPage';
 
 export function App() {
   return (
@@ -26,7 +26,7 @@ export function App() {
               <Routes>
                 <Route path="/" element={<FleetGridView />} />
                 <Route path="/issues" element={<IssueTreeView />} />
-                <Route path="/costs" element={<CostViewPage />} />
+                <Route path="/usage" element={<UsageViewPage />} />
               </Routes>
             </main>
           </div>

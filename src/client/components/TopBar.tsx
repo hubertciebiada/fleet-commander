@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useFleet } from '../context/FleetContext';
 import { LaunchDialog } from './LaunchDialog';
+import { useApi } from '../hooks/useApi';
 
 // Status colors from PRD
 const STATUS_COLORS: Record<string, string> = {
@@ -12,9 +13,40 @@ const STATUS_COLORS: Record<string, string> = {
   launching: '#58A6FF',
 };
 
+/** Get pill color based on usage threshold */
+function getUsagePillColor(percent: number): string {
+  if (percent > 80) return '#F85149';
+  if (percent >= 50) return '#D29922';
+  return '#3FB950';
+}
+
+interface UsageData {
+  dailyPercent: number;
+  weeklyPercent: number;
+  sonnetPercent: number;
+  extraPercent: number;
+}
+
 export function TopBar() {
   const { teams } = useFleet();
+  const api = useApi();
   const [launchOpen, setLaunchOpen] = useState(false);
+  const [usage, setUsage] = useState<UsageData | null>(null);
+
+  const fetchUsage = useCallback(async () => {
+    try {
+      const data = await api.get<UsageData>('usage');
+      setUsage(data);
+    } catch {
+      // Silently ignore — pill will just not show
+    }
+  }, [api]);
+
+  useEffect(() => {
+    fetchUsage();
+    const interval = setInterval(fetchUsage, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchUsage]);
 
   // Count teams by status
   const counts = teams.reduce((acc, team) => {
@@ -22,8 +54,20 @@ export function TopBar() {
     return acc;
   }, {} as Record<string, number>);
 
-  // Total cost
-  const totalCost = teams.reduce((sum, team) => sum + (team.totalCost || 0), 0);
+  // Determine highest usage for the pill display
+  const highestUsage = usage
+    ? Math.max(usage.dailyPercent, usage.weeklyPercent, usage.sonnetPercent, usage.extraPercent)
+    : 0;
+  const highestLabel = usage
+    ? (() => {
+        const max = highestUsage;
+        if (max === usage.dailyPercent) return 'Daily';
+        if (max === usage.weeklyPercent) return 'Weekly';
+        if (max === usage.sonnetPercent) return 'Sonnet';
+        return 'Extra';
+      })()
+    : 'Daily';
+  const usageColor = getUsagePillColor(highestUsage);
 
   const pills = [
     { label: 'Running', count: counts.running || 0, color: STATUS_COLORS.running },
@@ -54,8 +98,15 @@ export function TopBar() {
               </span>
             )
           ))}
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-dark-muted/10 text-dark-muted border border-dark-muted/25">
-            ${totalCost.toFixed(2)}
+          <span
+            className="px-2 py-0.5 rounded-full text-xs font-medium"
+            style={{
+              backgroundColor: usageColor + '20',
+              color: usageColor,
+              border: `1px solid ${usageColor}40`,
+            }}
+          >
+            {highestLabel}: {highestUsage.toFixed(0)}%
           </span>
 
           {/* Launch Team button */}

@@ -126,5 +126,24 @@ LEFT JOIN cost_entries c ON c.team_id = t.id
 LEFT JOIN pull_requests pr ON pr.team_id = t.id
 GROUP BY t.id;
 
+-- ---------------------------------------------------------------------------
+-- USAGE SNAPSHOTS — usage percentage tracking (replaces cost tracking)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS usage_snapshots (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id         INTEGER,
+  project_id      INTEGER,
+  session_id      TEXT,
+  daily_percent   REAL DEFAULT 0,
+  weekly_percent  REAL DEFAULT 0,
+  sonnet_percent  REAL DEFAULT 0,
+  extra_percent   REAL DEFAULT 0,
+  raw_output      TEXT,
+  recorded_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_recorded ON usage_snapshots(recorded_at);
+
 -- Insert initial schema version
 INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+INSERT OR IGNORE INTO schema_version (version) VALUES (2);
