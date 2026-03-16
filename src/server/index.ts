@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import eventsRoutes from './routes/events.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,9 @@ async function main() {
   server.get('/api/health', async (_request, _reply) => {
     return { status: 'ok' };
   });
+
+  // API routes
+  await server.register(eventsRoutes);
 
   // Static file serving for production builds
   const clientDir = path.resolve(__dirname, '..', 'client');
