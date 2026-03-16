@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import streamRoutes from './routes/stream.js';
+import { sseBroker } from './services/sse-broker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +21,9 @@ async function main() {
     return { status: 'ok' };
   });
 
+  // SSE streaming endpoint
+  await server.register(streamRoutes);
+
   // Static file serving for production builds
   const clientDir = path.resolve(__dirname, '..', 'client');
   try {
@@ -30,6 +35,16 @@ async function main() {
   } catch {
     server.log.warn(`Static file directory not found: ${clientDir}`);
   }
+
+  // Start the SSE heartbeat (30s default from config.sseHeartbeatMs)
+  sseBroker.start();
+  server.log.info('SSE broker heartbeat started');
+
+  // Graceful shutdown: stop broker when server closes
+  server.addHook('onClose', async () => {
+    sseBroker.stop();
+    server.log.info('SSE broker stopped');
+  });
 
   await server.listen({ port: PORT, host: '0.0.0.0' });
   server.log.info(`Fleet Commander server listening on port ${PORT}`);
