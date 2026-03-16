@@ -9,6 +9,17 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# ── Ensure prompts directory and default prompt exist ──────────────
+mkdir -p "$FC_ROOT/prompts"
+if [ ! -f "$FC_ROOT/prompts/default-prompt.md" ]; then
+  cat > "$FC_ROOT/prompts/default-prompt.md" << 'PROMPT_EOF'
+Read the ENTIRE file `.claude/prompts/fleet-workflow.md` before taking any actions.
+You are the TL. Create a team and spawn the CORE team (Coordinator + analyst + dev + reviewer) as described in the workflow.
+Issue: #{{ISSUE_NUMBER}}
+PROMPT_EOF
+  echo "  Created default prompt: $FC_ROOT/prompts/default-prompt.md"
+fi
+
 # ── Validate required template files ───────────────────────────────
 if [ ! -f "$FC_ROOT/templates/workflow.md" ]; then
   echo "ERROR: templates/workflow.md not found"

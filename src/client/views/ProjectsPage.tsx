@@ -33,6 +33,13 @@ export function ProjectsPage() {
   const limitInputRef = useRef<HTMLInputElement>(null);
   const committedRef = useRef(false);
 
+  // Prompt editor state
+  const [editingPromptId, setEditingPromptId] = useState<number | null>(null);
+  const [promptContent, setPromptContent] = useState('');
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptError, setPromptError] = useState<string | null>(null);
+
   const fetchProjects = useCallback(async () => {
     try {
       const data = await api.get<ProjectSummary[]>('projects');
@@ -120,6 +127,37 @@ export function ProjectsPage() {
   const handleCancelEditLimit = useCallback(() => {
     setEditingLimitId(null);
   }, []);
+
+  // Load prompt content when editing
+  useEffect(() => {
+    if (editingPromptId === null) return;
+    setPromptLoading(true);
+    setPromptError(null);
+    api.get<{ content: string }>(`projects/${editingPromptId}/prompt`)
+      .then((data) => {
+        setPromptContent(data.content);
+      })
+      .catch((err: unknown) => {
+        setPromptError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        setPromptLoading(false);
+      });
+  }, [editingPromptId, api]);
+
+  const handleSavePrompt = useCallback(async () => {
+    if (editingPromptId === null) return;
+    setPromptSaving(true);
+    setPromptError(null);
+    try {
+      await api.put(`projects/${editingPromptId}/prompt`, { content: promptContent });
+      setEditingPromptId(null);
+    } catch (err: unknown) {
+      setPromptError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPromptSaving(false);
+    }
+  }, [editingPromptId, promptContent, api]);
 
   // --- Render ---
 
@@ -271,6 +309,21 @@ export function ProjectsPage() {
                         </span>
                       )}
                     </div>
+                    {project.promptFile && (
+                      <div className="flex items-center gap-2 text-xs text-dark-muted mt-1">
+                        <span className="shrink-0">Prompt:</span>
+                        <span className="truncate text-dark-text/70" title={project.promptFile}>
+                          {project.promptFile}
+                        </span>
+                        <button
+                          onClick={() => setEditingPromptId(project.id)}
+                          className="shrink-0 text-dark-accent/70 hover:text-dark-accent transition-colors"
+                          title="Edit launch prompt"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Right: actions */}
@@ -312,6 +365,77 @@ export function ProjectsPage() {
           onClose={handleCleanupClose}
           onDone={handleCleanupDone}
         />
+      )}
+
+      {/* Prompt editor modal */}
+      {editingPromptId !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingPromptId(null);
+          }}
+        >
+          <div className="w-[600px] max-w-[95vw] max-h-[80vh] bg-dark-surface border border-dark-border rounded-lg shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-dark-border shrink-0">
+              <h2 className="text-base font-semibold text-dark-text">Edit Launch Prompt</h2>
+              <button
+                onClick={() => setEditingPromptId(null)}
+                className="text-dark-muted hover:text-dark-text transition-colors p-1 rounded hover:bg-dark-border/30"
+                title="Close"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-4 flex-1 overflow-y-auto">
+              {promptLoading ? (
+                <p className="text-dark-muted text-sm">Loading prompt...</p>
+              ) : (
+                <>
+                  <p className="text-xs text-dark-muted mb-2">
+                    Use <code className="text-dark-accent/70">{'{{ISSUE_NUMBER}}'}</code> as a placeholder -- it will be replaced with the actual issue number at launch time.
+                  </p>
+                  <textarea
+                    value={promptContent}
+                    onChange={(e) => setPromptContent(e.target.value)}
+                    className="w-full h-48 px-3 py-2 text-sm rounded border border-dark-border bg-dark-base text-dark-text placeholder:text-dark-muted/50 focus:outline-none focus:border-dark-accent focus:ring-1 focus:ring-dark-accent/30 font-mono resize-y"
+                    disabled={promptSaving}
+                  />
+                  {promptError && (
+                    <div className="mt-2 px-3 py-2 rounded border border-[#F85149]/30 bg-[#F85149]/10 text-[#F85149] text-sm">
+                      {promptError}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-dark-border shrink-0">
+              <button
+                onClick={() => setEditingPromptId(null)}
+                className="px-3 py-1.5 text-sm rounded border border-dark-border text-dark-muted hover:text-dark-text hover:border-dark-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSavePrompt}
+                disabled={promptSaving || promptLoading}
+                className="px-4 py-1.5 text-sm font-medium rounded border border-dark-accent/40 text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {promptSaving ? 'Saving...' : 'Save Prompt'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

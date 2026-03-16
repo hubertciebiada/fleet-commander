@@ -34,6 +34,7 @@ export interface Project {
   status: ProjectStatus;
   hooksInstalled: boolean;
   maxActiveTeams: number;
+  promptFile: string | null;
   createdAt: string;
   updatedAt: string;
 }

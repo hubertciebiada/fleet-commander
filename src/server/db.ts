@@ -139,6 +139,7 @@ export interface ProjectInsert {
   repoPath: string;
   githubRepo?: string | null;
   maxActiveTeams?: number;
+  promptFile?: string | null;
 }
 
 export interface ProjectUpdate {
@@ -147,6 +148,7 @@ export interface ProjectUpdate {
   status?: ProjectStatus;
   hooksInstalled?: boolean;
   maxActiveTeams?: number;
+  promptFile?: string | null;
 }
 
 export interface ProjectFilter {
@@ -191,6 +193,9 @@ export class FleetDatabase {
 
     // Add max_active_teams column if missing (for existing v2 databases)
     this.addMaxActiveTeamsColumn();
+
+    // Add prompt_file column if missing (for existing databases)
+    this.addPromptFileColumn();
 
     // Resolve schema.sql relative to this file.
     // In dev (tsx): __dirname is src/server
@@ -292,6 +297,22 @@ export class FleetDatabase {
   }
 
   /**
+   * Add prompt_file column to projects table if it doesn't exist.
+   * Handles upgrade of existing databases that lack this column.
+   */
+  private addPromptFileColumn(): void {
+    try {
+      const columns = this.db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+      const hasColumn = columns.some((c) => c.name === 'prompt_file');
+      if (!hasColumn) {
+        this.db.exec('ALTER TABLE projects ADD COLUMN prompt_file TEXT');
+      }
+    } catch {
+      // Table may not exist yet (fresh database) — schema.sql will create it
+    }
+  }
+
+  /**
    * Get the current schema version.
    */
   getSchemaVersion(): number {
@@ -312,8 +333,8 @@ export class FleetDatabase {
   insertProject(data: ProjectInsert): Project {
     const now = new Date().toISOString();
     const stmt = this.db.prepare(`
-      INSERT INTO projects (name, repo_path, github_repo, max_active_teams, created_at, updated_at)
-      VALUES (@name, @repoPath, @githubRepo, @maxActiveTeams, @createdAt, @updatedAt)
+      INSERT INTO projects (name, repo_path, github_repo, max_active_teams, prompt_file, created_at, updated_at)
+      VALUES (@name, @repoPath, @githubRepo, @maxActiveTeams, @promptFile, @createdAt, @updatedAt)
     `);
 
     const info = stmt.run({
@@ -321,6 +342,7 @@ export class FleetDatabase {
       repoPath: data.repoPath,
       githubRepo: data.githubRepo ?? null,
       maxActiveTeams: data.maxActiveTeams ?? 5,
+      promptFile: data.promptFile ?? null,
       createdAt: now,
       updatedAt: now,
     });
@@ -401,6 +423,10 @@ export class FleetDatabase {
     if (fields.maxActiveTeams !== undefined) {
       setClauses.push('max_active_teams = @maxActiveTeams');
       params.maxActiveTeams = fields.maxActiveTeams;
+    }
+    if (fields.promptFile !== undefined) {
+      setClauses.push('prompt_file = @promptFile');
+      params.promptFile = fields.promptFile;
     }
 
     if (setClauses.length === 0) return this.getProject(id);
@@ -956,6 +982,7 @@ export class FleetDatabase {
       status: row.status as ProjectStatus,
       hooksInstalled: (row.hooks_installed as number) === 1,
       maxActiveTeams: (row.max_active_teams as number | undefined) ?? 5,
+      promptFile: (row.prompt_file as string | null) ?? null,
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
     };

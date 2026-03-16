@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS projects (
   status          TEXT NOT NULL DEFAULT 'active',     -- active | paused | archived
   hooks_installed INTEGER NOT NULL DEFAULT 0,         -- 0 | 1
   max_active_teams INTEGER NOT NULL DEFAULT 5,        -- max concurrent active teams before queueing
+  prompt_file     TEXT,                               -- relative path to launch prompt .md file
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

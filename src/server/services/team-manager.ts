@@ -16,7 +16,7 @@ import { getDatabase } from '../db.js';
 import { sseBroker } from './sse-broker.js';
 import type { StreamEvent } from './sse-broker.js';
 import { findGitBash } from '../utils/find-git-bash.js';
-import type { Team } from '../../shared/types.js';
+import type { Team, Project } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -296,7 +296,7 @@ export class TeamManager {
     }
 
     // ── Step 4: Spawn Claude Code process ──
-    const resolvedPrompt = prompt || `${config.defaultPrompt} ${issueNumber}`;
+    const resolvedPrompt = prompt || this.resolvePromptFromFile(project, issueNumber);
 
     // Resolve headless flag — default to true if not specified
     const isHeadless = headless !== false;
@@ -942,7 +942,7 @@ export class TeamManager {
     }
 
     // ── Step 3: Spawn Claude Code ──
-    const resolvedPrompt = `${config.defaultPrompt} ${team.issueNumber}`;
+    const resolvedPrompt = this.resolvePromptFromFile(project, team.issueNumber);
     const args: string[] = [];
     args.push('--worktree', team.worktreeName);
     args.push('--output-format', 'stream-json');
@@ -1075,6 +1075,50 @@ export class TeamManager {
 
   getParsedEvents(teamId: number): StreamEvent[] {
     return this.parsedEvents.get(teamId) ?? [];
+  }
+
+  // -------------------------------------------------------------------------
+  // resolvePromptFromFile — read prompt from project's prompt file on disk
+  // -------------------------------------------------------------------------
+
+  /**
+   * Read the project's prompt file and replace {{ISSUE_NUMBER}} placeholder.
+   * Falls back to default-prompt.md, then to config.defaultPrompt + issueNumber.
+   */
+  private resolvePromptFromFile(project: Project, issueNumber: number): string {
+    const fallback = `${config.defaultPrompt} ${issueNumber}`;
+
+    if (project.promptFile) {
+      const absPath = path.join(config.fleetCommanderRoot, project.promptFile);
+      if (fs.existsSync(absPath)) {
+        try {
+          const template = fs.readFileSync(absPath, 'utf-8');
+          const resolved = template.replace(/\{\{ISSUE_NUMBER\}\}/g, String(issueNumber));
+          console.log(`[TeamManager] Resolved prompt from file: ${project.promptFile}`);
+          return resolved;
+        } catch (err: unknown) {
+          console.warn(`[TeamManager] Failed to read prompt file ${absPath}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else {
+        console.warn(`[TeamManager] Prompt file not found: ${absPath}`);
+      }
+    }
+
+    // Fall back to default-prompt.md
+    const defaultPath = path.join(config.fleetCommanderRoot, 'prompts', 'default-prompt.md');
+    if (fs.existsSync(defaultPath)) {
+      try {
+        const template = fs.readFileSync(defaultPath, 'utf-8');
+        const resolved = template.replace(/\{\{ISSUE_NUMBER\}\}/g, String(issueNumber));
+        console.log(`[TeamManager] Resolved prompt from default: prompts/default-prompt.md`);
+        return resolved;
+      } catch {
+        // Fall through to hardcoded fallback
+      }
+    }
+
+    console.log(`[TeamManager] Using hardcoded fallback prompt`);
+    return fallback;
   }
 
   // -------------------------------------------------------------------------

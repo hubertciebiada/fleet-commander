@@ -39,6 +39,7 @@ interface UpdateProjectBody {
   githubRepo?: string | null;
   hooksInstalled?: boolean;
   maxActiveTeams?: number;
+  promptFile?: string | null;
 }
 
 interface ProjectIdParams {
@@ -130,8 +131,12 @@ function uninstallHooks(repoPath: string): void {
       : `"${scriptPath}" "${repoPath}"`;
 
     execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });
-  } catch {
-    // Non-fatal — log but continue
+  } catch (err) {
+    // Non-fatal — log but don't block project deletion
+    console.error(
+      `[uninstallHooks] Failed to uninstall from ${repoPath}:`,
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 
@@ -272,12 +277,41 @@ const projectsRoutes: FastifyPluginCallback = (
           }
         }
 
+        // Create project-specific prompt file from default template
+        const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const promptRelPath = `prompts/${slug}-prompt.md`;
+        const promptAbsPath = path.join(config.fleetCommanderRoot, promptRelPath);
+        const defaultPromptPath = path.join(config.fleetCommanderRoot, 'prompts', 'default-prompt.md');
+
+        try {
+          // Ensure prompts directory exists
+          fs.mkdirSync(path.join(config.fleetCommanderRoot, 'prompts'), { recursive: true });
+
+          // Copy default prompt if the project-specific one doesn't exist
+          if (!fs.existsSync(promptAbsPath)) {
+            if (fs.existsSync(defaultPromptPath)) {
+              fs.copyFileSync(defaultPromptPath, promptAbsPath);
+            } else {
+              // Create a basic default prompt inline
+              fs.writeFileSync(promptAbsPath,
+                'Read the ENTIRE file `.claude/prompts/fleet-workflow.md` before taking any actions.\n' +
+                'You are the TL. Create a team and spawn the CORE team (Coordinator + analyst + dev + reviewer) as described in the workflow.\n' +
+                'Issue: #{{ISSUE_NUMBER}}\n',
+                'utf-8',
+              );
+            }
+          }
+        } catch (promptErr: unknown) {
+          request.log.warn(promptErr, 'Failed to create project prompt file (non-fatal)');
+        }
+
         // Insert the project
         const project = db.insertProject({
           name: name.trim(),
           repoPath: normalizedPath,
           githubRepo: resolvedGithubRepo,
           maxActiveTeams: maxActiveTeams ?? 5,
+          promptFile: promptRelPath,
         });
 
         // Install hooks (non-fatal)
@@ -398,7 +432,7 @@ const projectsRoutes: FastifyPluginCallback = (
           });
         }
 
-        const { name, status, githubRepo, hooksInstalled, maxActiveTeams } = request.body || {};
+        const { name, status, githubRepo, hooksInstalled, maxActiveTeams, promptFile } = request.body || {};
 
         // Validate status if provided
         if (status !== undefined) {
@@ -435,6 +469,7 @@ const projectsRoutes: FastifyPluginCallback = (
           githubRepo,
           hooksInstalled,
           maxActiveTeams,
+          promptFile,
         });
 
         // Broadcast SSE event
@@ -655,6 +690,125 @@ const projectsRoutes: FastifyPluginCallback = (
         return reply.code(200).send(result);
       } catch (err: unknown) {
         request.log.error(err, 'Failed to execute cleanup');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // GET /api/projects/:id/prompt — return contents of the project's prompt file
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/projects/:id/prompt',
+    async (
+      request: FastifyRequest<{ Params: ProjectIdParams }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const projectId = parseInt(request.params.id, 10);
+        if (isNaN(projectId) || projectId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid project ID',
+          });
+        }
+
+        const db = getDatabase();
+        const project = db.getProject(projectId);
+        if (!project) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Project ${projectId} not found`,
+          });
+        }
+
+        if (!project.promptFile) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `No prompt file configured for project ${projectId}`,
+          });
+        }
+
+        const absPath = path.join(config.fleetCommanderRoot, project.promptFile);
+        if (!fs.existsSync(absPath)) {
+          // Try falling back to default
+          const defaultPath = path.join(config.fleetCommanderRoot, 'prompts', 'default-prompt.md');
+          if (fs.existsSync(defaultPath)) {
+            const content = fs.readFileSync(defaultPath, 'utf-8');
+            return reply.code(200).send({ promptFile: project.promptFile, content, isDefault: true });
+          }
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Prompt file not found: ${project.promptFile}`,
+          });
+        }
+
+        const content = fs.readFileSync(absPath, 'utf-8');
+        return reply.code(200).send({ promptFile: project.promptFile, content, isDefault: false });
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to read project prompt');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // PUT /api/projects/:id/prompt — update the contents of the prompt file
+  // -------------------------------------------------------------------------
+  fastify.put(
+    '/api/projects/:id/prompt',
+    async (
+      request: FastifyRequest<{ Params: ProjectIdParams; Body: { content: string } }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const projectId = parseInt(request.params.id, 10);
+        if (isNaN(projectId) || projectId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid project ID',
+          });
+        }
+
+        const db = getDatabase();
+        const project = db.getProject(projectId);
+        if (!project) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Project ${projectId} not found`,
+          });
+        }
+
+        const { content } = request.body || {};
+        if (content === undefined || typeof content !== 'string') {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'content is required and must be a string',
+          });
+        }
+
+        if (!project.promptFile) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: `No prompt file configured for project ${projectId}`,
+          });
+        }
+
+        const absPath = path.join(config.fleetCommanderRoot, project.promptFile);
+
+        // Ensure directory exists
+        fs.mkdirSync(path.dirname(absPath), { recursive: true });
+        fs.writeFileSync(absPath, content, 'utf-8');
+
+        return reply.code(200).send({ promptFile: project.promptFile, content });
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to update project prompt');
         return reply.code(500).send({
           error: 'Internal Server Error',
           message: err instanceof Error ? err.message : String(err),
