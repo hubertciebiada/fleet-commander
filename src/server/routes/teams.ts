@@ -460,6 +460,10 @@ const teamsRoutes: FastifyPluginCallback = (
           });
         }
 
+        // Fetch pending PM commands for this team
+        const pendingCommands = db.getPendingCommands(team.id);
+        const latestMessage = pendingCommands.length > 0 ? pendingCommands[0].message : null;
+
         // Compact MCP-compatible format
         return reply.code(200).send({
           id: team.id,
@@ -470,6 +474,12 @@ const teamsRoutes: FastifyPluginCallback = (
           pid: team.pid,
           prNumber: team.prNumber,
           lastEventAt: team.lastEventAt,
+          pm_message: latestMessage,
+          pending_commands: pendingCommands.map(c => ({
+            id: c.id,
+            message: c.message,
+            createdAt: c.createdAt,
+          })),
         });
       } catch (err: unknown) {
         request.log.error(err, 'Failed to get team status');
@@ -672,7 +682,19 @@ const teamsRoutes: FastifyPluginCallback = (
           message: message.trim(),
         });
 
-        return reply.code(201).send(command);
+        // Try to deliver via stdin pipe (direct delivery to running process)
+        const manager = getTeamManager();
+        const delivered = manager.sendMessage(teamId, message.trim());
+        if (delivered) {
+          db.markCommandDelivered(command.id);
+          console.log(`[Teams] Message delivered to team ${teamId} via stdin`);
+        }
+
+        return reply.code(201).send({
+          ...command,
+          // Override status if delivered via stdin
+          ...(delivered ? { status: 'delivered' as const, deliveredAt: new Date().toISOString() } : {}),
+        });
       } catch (err: unknown) {
         request.log.error(err, 'Failed to send message to team');
         return reply.code(500).send({

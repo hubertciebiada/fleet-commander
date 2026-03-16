@@ -11,6 +11,7 @@
 import { spawn, execSync, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import type { Writable } from 'stream';
 import config from '../config.js';
 import { getDatabase } from '../db.js';
 import { sseBroker } from './sse-broker.js';
@@ -122,6 +123,7 @@ interface OutputBuffer {
 export class TeamManager {
   private outputBuffers: Map<number, OutputBuffer> = new Map();
   private childProcesses: Map<number, ChildProcess> = new Map();
+  private stdinPipes: Map<number, Writable> = new Map();
   private parsedEvents: Map<number, StreamEvent[]> = new Map();
   private _processingQueue = new Set<number>();
 
@@ -308,6 +310,7 @@ export class TeamManager {
     // Only add --output-format for headless mode; interactive terminals need
     // normal ANSI output so the user can read the Claude Code UI.
     if (isHeadless) {
+      args.push('--input-format', 'stream-json');   // Bidirectional: receive messages via stdin
       args.push('--output-format', 'stream-json');  // Structured NDJSON output
       args.push('--verbose');  // Required when using stream-json with prompt (--print mode)
     }
@@ -316,7 +319,11 @@ export class TeamManager {
       args.push('--dangerously-skip-permissions');
     }
 
-    args.push(resolvedPrompt);
+    // In headless mode, the initial prompt is sent via stdin (not as positional arg)
+    // so that the process stays alive for follow-up messages.
+    if (!isHeadless) {
+      args.push(resolvedPrompt);
+    }
 
     // Build spawn environment — inherit everything from the server process
     // and auto-detect Git Bash so Claude Code can find it on Windows.
@@ -394,10 +401,12 @@ export class TeamManager {
     // connects to cmd.exe, not claude.exe, so Claude's NDJSON output never
     // reaches our capture handler. Instead, we resolve the full path to the
     // claude executable and spawn it directly.
+    //
+    // stdin is 'pipe' so we can send messages via --input-format stream-json.
     const child = spawn(claudePath, args, {
       cwd: project.repoPath,
       env: spawnEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       // Detach so parent can exit without killing children (if needed)
       detached: false,
     });
@@ -419,6 +428,16 @@ export class TeamManager {
     // Store child process reference
     this.childProcesses.set(team.id, child);
 
+    // Store stdin pipe for bidirectional messaging
+    if (child.stdin) {
+      this.stdinPipes.set(team.id, child.stdin);
+
+      // Send the initial prompt via stdin (not as positional arg) so the
+      // process stays alive for follow-up messages from the PM.
+      this.writeStdinMessage(child.stdin, resolvedPrompt);
+      console.log(`[TeamManager] Initial prompt sent via stdin for team ${team.id}`);
+    }
+
     // Set up output capture
     this.initOutputBuffer(team.id);
     this.captureOutput(team.id, child);
@@ -427,6 +446,7 @@ export class TeamManager {
     child.on('exit', (code, signal) => {
       console.log(`[TeamManager] Process exited for team ${team.id} (code=${code}, signal=${signal})`);
       this.childProcesses.delete(team.id);
+      this.stdinPipes.delete(team.id);
 
       const currentTeam = db.getTeam(team.id);
       if (!currentTeam) return;
@@ -460,6 +480,7 @@ export class TeamManager {
     child.on('error', (err) => {
       console.error(`[TeamManager] ERROR: process error for team ${team.id}:`, err.message);
       this.childProcesses.delete(team.id);
+      this.stdinPipes.delete(team.id);
 
       const currentTeam = db.getTeam(team.id);
       if (!currentTeam) return;
@@ -517,6 +538,22 @@ export class TeamManager {
       return db.getTeam(teamId)!;
     }
 
+    // Try graceful shutdown via stdin.end() first — closing stdin signals
+    // Claude Code to finish its current work and exit cleanly.
+    const stdin = this.stdinPipes.get(teamId);
+    if (stdin && !stdin.destroyed) {
+      try {
+        stdin.end();
+        console.log(`[TeamManager] Sent stdin EOF to team ${teamId} for graceful shutdown`);
+        // Give the process 5 seconds to finish gracefully before force-killing
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      } catch {
+        // stdin.end() failed — fall through to force kill
+      }
+    }
+    this.stdinPipes.delete(teamId);
+
+    // Force kill if still running
     if (team.pid) {
       this.killProcess(team.pid);
     }
@@ -573,9 +610,10 @@ export class TeamManager {
       throw new Error(`Worktree ${team.worktreeName} no longer exists at ${worktreeAbsPath}`);
     }
 
-    // Build args with --resume
+    // Build args with --resume and bidirectional streaming
     const args: string[] = [];
     args.push('--resume', '--worktree', team.worktreeName);
+    args.push('--input-format', 'stream-json');   // Bidirectional: receive messages via stdin
     args.push('--output-format', 'stream-json');  // Structured NDJSON output
     args.push('--verbose');  // Required when using stream-json with prompt (--print mode)
 
@@ -611,7 +649,7 @@ export class TeamManager {
     const child = spawn(claudePath, args, {
       cwd: project.repoPath,
       env: resumeEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       detached: false,
     });
 
@@ -626,6 +664,12 @@ export class TeamManager {
     // Store child process reference
     this.childProcesses.set(teamId, child);
 
+    // Store stdin pipe for bidirectional messaging
+    if (child.stdin) {
+      this.stdinPipes.set(teamId, child.stdin);
+      console.log(`[TeamManager] Stdin pipe stored for resumed team ${teamId}`);
+    }
+
     // Set up output capture
     this.initOutputBuffer(teamId);
     this.captureOutput(teamId, child);
@@ -634,6 +678,7 @@ export class TeamManager {
     child.on('exit', (code, _signal) => {
       console.log(`[TeamManager] Resume process exited for team ${teamId} (code=${code})`);
       this.childProcesses.delete(teamId);
+      this.stdinPipes.delete(teamId);
 
       const currentTeam = db.getTeam(teamId);
       if (!currentTeam) return;
@@ -661,6 +706,7 @@ export class TeamManager {
     child.on('error', (err) => {
       console.error(`[TeamManager] Resume process error for team ${teamId}:`, err);
       this.childProcesses.delete(teamId);
+      this.stdinPipes.delete(teamId);
 
       const currentTeam = db.getTeam(teamId);
       if (!currentTeam) return;
@@ -945,6 +991,7 @@ export class TeamManager {
     const resolvedPrompt = this.resolvePromptFromFile(project, team.issueNumber);
     const args: string[] = [];
     args.push('--worktree', team.worktreeName);
+    args.push('--input-format', 'stream-json');   // Bidirectional: receive messages via stdin
     args.push('--output-format', 'stream-json');
     args.push('--verbose');
 
@@ -952,7 +999,7 @@ export class TeamManager {
       args.push('--dangerously-skip-permissions');
     }
 
-    args.push(resolvedPrompt);
+    // Initial prompt is sent via stdin, not as positional arg
 
     const spawnEnv: Record<string, string | undefined> = {
       ...process.env,
@@ -971,7 +1018,7 @@ export class TeamManager {
     const child = spawn(claudePath, args, {
       cwd: project.repoPath,
       env: spawnEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       detached: false,
     });
 
@@ -988,6 +1035,14 @@ export class TeamManager {
     this.broadcastSnapshot();
 
     this.childProcesses.set(team.id, child);
+
+    // Store stdin pipe and send initial prompt
+    if (child.stdin) {
+      this.stdinPipes.set(team.id, child.stdin);
+      this.writeStdinMessage(child.stdin, resolvedPrompt);
+      console.log(`[TeamManager] Initial prompt sent via stdin for dequeued team ${team.id}`);
+    }
+
     this.initOutputBuffer(team.id);
     this.captureOutput(team.id, child);
 
@@ -995,6 +1050,7 @@ export class TeamManager {
     child.on('exit', (code, signal) => {
       console.log(`[TeamManager] Process exited for dequeued team ${team.id} (code=${code}, signal=${signal})`);
       this.childProcesses.delete(team.id);
+      this.stdinPipes.delete(team.id);
 
       const currentTeam = db.getTeam(team.id);
       if (!currentTeam) return;
@@ -1022,6 +1078,7 @@ export class TeamManager {
     child.on('error', (err) => {
       console.error(`[TeamManager] ERROR: process error for dequeued team ${team.id}:`, err.message);
       this.childProcesses.delete(team.id);
+      this.stdinPipes.delete(team.id);
 
       const currentTeam = db.getTeam(team.id);
       if (!currentTeam) return;
@@ -1075,6 +1132,38 @@ export class TeamManager {
 
   getParsedEvents(teamId: number): StreamEvent[] {
     return this.parsedEvents.get(teamId) ?? [];
+  }
+
+  // -------------------------------------------------------------------------
+  // sendMessage — deliver a PM message to a running team via stdin
+  // -------------------------------------------------------------------------
+
+  sendMessage(teamId: number, message: string): boolean {
+    const stdin = this.stdinPipes.get(teamId);
+    if (!stdin || stdin.destroyed) return false;
+
+    try {
+      this.writeStdinMessage(stdin, message);
+      console.log(`[TeamManager] Message sent to team ${teamId}: ${message.substring(0, 100)}`);
+      return true;
+    } catch (err) {
+      console.error(`[TeamManager] Failed to send message to team ${teamId}:`, err);
+      return false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // writeStdinMessage — low-level: write an SDKUserMessage JSON line to stdin
+  // -------------------------------------------------------------------------
+
+  private writeStdinMessage(stdin: Writable, content: string): void {
+    const msg = {
+      type: 'user',
+      session_id: '',
+      message: { role: 'user', content },
+      parent_tool_use_id: null,
+    };
+    stdin.write(JSON.stringify(msg) + '\n');
   }
 
   // -------------------------------------------------------------------------
