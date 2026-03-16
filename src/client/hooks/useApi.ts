@@ -20,12 +20,13 @@ class ApiError extends Error {
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const url = `/api/${path.replace(/^\//, '')}`;
-  const init: RequestInit = {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-  };
+  const init: RequestInit = { method };
   if (body !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(body);
+  } else if (method === 'POST' || method === 'PUT') {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = '{}';
   }
 
   const response = await fetch(url, init);
