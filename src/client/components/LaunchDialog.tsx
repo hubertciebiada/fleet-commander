@@ -151,6 +151,11 @@ function LaunchLog({ teamId, issueNumber, onClose }: LaunchLogProps) {
     outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [outputLines]);
 
+  // Auto-scroll for stream events
+  useEffect(() => {
+    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [streamEvents]);
+
   // Keep a stable ref to onClose so the timer effect only re-runs on teamStatus changes
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);

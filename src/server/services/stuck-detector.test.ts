@@ -65,58 +65,58 @@ describe('StuckDetector', () => {
   describe('check() — idle detection', () => {
     it('transitions running -> idle after idle threshold', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 100,
         worktreeName: 'kea-100',
         status: 'running',
         phase: 'implementing',
       });
       // Set lastEventAt to 6 minutes ago (> 5 min idle threshold)
-      db.updateTeam(1, { lastEventAt: minutesAgo(6) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(6) });
 
       stuckDetector.check();
 
-      const team = db.getTeam(1)!;
-      expect(team.status).toBe('idle');
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('idle');
     });
 
     it('does NOT transition running -> idle before threshold', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 101,
         worktreeName: 'kea-101',
         status: 'running',
         phase: 'implementing',
       });
       // Set lastEventAt to 3 minutes ago (< 5 min idle threshold)
-      db.updateTeam(1, { lastEventAt: minutesAgo(3) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(3) });
 
       stuckDetector.check();
 
-      const team = db.getTeam(1)!;
-      expect(team.status).toBe('running');
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('running');
     });
 
     it('broadcasts SSE event on running -> idle transition', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 102,
         worktreeName: 'kea-102',
         status: 'running',
         phase: 'implementing',
       });
-      db.updateTeam(1, { lastEventAt: minutesAgo(7) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(7) });
 
       stuckDetector.check();
 
       expect(sseBroker.broadcast).toHaveBeenCalledWith(
         'team_status_changed',
         expect.objectContaining({
-          team_id: 1,
+          team_id: team.id,
           status: 'idle',
           previous_status: 'running',
         }),
-        1,
+        team.id,
       );
     });
   });
@@ -124,59 +124,59 @@ describe('StuckDetector', () => {
   describe('check() — stuck detection', () => {
     it('transitions idle -> stuck after stuck threshold', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 200,
         worktreeName: 'kea-200',
         status: 'idle',
         phase: 'implementing',
       });
       // Set lastEventAt to 16 minutes ago (> 15 min stuck threshold)
-      db.updateTeam(1, { lastEventAt: minutesAgo(16) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(16) });
 
       stuckDetector.check();
 
-      const team = db.getTeam(1)!;
-      expect(team.status).toBe('stuck');
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('stuck');
     });
 
     it('does NOT transition idle -> stuck before threshold', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 201,
         worktreeName: 'kea-201',
         status: 'idle',
         phase: 'implementing',
       });
       // Set lastEventAt to 10 minutes ago (between idle and stuck thresholds)
-      db.updateTeam(1, { lastEventAt: minutesAgo(10) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(10) });
 
       stuckDetector.check();
 
-      const team = db.getTeam(1)!;
-      expect(team.status).toBe('idle');
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('idle');
     });
 
     it('broadcasts SSE event on idle -> stuck transition', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 202,
         worktreeName: 'kea-202',
         status: 'idle',
         phase: 'implementing',
       });
-      db.updateTeam(1, { lastEventAt: minutesAgo(20) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(20) });
 
       stuckDetector.check();
 
       expect(sseBroker.broadcast).toHaveBeenCalledWith(
         'team_status_changed',
         expect.objectContaining({
-          team_id: 1,
+          team_id: team.id,
           status: 'stuck',
           previous_status: 'idle',
           idle_minutes: 20,
         }),
-        1,
+        team.id,
       );
     });
   });
@@ -184,7 +184,7 @@ describe('StuckDetector', () => {
   describe('check() — CI failure threshold -> blocked phase', () => {
     it('marks team phase as blocked when CI failures >= threshold', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 300,
         worktreeName: 'kea-300',
         status: 'running',
@@ -192,58 +192,58 @@ describe('StuckDetector', () => {
         prNumber: 42,
       });
       // Set lastEventAt to recent so we don't trigger idle
-      db.updateTeam(1, { lastEventAt: minutesAgo(1) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(1) });
 
       // Create a PR with 3 CI failures (>= maxUniqueCiFailures)
       db.insertPullRequest({
         prNumber: 42,
-        teamId: 1,
+        teamId: team.id,
         ciFailCount: 3,
       });
 
       stuckDetector.check();
 
-      const team = db.getTeam(1)!;
-      expect(team.phase).toBe('blocked');
+      const result = db.getTeam(team.id)!;
+      expect(result.phase).toBe('blocked');
     });
 
     it('does NOT mark as blocked when CI failures < threshold', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 301,
         worktreeName: 'kea-301',
         status: 'running',
         phase: 'pr',
         prNumber: 43,
       });
-      db.updateTeam(1, { lastEventAt: minutesAgo(1) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(1) });
 
       db.insertPullRequest({
         prNumber: 43,
-        teamId: 1,
+        teamId: team.id,
         ciFailCount: 2,
       });
 
       stuckDetector.check();
 
-      const team = db.getTeam(1)!;
-      expect(team.phase).toBe('pr');
+      const result = db.getTeam(team.id)!;
+      expect(result.phase).toBe('pr');
     });
 
     it('does NOT re-mark phase if already blocked', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 302,
         worktreeName: 'kea-302',
         status: 'running',
         phase: 'blocked',
         prNumber: 44,
       });
-      db.updateTeam(1, { lastEventAt: minutesAgo(1) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(1) });
 
       db.insertPullRequest({
         prNumber: 44,
-        teamId: 1,
+        teamId: team.id,
         ciFailCount: 5,
       });
 
@@ -255,18 +255,18 @@ describe('StuckDetector', () => {
 
     it('broadcasts SSE event on phase -> blocked transition', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 303,
         worktreeName: 'kea-303',
         status: 'running',
         phase: 'pr',
         prNumber: 45,
       });
-      db.updateTeam(1, { lastEventAt: minutesAgo(1) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(1) });
 
       db.insertPullRequest({
         prNumber: 45,
-        teamId: 1,
+        teamId: team.id,
         ciFailCount: 4,
       });
 
@@ -275,11 +275,11 @@ describe('StuckDetector', () => {
       expect(sseBroker.broadcast).toHaveBeenCalledWith(
         'team_status_changed',
         expect.objectContaining({
-          team_id: 1,
+          team_id: team.id,
           phase: 'blocked',
           reason: '4 unique CI failures',
         }),
-        1,
+        team.id,
       );
     });
   });
@@ -287,7 +287,7 @@ describe('StuckDetector', () => {
   describe('check() — edge cases', () => {
     it('skips teams with no lastEventAt', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 400,
         worktreeName: 'kea-400',
         status: 'running',
@@ -297,8 +297,8 @@ describe('StuckDetector', () => {
 
       stuckDetector.check();
 
-      const team = db.getTeam(1)!;
-      expect(team.status).toBe('running');
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('running');
       expect(sseBroker.broadcast).not.toHaveBeenCalled();
     });
 
@@ -362,14 +362,14 @@ describe('StuckDetector', () => {
 
     it('skips teams with no prNumber for CI check', () => {
       const db = getDatabase();
-      db.insertTeam({
+      const team = db.insertTeam({
         issueNumber: 600,
         worktreeName: 'kea-600',
         status: 'running',
         phase: 'implementing',
         // No prNumber set
       });
-      db.updateTeam(1, { lastEventAt: minutesAgo(1) });
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(1) });
 
       stuckDetector.check();
 

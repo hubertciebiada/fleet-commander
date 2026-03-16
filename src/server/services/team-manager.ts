@@ -510,6 +510,13 @@ export class TeamManager {
       throw new Error(`Team ${teamId} not found`);
     }
 
+    // Queued teams have no process — just cancel them directly
+    if (team.status === 'queued') {
+      db.updateTeam(teamId, { status: 'failed', stoppedAt: new Date().toISOString() });
+      this.broadcastSnapshot();
+      return db.getTeam(teamId)!;
+    }
+
     if (team.pid) {
       this.killProcess(team.pid);
     }
@@ -858,8 +865,10 @@ export class TeamManager {
     const db = getDatabase();
 
     // Re-check status to avoid racing with other dequeue calls
+    // processQueue pre-sets status to 'launching' before calling us,
+    // so we must accept both 'queued' and 'launching'.
     const fresh = db.getTeam(team.id);
-    if (!fresh || fresh.status !== 'queued') return;
+    if (!fresh || (fresh.status !== 'queued' && fresh.status !== 'launching')) return;
 
     const projectId = team.projectId;
     if (!projectId) {
@@ -1201,7 +1210,6 @@ export class TeamManager {
                 weekly_percent: 0,
                 sonnet_percent: 0,
                 extra_percent: 0,
-                raw_cost: costUsd,
               }, teamId);
             }
 

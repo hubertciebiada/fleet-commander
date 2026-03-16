@@ -58,3 +58,7 @@ server.on('exit', (code) => {
 process.on('SIGINT', () => {
   server.kill('SIGINT');
 });
+
+process.on('SIGTERM', () => {
+  server.kill('SIGTERM');
+});
