@@ -48,6 +48,7 @@ export class TeamManager {
     issueTitle?: string,
     prompt?: string,
   ): Promise<Team> {
+    console.log(`[TeamManager] launch() called: projectId=${projectId}, issue=#${issueNumber}`);
     const db = getDatabase();
 
     // Look up project to get repo_path, github_repo, name
@@ -123,6 +124,7 @@ export class TeamManager {
     }
 
     // 4. Insert team record in DB (with projectId)
+    console.log(`[TeamManager] Inserting team record: worktree=${worktreeName}, branch=${branchName}`);
     const now = new Date().toISOString();
     const team = db.insertTeam({
       projectId,
@@ -134,6 +136,8 @@ export class TeamManager {
       phase: 'init',
       launchedAt: now,
     });
+
+    console.log(`[TeamManager] Team inserted: id=${team.id}, status=${team.status}`);
 
     // 5. Spawn Claude Code process
     const resolvedPrompt = prompt || `${config.defaultPrompt} ${issueNumber}`;
@@ -160,9 +164,13 @@ export class TeamManager {
 
     const pid = child.pid;
     if (pid === undefined) {
+      console.error(`[TeamManager] Spawn failed for team ${team.id}: no PID returned`);
       db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
+      this.broadcastSnapshot();
       throw new Error('Failed to spawn Claude Code process — no PID returned');
     }
+
+    console.log(`[TeamManager] Process spawned: team=${team.id}, pid=${pid}`);
 
     // Update team with PID
     db.updateTeam(team.id, { pid });
@@ -176,6 +184,7 @@ export class TeamManager {
 
     // 7. Handle process exit
     child.on('exit', (code, signal) => {
+      console.log(`[TeamManager] Process exited for team ${team.id} (code=${code}, signal=${signal})`);
       this.childProcesses.delete(team.id);
 
       const currentTeam = db.getTeam(team.id);
@@ -195,10 +204,13 @@ export class TeamManager {
           { team_id: team.id },
           team.id,
         );
+
+        this.broadcastSnapshot();
       }
     });
 
     child.on('error', (err) => {
+      console.error(`[TeamManager] Process error for team ${team.id}:`, err);
       this.childProcesses.delete(team.id);
 
       const currentTeam = db.getTeam(team.id);
@@ -216,6 +228,8 @@ export class TeamManager {
           { team_id: team.id },
           team.id,
         );
+
+        this.broadcastSnapshot();
       }
     });
 
@@ -225,6 +239,9 @@ export class TeamManager {
       { team_id: team.id, issue_number: issueNumber, project_id: projectId },
       team.id,
     );
+
+    // 9. Broadcast full snapshot so all SSE clients refresh their team list
+    this.broadcastSnapshot();
 
     // Return fresh team record
     return db.getTeam(team.id)!;
@@ -259,6 +276,8 @@ export class TeamManager {
       { team_id: teamId },
       teamId,
     );
+
+    this.broadcastSnapshot();
 
     return updated!;
   }
@@ -332,6 +351,7 @@ export class TeamManager {
 
     // Handle process exit
     child.on('exit', (code, _signal) => {
+      console.log(`[TeamManager] Resume process exited for team ${teamId} (code=${code})`);
       this.childProcesses.delete(teamId);
 
       const currentTeam = db.getTeam(teamId);
@@ -346,10 +366,12 @@ export class TeamManager {
         });
 
         sseBroker.broadcast('team_stopped', { team_id: teamId }, teamId);
+        this.broadcastSnapshot();
       }
     });
 
-    child.on('error', (_err) => {
+    child.on('error', (err) => {
+      console.error(`[TeamManager] Resume process error for team ${teamId}:`, err);
       this.childProcesses.delete(teamId);
 
       const currentTeam = db.getTeam(teamId);
@@ -363,6 +385,7 @@ export class TeamManager {
         });
 
         sseBroker.broadcast('team_stopped', { team_id: teamId }, teamId);
+        this.broadcastSnapshot();
       }
     });
 
@@ -372,6 +395,9 @@ export class TeamManager {
       { team_id: teamId, issue_number: team.issueNumber },
       teamId,
     );
+
+    // Broadcast full snapshot so all SSE clients refresh their team list
+    this.broadcastSnapshot();
 
     return db.getTeam(teamId)!;
   }
@@ -479,6 +505,20 @@ export class TeamManager {
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Broadcast a full team dashboard snapshot to all SSE clients.
+   * Called after any team state change so the Fleet Grid refreshes.
+   */
+  private broadcastSnapshot(): void {
+    try {
+      const db = getDatabase();
+      const dashboard = db.getTeamDashboard();
+      sseBroker.broadcast('snapshot', { teams: dashboard });
+    } catch (err) {
+      console.error('[TeamManager] Failed to broadcast snapshot:', err);
+    }
+  }
 
   private initOutputBuffer(teamId: number): void {
     this.outputBuffers.set(teamId, { lines: [] });

@@ -111,7 +111,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
 
   // Build default prompt with the issue number(s)
   function getDefaultPrompt(num: string): string {
-    return `/next-issue-kea ${num}`;
+    return `/next-issue ${num}`;
   }
 
   // --- Single launch ---
@@ -368,16 +368,16 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                   onKeyDown={handleKeyDown}
                   placeholder={
                     batchMode
-                      ? 'Default: /next-issue-kea {number}'
+                      ? 'Custom prompt (default: /next-issue {N})'
                       : issueNumber.trim()
                         ? getDefaultPrompt(issueNumber.trim())
-                        : '/next-issue-kea {number}'
+                        : 'Custom prompt (default: /next-issue {N})'
                   }
                   className="w-full px-3 py-2 text-sm rounded border border-dark-border bg-dark-base text-dark-text placeholder:text-dark-muted/50 focus:outline-none focus:border-dark-accent focus:ring-1 focus:ring-dark-accent/30"
                   disabled={loading}
                 />
                 <p className="text-xs text-dark-muted mt-1">
-                  Leave empty to use default: <code className="text-dark-accent/70">/next-issue-kea {'{'}<span className="text-dark-text/70">number</span>{'}'}</code>
+                  Leave empty to use default: <code className="text-dark-accent/70">/next-issue {'{'}<span className="text-dark-text/70">N</span>{'}'}</code>
                 </p>
               </div>
 

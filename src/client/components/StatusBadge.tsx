@@ -2,6 +2,7 @@ import type { TeamStatus } from '../../shared/types';
 
 /** Status color map from PRD */
 const STATUS_COLORS: Record<TeamStatus, string> = {
+  queued: '#8B949E',
   running: '#3FB950',
   stuck: '#F85149',
   idle: '#D29922',
@@ -12,6 +13,7 @@ const STATUS_COLORS: Record<TeamStatus, string> = {
 
 /** Human-readable status labels */
 const STATUS_LABELS: Record<TeamStatus, string> = {
+  queued: 'Queued',
   running: 'Running',
   stuck: 'Stuck',
   idle: 'Idle',

@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyPluginCallback } from 'fastify';
 import { sseBroker } from '../services/sse-broker.js';
+import { getDatabase } from '../db.js';
 
 /**
  * SSE streaming endpoint.
@@ -45,6 +46,17 @@ const streamRoutes: FastifyPluginCallback = (
 
     // Send an initial comment so the client knows the connection is live
     reply.raw.write(`:ok\n\n`);
+
+    // Send initial team dashboard snapshot so the client has data immediately
+    try {
+      const db = getDatabase();
+      const dashboard = db.getTeamDashboard();
+      const snapshotData = { type: 'snapshot', teams: dashboard };
+      const frame = `event: snapshot\ndata: ${JSON.stringify(snapshotData)}\n\n`;
+      reply.raw.write(frame);
+    } catch (err) {
+      request.log.warn(err, 'Failed to send initial SSE snapshot');
+    }
 
     // Detect client disconnect
     request.raw.on('close', () => {

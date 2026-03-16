@@ -22,11 +22,11 @@
 /** Payload received from Claude Code hooks via send_event.sh */
 export interface EventPayload {
   event: string;         // e.g. "tool_use", "session_start", "session_end", "stop", etc.
-  team: string;          // worktree name, e.g. "kea-763"
+  team: string;          // worktree name, e.g. "myproject-763"
   timestamp?: string;    // ISO 8601
   session_id?: string;   // Claude Code session UUID
   tool_name?: string;    // e.g. "Bash", "Read", "Edit"
-  agent_type?: string;   // e.g. "kea-coordinator", "kea-csharp-dev"
+  agent_type?: string;   // e.g. "coordinator", "csharp-dev"
   teammate_name?: string;
   message?: string;
   stop_reason?: string;

@@ -77,13 +77,25 @@ function IssueStateBadge({ state }: { state: 'open' | 'closed' }) {
 interface TreeNodeProps {
   node: IssueNode;
   depth: number;
-  onLaunch: (issueNumber: number, title: string) => void;
+  onLaunch: (issueNumber: number, title: string) => Promise<void>;
 }
 
 export function TreeNode({ node, depth, onLaunch }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(depth < 2);
+  const [launching, setLaunching] = useState(false);
   const hasChildren = node.children.length > 0;
   const hasActiveTeam = node.activeTeam != null;
+
+  const handleLaunch = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (launching) return;
+    setLaunching(true);
+    try {
+      await onLaunch(node.number, node.title);
+    } finally {
+      setLaunching(false);
+    }
+  };
 
   // Find first PR reference for PRBadge
   const firstPR = node.prReferences?.[0] ?? null;
@@ -155,14 +167,21 @@ export function TreeNode({ node, depth, onLaunch }: TreeNodeProps) {
         {/* Play button — only for leaf issues with no active team that are open */}
         {!hasActiveTeam && node.state === 'open' && !hasChildren && (
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onLaunch(node.number, node.title);
-            }}
-            className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-1.5 py-0.5 text-xs rounded border border-dark-border text-dark-muted hover:text-[#3FB950] hover:border-[#3FB950]/50"
+            onClick={handleLaunch}
+            disabled={launching}
+            className={`ml-auto shrink-0 transition-opacity px-1.5 py-0.5 text-xs rounded border border-dark-border text-dark-muted hover:text-[#3FB950] hover:border-[#3FB950]/50 disabled:opacity-70 disabled:cursor-not-allowed ${
+              launching ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}
             title={`Launch team for #${node.number}`}
           >
-            <PlayIcon size={12} />
+            {launching ? (
+              <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+            ) : (
+              <PlayIcon size={12} />
+            )}
           </button>
         )}
       </div>

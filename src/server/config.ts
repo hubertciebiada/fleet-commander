@@ -27,7 +27,7 @@ const config = Object.freeze({
    * @deprecated Use per-project githubRepo from the projects table instead.
    * Kept as fallback for services not yet migrated to per-project context.
    */
-  githubRepo: process.env['FLEET_GITHUB_REPO'] || 'itsg-global-agentic/itsg-kea',
+  githubRepo: process.env['FLEET_GITHUB_REPO'] || '',
 
   githubPollIntervalMs: parseInt(process.env['FLEET_GITHUB_POLL_MS'] || '30000', 10),
   issuePollIntervalMs: parseInt(process.env['FLEET_ISSUE_POLL_MS'] || '60000', 10),
@@ -39,7 +39,7 @@ const config = Object.freeze({
   maxUniqueCiFailures: parseInt(process.env['FLEET_MAX_CI_FAILURES'] || '3', 10),
 
   claudeCmd: process.env['FLEET_CLAUDE_CMD'] || 'claude',
-  defaultPrompt: process.env['FLEET_DEFAULT_PROMPT'] || '/next-issue-kea',
+  defaultPrompt: process.env['FLEET_DEFAULT_PROMPT'] || '/next-issue',
   skipPermissions: process.env['FLEET_SKIP_PERMISSIONS'] !== 'false',
 
   dbPath: process.env['FLEET_DB_PATH'] || path.join(fleetCommanderRoot, 'fleet.db'),

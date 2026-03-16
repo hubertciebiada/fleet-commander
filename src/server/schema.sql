@@ -13,9 +13,9 @@ CREATE TABLE IF NOT EXISTS schema_version (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS projects (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  name            TEXT NOT NULL,                      -- user-friendly, e.g. "itsg-kea"
-  repo_path       TEXT NOT NULL UNIQUE,               -- absolute path, e.g. "C:/Git/itsg-kea"
-  github_repo     TEXT,                               -- e.g. "itsg-global-agentic/itsg-kea"
+  name            TEXT NOT NULL,                      -- user-friendly, e.g. "my-project"
+  repo_path       TEXT NOT NULL UNIQUE,               -- absolute path, e.g. "C:/Git/my-project"
+  github_repo     TEXT,                               -- e.g. "org/my-project"
   status          TEXT NOT NULL DEFAULT 'active',     -- active | paused | archived
   hooks_installed INTEGER NOT NULL DEFAULT 0,         -- 0 | 1
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS teams (
   issue_number    INTEGER NOT NULL,
   issue_title     TEXT,
   project_id      INTEGER REFERENCES projects(id),
-  worktree_name   TEXT NOT NULL UNIQUE,           -- e.g. "kea-763"
+  worktree_name   TEXT NOT NULL UNIQUE,           -- e.g. "my-project-763"
   branch_name     TEXT,
   status          TEXT NOT NULL DEFAULT 'queued',  -- queued|launching|running|idle|stuck|done|failed
   phase           TEXT NOT NULL DEFAULT 'init',   -- init|analyzing|implementing|reviewing|pr|done|blocked

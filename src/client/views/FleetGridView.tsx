@@ -13,8 +13,9 @@ const STATUS_PRIORITY: Record<TeamStatus, number> = {
   running: 1,
   idle: 2,
   launching: 3,
-  failed: 4,
-  done: 5,
+  queued: 4,
+  failed: 5,
+  done: 6,
 };
 
 /** Sort teams by status priority, then by duration descending within same status */

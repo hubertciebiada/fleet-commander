@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 /** Team operational status */
-export type TeamStatus = 'launching' | 'running' | 'idle' | 'stuck' | 'done' | 'failed';
+export type TeamStatus = 'queued' | 'launching' | 'running' | 'idle' | 'stuck' | 'done' | 'failed';
 
 /** Team domain phase */
 export type TeamPhase = 'init' | 'analyzing' | 'implementing' | 'reviewing' | 'pr' | 'done' | 'blocked';

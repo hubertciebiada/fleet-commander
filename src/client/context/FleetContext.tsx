@@ -20,6 +20,21 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
 
+  // Fetch the full team dashboard from the REST API.
+  // Used as a fallback when an SSE event signals a change but
+  // doesn't carry the full team list payload.
+  const fetchTeams = useCallback(async () => {
+    try {
+      const res = await fetch('/api/teams');
+      if (res.ok) {
+        const teams = (await res.json()) as TeamDashboardRow[];
+        setAllTeams(teams);
+      }
+    } catch {
+      // Network error — will be retried on next event
+    }
+  }, []);
+
   const handleSSEEvent = useCallback((type: string, data: unknown) => {
     if (type === 'teams' || type === 'snapshot') {
       // Full team list update
@@ -42,8 +57,12 @@ export function FleetProvider({ children }: { children: ReactNode }) {
           return [...prev, updated];
         });
       }
+    } else if (type === 'team_launched' || type === 'team_stopped' || type === 'team_status_changed') {
+      // A team lifecycle event occurred — refresh the full list
+      // so the grid is always up to date.
+      fetchTeams();
     }
-  }, []);
+  }, [fetchTeams]);
 
   const { connected, lastEvent } = useSSE({ onEvent: handleSSEEvent });
 
