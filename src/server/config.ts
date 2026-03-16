@@ -42,6 +42,14 @@ const config = Object.freeze({
 
   outputBufferLines: 500,
   sseHeartbeatMs: 30000,
+
+  /**
+   * Terminal preference for interactive (non-headless) mode on Windows.
+   *   'auto' — try Windows Terminal (wt.exe) first, fall back to cmd.exe
+   *   'wt'   — force Windows Terminal
+   *   'cmd'  — force classic cmd.exe
+   */
+  terminalCmd: (process.env['FLEET_TERMINAL'] || 'auto') as 'auto' | 'wt' | 'cmd',
 });
 
 // Validate config

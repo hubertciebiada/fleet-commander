@@ -3,7 +3,7 @@
 // =============================================================================
 // Fastify plugin that registers all team-related API endpoints:
 // launch, stop, resume, restart, batch-launch, stop-all, list, detail, output,
-// send-message, set-phase, acknowledge.
+// export, send-message, set-phase, acknowledge.
 // =============================================================================
 
 import type {
@@ -52,6 +52,10 @@ interface OutputQuerystring {
   lines?: string;
 }
 
+interface ExportQuerystring {
+  format?: string;
+}
+
 interface SendMessageBody {
   message: string;
 }
@@ -59,6 +63,18 @@ interface SendMessageBody {
 interface SetPhaseBody {
   phase: TeamPhase;
   reason?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Produce a short one-line summary of a stream event for text export. */
+function summarize(e: Record<string, unknown>): string {
+  if (typeof e.message === 'string') return e.message;
+  if (typeof e.tool === 'string') return `tool:${e.tool}`;
+  if (typeof e.content === 'string') return e.content.slice(0, 120);
+  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +587,71 @@ const teamsRoutes: FastifyPluginCallback = (
         return reply.code(200).send(events);
       } catch (err: unknown) {
         request.log.error(err, 'Failed to get team stream events');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // GET /api/teams/:id/export — download team logs as file
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/teams/:id/export',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams; Querystring: ExportQuerystring }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseInt(request.params.id, 10);
+        if (isNaN(teamId) || teamId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid team ID',
+          });
+        }
+
+        const db = getDatabase();
+        const team = db.getTeam(teamId);
+        if (!team) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Team ${teamId} not found`,
+          });
+        }
+
+        const format = (request.query as ExportQuerystring).format ?? 'json';
+        const events = db.getEventsByTeam(teamId);
+        const manager = getTeamManager();
+        const streamEvents = manager.getParsedEvents(teamId);
+        const outputLines = manager.getOutput(teamId);
+
+        if (format === 'txt') {
+          // Plain text format
+          let text = `# Team ${team.worktreeName} - Export\n`;
+          text += `Issue: #${team.issueNumber} ${team.issueTitle ?? ''}\n`;
+          text += `Status: ${team.status}\n`;
+          text += `Launched: ${team.launchedAt ?? 'N/A'}\n\n`;
+          text += `## Stream Events\n`;
+          for (const e of streamEvents) {
+            text += `[${e.timestamp ?? ''}] ${e.type} ${summarize(e as unknown as Record<string, unknown>)}\n`;
+          }
+          text += `\n## Raw Output\n`;
+          text += outputLines.join('\n');
+
+          reply.header('Content-Type', 'text/plain');
+          reply.header('Content-Disposition', `attachment; filename="${team.worktreeName}-export.txt"`);
+          return text;
+        }
+
+        // JSON format (default)
+        reply.header('Content-Type', 'application/json');
+        reply.header('Content-Disposition', `attachment; filename="${team.worktreeName}-export.json"`);
+        return { team, events, streamEvents, output: outputLines };
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to export team logs');
         return reply.code(500).send({
           error: 'Internal Server Error',
           message: err instanceof Error ? err.message : String(err),

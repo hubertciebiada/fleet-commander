@@ -1,7 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useFleet } from '../context/FleetContext';
 import { FleetGrid } from '../components/FleetGrid';
+import { TeamTimeline } from '../components/TeamTimeline';
 import type { TeamDashboardRow, TeamStatus } from '../../shared/types';
+
+type ViewMode = 'grid' | 'timeline';
 
 // ---------------------------------------------------------------------------
 // Status priority: lower number = higher priority (sorted first)
@@ -31,6 +34,7 @@ function sortTeams(teams: TeamDashboardRow[]): TeamDashboardRow[] {
 
 export function FleetGridView() {
   const { teams, allTeams, selectedTeamId, setSelectedTeamId } = useFleet();
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
 
   const sortedTeams = useMemo(() => sortTeams(teams), [teams]);
 
@@ -49,14 +53,45 @@ export function FleetGridView() {
 
   return (
     <div className="p-4">
-      <FleetGrid
-        teams={sortedTeams}
-        selectedTeamId={selectedTeamId}
-        onSelectTeam={setSelectedTeamId}
-      />
-      <div className="text-xs text-dark-muted px-4 py-1">
-        {allTeams.length} total teams ({sortedTeams.length} shown)
+      {/* Header with view toggle */}
+      <div className="flex items-center justify-between mb-3 px-4">
+        <div className="text-xs text-dark-muted">
+          {allTeams.length} total teams ({sortedTeams.length} shown)
+        </div>
+        <div className="inline-flex rounded border border-dark-border text-xs overflow-hidden">
+          <button
+            onClick={() => setViewMode('grid')}
+            className={`px-3 py-1 transition-colors ${
+              viewMode === 'grid'
+                ? 'bg-dark-accent/20 text-dark-accent'
+                : 'text-dark-muted hover:text-dark-text'
+            }`}
+          >
+            Grid
+          </button>
+          <button
+            onClick={() => setViewMode('timeline')}
+            className={`px-3 py-1 border-l border-dark-border transition-colors ${
+              viewMode === 'timeline'
+                ? 'bg-dark-accent/20 text-dark-accent'
+                : 'text-dark-muted hover:text-dark-text'
+            }`}
+          >
+            Timeline
+          </button>
+        </div>
       </div>
+
+      {/* View content */}
+      {viewMode === 'grid' ? (
+        <FleetGrid
+          teams={sortedTeams}
+          selectedTeamId={selectedTeamId}
+          onSelectTeam={setSelectedTeamId}
+        />
+      ) : (
+        <TeamTimeline teams={sortedTeams} />
+      )}
     </div>
   );
 }

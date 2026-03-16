@@ -344,30 +344,55 @@ export class TeamManager {
     console.log(`[TeamManager] Spawning: ${claudePath} ${args.join(' ')} (headless=${isHeadless})`);
 
     if (!isHeadless && process.platform === 'win32') {
-      // ── Interactive mode (Windows): open Claude Code in a new terminal window ──
+      // ── Interactive mode (Windows): open Claude Code in a new terminal ──
       const fullCmd = `${config.claudeCmd} ${args.join(' ')}`;
       const windowTitle = `Team ${worktreeName}`;
 
-      // Build the entire command as a single string for cmd.exe /c.
-      //
-      // Windows `start` syntax: start "title" command args...
-      // CRITICAL: The first quoted string is ALWAYS interpreted as the window
-      // title by `start`. We must pass the full command as one string to
-      // cmd.exe /c, because:
-      //   1. Node's spawn() on Windows auto-quotes arguments containing spaces,
-      //      which double-quotes our already-quoted title (""Team kea-765""),
-      //      causing `start` to misparse it and try to open "kea-765" as a file.
-      //   2. The && in the inner command gets interpreted by the outer cmd.exe
-      //      as a command separator unless the whole thing is properly wrapped.
-      //
-      // Solution: use shell: true (which invokes cmd.exe /c) and pass the
-      // entire start command as a single pre-formatted string. The inner
-      // command that runs inside the new window uses cmd.exe /k with a quoted
-      // command block so && stays inside the new window's context.
+      // The inner command sets up the environment and launches Claude Code
+      // inside the new terminal window. cmd.exe /k keeps it open after exit.
       const innerCommand = `cd /d "${worktreeAbsPath}" && set CLAUDE_CODE_GIT_BASH_PATH=${gitBash || ''} && set FLEET_TEAM_ID=${worktreeName} && set FLEET_PROJECT_ID=${projectId} && ${fullCmd}`;
-      const startCommand = `start "${windowTitle}" cmd.exe /k "${innerCommand}"`;
 
-      console.log(`[TeamManager] Interactive spawn command: ${startCommand}`);
+      // Determine which terminal to use based on config.terminalCmd:
+      //   'auto' — try wt.exe, fall back to cmd.exe
+      //   'wt'   — force Windows Terminal
+      //   'cmd'  — force classic cmd.exe
+      const termPref = config.terminalCmd;
+      let useWindowsTerminal = false;
+
+      if (termPref === 'wt') {
+        useWindowsTerminal = true;
+      } else if (termPref === 'auto') {
+        try {
+          execSync('where wt.exe', { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
+          useWindowsTerminal = true;
+        } catch {
+          // wt.exe not found — fall back to cmd.exe
+          useWindowsTerminal = false;
+        }
+      }
+      // termPref === 'cmd' leaves useWindowsTerminal = false
+
+      let startCommand: string;
+      if (useWindowsTerminal) {
+        // Windows Terminal: open in a new tab with a descriptive title.
+        // wt.exe new-tab runs inside the existing WT instance (or launches
+        // a new one), giving users tabbed terminals, better fonts, and
+        // dark-theme support.
+        startCommand = `wt.exe new-tab --title "${windowTitle}" cmd.exe /k "${innerCommand}"`;
+      } else {
+        // Classic cmd.exe via `start`:
+        // CRITICAL: The first quoted string is ALWAYS interpreted as the window
+        // title by `start`. We must pass the full command as one string to
+        // cmd.exe /c, because:
+        //   1. Node's spawn() on Windows auto-quotes arguments containing spaces,
+        //      which double-quotes our already-quoted title (""Team kea-765""),
+        //      causing `start` to misparse it and try to open "kea-765" as a file.
+        //   2. The && in the inner command gets interpreted by the outer cmd.exe
+        //      as a command separator unless the whole thing is properly wrapped.
+        startCommand = `start "${windowTitle}" cmd.exe /k "${innerCommand}"`;
+      }
+
+      console.log(`[TeamManager] Interactive spawn command (terminal=${useWindowsTerminal ? 'wt' : 'cmd'}): ${startCommand}`);
 
       const interactiveChild = spawn(startCommand, [], {
         env: spawnEnv,

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useFleet } from '../context/FleetContext';
 import { LaunchDialog } from './LaunchDialog';
 import { ProjectSelector } from './ProjectSelector';
@@ -161,8 +162,13 @@ export function TopBar() {
         </div>
       </header>
 
-      {/* Launch dialog rendered at portal-level to avoid z-index issues */}
-      <LaunchDialog open={launchOpen} onClose={() => setLaunchOpen(false)} />
+      {/* Launch dialog rendered via portal to document.body — completely outside
+          the Router/NavLink DOM tree so that open/close re-renders cannot
+          accidentally trigger SideNav navigation (see bug #3x Playwright). */}
+      {createPortal(
+        <LaunchDialog open={launchOpen} onClose={() => setLaunchOpen(false)} />,
+        document.body,
+      )}
     </>
   );
 }

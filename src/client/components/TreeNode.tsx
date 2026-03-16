@@ -80,10 +80,12 @@ interface TreeNodeProps {
   onLaunch: (issueNumber: number, title: string) => Promise<void>;
   launchingIssues: Set<number>;
   launchErrors: Map<number, string>;
+  forceExpand?: boolean;
 }
 
-export const TreeNode = React.memo(function TreeNode({ node, depth, onLaunch, launchingIssues, launchErrors }: TreeNodeProps) {
+export const TreeNode = React.memo(function TreeNode({ node, depth, onLaunch, launchingIssues, launchErrors, forceExpand }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(depth < 2);
+  const isExpanded = forceExpand || expanded;
   const hasChildren = node.children.length > 0;
   const hasActiveTeam = node.activeTeam != null;
   const launching = launchingIssues.has(node.number);
@@ -107,11 +109,11 @@ export const TreeNode = React.memo(function TreeNode({ node, depth, onLaunch, la
       >
         {/* Expand/collapse arrow */}
         <button
-          onClick={() => hasChildren && setExpanded(!expanded)}
+          onClick={() => hasChildren && setExpanded(!isExpanded)}
           className={`w-4 h-4 flex items-center justify-center text-dark-muted shrink-0 transition-transform duration-150 ${
             hasChildren ? 'cursor-pointer hover:text-dark-text' : 'invisible'
-          } ${expanded ? 'rotate-90' : ''}`}
-          aria-label={expanded ? 'Collapse' : 'Expand'}
+          } ${isExpanded ? 'rotate-90' : ''}`}
+          aria-label={isExpanded ? 'Collapse' : 'Expand'}
           tabIndex={hasChildren ? 0 : -1}
         >
           <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
@@ -207,7 +209,7 @@ export const TreeNode = React.memo(function TreeNode({ node, depth, onLaunch, la
       )}
 
       {/* Children (recursive) */}
-      {hasChildren && expanded && (
+      {hasChildren && isExpanded && (
         <div>
           {node.children.map((child) => (
             <TreeNode
@@ -217,6 +219,7 @@ export const TreeNode = React.memo(function TreeNode({ node, depth, onLaunch, la
               onLaunch={onLaunch}
               launchingIssues={launchingIssues}
               launchErrors={launchErrors}
+              forceExpand={forceExpand}
             />
           ))}
         </div>

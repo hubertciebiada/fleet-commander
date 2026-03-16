@@ -268,6 +268,39 @@ const systemRoutes: FastifyPluginCallback = (
     },
   );
 
+  // -------------------------------------------------------------------------
+  // GET /api/settings — current runtime config (read-only, non-sensitive)
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/settings',
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        return reply.code(200).send({
+          port: config.port,
+          idleThresholdMin: config.idleThresholdMin,
+          stuckThresholdMin: config.stuckThresholdMin,
+          maxUniqueCiFailures: config.maxUniqueCiFailures,
+          githubPollIntervalMs: config.githubPollIntervalMs,
+          issuePollIntervalMs: config.issuePollIntervalMs,
+          stuckCheckIntervalMs: config.stuckCheckIntervalMs,
+          usagePollIntervalMs: config.usagePollIntervalMs,
+          sseHeartbeatMs: config.sseHeartbeatMs,
+          outputBufferLines: config.outputBufferLines,
+          claudeCmd: config.claudeCmd,
+          defaultPrompt: config.defaultPrompt,
+          fleetCommanderRoot: config.fleetCommanderRoot,
+          dbPath: config.dbPath,
+        });
+      } catch (err: unknown) {
+        _request.log.error(err, 'Failed to get settings');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
   done();
 };
 

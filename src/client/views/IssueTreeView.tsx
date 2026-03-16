@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useApi } from '../hooks/useApi';
 import { useFleet } from '../context/FleetContext';
 import { TreeNode, type IssueNode } from '../components/TreeNode';
@@ -37,6 +37,7 @@ export function IssueTreeView() {
   const [launchingIssues, setLaunchingIssues] = useState<Set<number>>(new Set());
   const [launchErrors, setLaunchErrors] = useState<Map<number, string>>(new Map());
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [search, setSearch] = useState('');
 
   // Fetch the project list so we can auto-resolve a project for launches
   // when "All Projects" is selected (selectedProjectId === null).
@@ -174,6 +175,12 @@ export function IssueTreeView() {
   }, [api, fetchTree, launchProjectId, activeProjects.length]);
 
   // -------------------------------------------------------------------------
+  // Filter tree by search query
+  // -------------------------------------------------------------------------
+
+  const filteredTree = useMemo(() => filterTree(tree, search), [tree, search]);
+
+  // -------------------------------------------------------------------------
   // Loading state
   // -------------------------------------------------------------------------
 
@@ -213,16 +220,40 @@ export function IssueTreeView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border shrink-0 gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <h2 className="text-sm font-semibold text-dark-text">Issue Tree</h2>
           <span className="text-xs text-dark-muted">
-            {issueCount} issue{issueCount !== 1 ? 's' : ''}
+            {search
+              ? `${countNodes(filteredTree)} of ${issueCount} issues`
+              : `${issueCount} issue${issueCount !== 1 ? 's' : ''}`}
           </span>
-          {cachedAt && (
+          {cachedAt && !search && (
             <span className="text-xs text-dark-muted" title={cachedAt}>
               {'\u00B7'} cached {formatRelativeTime(cachedAt)}
             </span>
+          )}
+        </div>
+
+        {/* Search input */}
+        <div className="relative flex-1 max-w-xs">
+          <input
+            type="text"
+            placeholder="Search issues... (#number or title)"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full px-3 py-1 text-xs bg-[#0D1117] border border-[#30363D] rounded text-[#E6EDF3] placeholder-[#8B949E] focus:outline-none focus:border-[#58A6FF]"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8B949E] hover:text-[#E6EDF3] transition-colors"
+              aria-label="Clear search"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+              </svg>
+            </button>
           )}
         </div>
 
@@ -271,9 +302,19 @@ export function IssueTreeView() {
               Click Refresh to fetch issues from GitHub
             </p>
           </div>
+        ) : filteredTree.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3">
+            <p className="text-dark-muted text-sm">No issues match &ldquo;{search}&rdquo;</p>
+            <button
+              onClick={() => setSearch('')}
+              className="text-xs text-dark-accent hover:underline"
+            >
+              Clear search
+            </button>
+          </div>
         ) : (
           <div className="space-y-0">
-            {tree.map((node) => (
+            {filteredTree.map((node) => (
               <TreeNode
                 key={node.number}
                 node={node}
@@ -281,6 +322,7 @@ export function IssueTreeView() {
                 onLaunch={handleLaunch}
                 launchingIssues={launchingIssues}
                 launchErrors={launchErrors}
+                forceExpand={!!search}
               />
             ))}
           </div>
@@ -293,6 +335,30 @@ export function IssueTreeView() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Filter tree nodes by search query, keeping parents of matching children */
+function filterTree(nodes: IssueNode[], query: string): IssueNode[] {
+  if (!query.trim()) return nodes;
+  const q = query.toLowerCase().trim();
+  const numMatch = q.startsWith('#') ? parseInt(q.slice(1)) : parseInt(q);
+
+  return nodes.reduce<IssueNode[]>((acc, node) => {
+    // Check if this node matches
+    const matches =
+      node.title.toLowerCase().includes(q) ||
+      node.number === numMatch ||
+      String(node.number).includes(q);
+
+    // Recursively filter children
+    const filteredChildren = filterTree(node.children, query);
+
+    // Include node if it matches OR has matching children
+    if (matches || filteredChildren.length > 0) {
+      acc.push({ ...node, children: filteredChildren });
+    }
+    return acc;
+  }, []);
+}
 
 /** Count nodes recursively */
 function countNodes(nodes: IssueNode[]): number {
