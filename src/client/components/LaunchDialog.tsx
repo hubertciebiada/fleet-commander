@@ -251,6 +251,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
 
   // --- Form state ---
   const [batchMode, setBatchMode] = useState(false);
+  const [headless, setHeadless] = useState(true);
   const [issueNumber, setIssueNumber] = useState('');
   const [batchIssues, setBatchIssues] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -301,6 +302,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
       setStaggerDelay('15000');
       setError(null);
       setBatchMode(false);
+      setHeadless(true);
       setSelectedProjectId('');
       setLaunchedTeamId(null);
       setLaunchedIssueNumber(null);
@@ -358,6 +360,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
         issueNumber: num,
         prompt: effectivePrompt,
         projectId,
+        headless,
       });
       // Switch to launch log view instead of closing
       setLaunchedTeamId(team.id);
@@ -368,7 +371,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
     } finally {
       setLoading(false);
     }
-  }, [issueNumber, prompt, api, projects, selectedProjectId]);
+  }, [issueNumber, prompt, api, projects, selectedProjectId, headless]);
 
   // --- Batch launch ---
   const handleLaunchBatch = useCallback(async () => {
@@ -418,6 +421,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
         prompt: effectivePrompt,
         delayMs: delay,
         projectId,
+        headless,
       });
       setToast(`Launched ${numbers.length} team${numbers.length > 1 ? 's' : ''}`);
       onClose();
@@ -427,7 +431,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
     } finally {
       setLoading(false);
     }
-  }, [batchIssues, staggerDelay, prompt, api, onClose, projects, selectedProjectId]);
+  }, [batchIssues, staggerDelay, prompt, api, onClose, projects, selectedProjectId, headless]);
 
   // Handle Enter key in single-mode input
   const handleKeyDown = useCallback(
@@ -518,16 +522,31 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                   </div>
                 )}
 
-                {/* Batch mode toggle */}
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={batchMode}
-                    onChange={(e) => setBatchMode(e.target.checked)}
-                    className="w-4 h-4 rounded border-dark-border bg-dark-base text-dark-accent focus:ring-dark-accent/50 focus:ring-offset-0 accent-[#58A6FF]"
-                  />
-                  <span className="text-sm text-dark-muted">Batch mode</span>
-                </label>
+                {/* Mode toggles */}
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={batchMode}
+                      onChange={(e) => setBatchMode(e.target.checked)}
+                      className="w-4 h-4 rounded border-dark-border bg-dark-base text-dark-accent focus:ring-dark-accent/50 focus:ring-offset-0 accent-[#58A6FF]"
+                    />
+                    <span className="text-sm text-dark-muted">Batch mode</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none" title={headless ? 'Runs Claude Code in the background with no visible window' : 'Opens Claude Code in a visible terminal window'}>
+                    <input
+                      type="checkbox"
+                      checked={headless}
+                      onChange={(e) => setHeadless(e.target.checked)}
+                      className="w-4 h-4 rounded border-dark-border bg-dark-base text-dark-accent focus:ring-dark-accent/50 focus:ring-offset-0 accent-[#58A6FF]"
+                    />
+                    <span className="text-sm text-dark-muted">Run headless (background)</span>
+                    {!headless && (
+                      <span className="text-xs text-dark-muted/60">— opens in a visible terminal window</span>
+                    )}
+                  </label>
+                </div>
 
                 {/* Issue input — single or batch */}
                 {!batchMode ? (

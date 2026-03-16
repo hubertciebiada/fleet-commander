@@ -29,6 +29,7 @@ interface LaunchBody {
   issueNumber: number;
   issueTitle?: string;
   prompt?: string;
+  headless?: boolean;
 }
 
 interface LaunchBatchBody {
@@ -36,6 +37,7 @@ interface LaunchBatchBody {
   issues: Array<{ number: number; title?: string }>;
   prompt?: string;
   delayMs?: number;
+  headless?: boolean;
 }
 
 interface RestartBody {
@@ -78,7 +80,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const { projectId, issueNumber, issueTitle, prompt } = request.body;
+        const { projectId, issueNumber, issueTitle, prompt, headless } = request.body;
 
         if (!projectId || typeof projectId !== 'number' || projectId < 1) {
           return reply.code(400).send({
@@ -95,7 +97,7 @@ const teamsRoutes: FastifyPluginCallback = (
         }
 
         const manager = getTeamManager();
-        const team = await manager.launch(projectId, issueNumber, issueTitle, prompt);
+        const team = await manager.launch(projectId, issueNumber, issueTitle, prompt, headless);
         return reply.code(201).send(team);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -123,7 +125,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const { projectId, issues, prompt, delayMs } = request.body;
+        const { projectId, issues, prompt, delayMs, headless } = request.body;
 
         if (!projectId || typeof projectId !== 'number' || projectId < 1) {
           return reply.code(400).send({
@@ -150,7 +152,7 @@ const teamsRoutes: FastifyPluginCallback = (
         }
 
         const manager = getTeamManager();
-        const teams = await manager.launchBatch(projectId, issues, prompt, delayMs);
+        const teams = await manager.launchBatch(projectId, issues, prompt, delayMs, headless);
         return reply.code(201).send(teams);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

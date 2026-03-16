@@ -48,6 +48,7 @@ export class TeamManager {
     issueNumber: number,
     issueTitle?: string,
     prompt?: string,
+    headless?: boolean,
   ): Promise<Team> {
     const db = getDatabase();
 
@@ -203,8 +204,46 @@ export class TeamManager {
       console.log(`[TeamManager] CLAUDE_CODE_GIT_BASH_PATH=${gitBash}`);
     }
 
-    console.log(`[TeamManager] Spawning: ${config.claudeCmd} ${args.join(' ')}`);
+    // Resolve headless flag — default to true if not specified
+    const isHeadless = headless !== false;
 
+    console.log(`[TeamManager] Spawning: ${config.claudeCmd} ${args.join(' ')} (headless=${isHeadless})`);
+
+    if (!isHeadless && process.platform === 'win32') {
+      // ── Interactive mode (Windows): open Claude Code in a new terminal window ──
+      const fullCmd = `${config.claudeCmd} ${args.join(' ')}`;
+      const windowTitle = `Team ${worktreeName}`;
+      const interactiveChild = spawn(
+        'cmd.exe',
+        ['/c', 'start', `"${windowTitle}"`, 'cmd.exe', '/k', `cd /d "${worktreeAbsPath}" && ${fullCmd}`],
+        {
+          env: spawnEnv,
+          shell: false,
+          detached: true,
+          stdio: 'ignore',
+        },
+      );
+      interactiveChild.unref();
+
+      console.log(`[TeamManager] Interactive window opened for team ${team.id} (worktree: ${worktreeName})`);
+
+      // We can't capture output or PID in interactive mode (the `start` command
+      // creates a separate process tree), but hooks still POST to the server
+      // independently so phase transitions and events will still work.
+      db.updateTeam(team.id, { status: 'running' });
+      this.broadcastSnapshot();
+
+      // Broadcast launch event
+      sseBroker.broadcast(
+        'team_launched',
+        { team_id: team.id, issue_number: issueNumber, project_id: projectId },
+        team.id,
+      );
+
+      return db.getTeam(team.id)!;
+    }
+
+    // ── Headless mode (default): spawn in background, capture output ──
     const child = spawn(config.claudeCmd, args, {
       cwd: project.repoPath,
       env: spawnEnv,
@@ -534,6 +573,7 @@ export class TeamManager {
     issues: Array<{ number: number; title?: string }>,
     prompt?: string,
     delayMs?: number,
+    headless?: boolean,
   ): Promise<Team[]> {
     const results: Team[] = [];
     const delay = delayMs ?? 2000; // default 2-second stagger
@@ -541,7 +581,7 @@ export class TeamManager {
     for (let i = 0; i < issues.length; i++) {
       const issue = issues[i]!;
       try {
-        const team = await this.launch(projectId, issue.number, issue.title, prompt);
+        const team = await this.launch(projectId, issue.number, issue.title, prompt, headless);
         results.push(team);
       } catch (err: unknown) {
         // Push a synthetic error indicator — don't stop the batch
