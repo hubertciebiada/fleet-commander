@@ -18,12 +18,6 @@ export type PRState = 'draft' | 'open' | 'merged' | 'closed';
 /** CI pipeline status */
 export type CIStatus = 'none' | 'pending' | 'passing' | 'failing';
 
-/** Merge readiness state */
-export type MergeState = 'unknown' | 'clean' | 'behind' | 'blocked' | 'dirty';
-
-/** Issue board status */
-export type BoardStatus = 'Backlog' | 'Ready' | 'InProgress' | 'Done' | 'Blocked';
-
 /** Project status */
 export type ProjectStatus = 'active' | 'paused' | 'archived';
 
@@ -73,7 +67,7 @@ export interface Team {
   worktreePath: string | null;
   branchName: string | null;
   prNumber: number | null;
-  launchedAt: string;
+  launchedAt: string | null;
   stoppedAt: string | null;
   lastEventAt: string | null;
   createdAt: string;
@@ -83,14 +77,13 @@ export interface Team {
 export interface PullRequest {
   prNumber: number;
   teamId: number | null;
+  title: string | null;
   state: string | null;
   mergeStatus: string | null;
   ciStatus: string | null;
-  ciConclusion: string | null;
   ciFailCount: number;
   checksJson: string | null;
   autoMerge: boolean;
-  lastPolledAt: string | null;
   updatedAt: string;
 }
 
@@ -98,10 +91,10 @@ export interface PullRequest {
 export interface Event {
   id: number;
   teamId: number;
-  hookType: string;
+  eventType: string;
   sessionId: string | null;
   toolName: string | null;
-  agentType: string | null;
+  agentName: string | null;
   payload: string | null;
   createdAt: string;
 }
@@ -110,9 +103,11 @@ export interface Event {
 export interface Command {
   id: number;
   teamId: number;
+  targetAgent: string | null;
   message: string;
-  sentAt: string;
-  delivered: boolean;
+  status: 'pending' | 'delivered' | 'failed';
+  createdAt: string;
+  deliveredAt: string | null;
 }
 
 /** A cost entry for tracking token usage and costs per session */
@@ -165,19 +160,6 @@ export interface CleanupResult {
   failed: { name: string; error: string }[];
 }
 
-/**
- * @deprecated Legacy cleanup result shape (pre-v2). Kept for migration reference.
- */
-export interface LegacyCleanupResult {
-  worktreesRemoved: string[];
-  signalFilesRemoved: string[];
-  staleDirsRemoved: string[];
-  branchesPruned: string[];
-  zombiesFixed: number;
-  staleTeamsCleaned: number;
-  errors: string[];
-}
-
 // ---------------------------------------------------------------------------
 // Dashboard View (v_team_dashboard)
 // ---------------------------------------------------------------------------
@@ -193,14 +175,14 @@ export interface TeamDashboardRow {
   phase: TeamPhase;
   worktreeName: string;
   prNumber: number | null;
-  launchedAt: string;
+  launchedAt: string | null;
   lastEventAt: string | null;
   durationMin: number;
   idleMin: number | null;
   totalCost: number;
   sessionCount: number;
-  prState: string | null;
-  ciStatus: string | null;
+  prState: PRState | null;
+  ciStatus: CIStatus | null;
   mergeStatus: string | null;
 }
 
@@ -228,7 +210,7 @@ export interface TeamDetail {
   worktreePath: string | null;
   branchName: string | null;
   prNumber: number | null;
-  launchedAt: string;
+  launchedAt: string | null;
   stoppedAt: string | null;
   lastEventAt: string | null;
   durationMin: number;
@@ -242,7 +224,6 @@ export interface TeamDetail {
     state: string | null;
     mergeStatus: string | null;
     ciStatus: string | null;
-    ciConclusion: string | null;
     ciFailCount: number;
     checks: CICheck[];
     autoMerge: boolean;

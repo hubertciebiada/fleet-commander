@@ -174,8 +174,7 @@ export function TeamDetail() {
 
   const isStopped =
     detail?.status === 'done' ||
-    detail?.status === 'failed' ||
-    detail?.status === 'idle';
+    detail?.status === 'failed';
 
   // PR merge status label
   const mergeStatusLabel = detail?.pr?.mergeStatus ?? null;
@@ -362,7 +361,7 @@ export function TeamDetail() {
                 <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1">
                   Claude Code Output
                 </h4>
-                <TeamOutput teamId={detail.id} />
+                <TeamOutput teamId={detail.id} teamStatus={detail.status} />
               </section>
 
               {/* ---- Command Input ---- */}

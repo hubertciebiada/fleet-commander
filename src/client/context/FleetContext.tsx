@@ -38,33 +38,19 @@ export function FleetProvider({ children }: { children: ReactNode }) {
 
   const handleSSEEvent = useCallback((type: string, data: unknown) => {
     console.log('[FleetContext] SSE event received:', type);
-    if (type === 'teams' || type === 'snapshot') {
+    if (type === 'snapshot') {
       // Full team list update
       const payload = data as { teams?: TeamDashboardRow[] };
       if (Array.isArray(payload.teams)) {
         console.log('[FleetContext] Teams loaded from SSE:', payload.teams.length, payload.teams.map(t => ({ id: t.id, status: t.status })));
         setAllTeams(payload.teams);
       }
-    } else if (type === 'team_update') {
-      // Single team update — merge into existing array
-      const payload = data as { team?: TeamDashboardRow };
-      if (payload.team) {
-        const updated = payload.team;
-        setAllTeams((prev) => {
-          const idx = prev.findIndex((t) => t.id === updated.id);
-          if (idx >= 0) {
-            const next = [...prev];
-            next[idx] = updated;
-            return next;
-          }
-          return [...prev, updated];
-        });
-      }
-    } else if (type === 'team_launched' || type === 'team_stopped' || type === 'team_status_changed' || type === 'cost_updated') {
-      // A team lifecycle or cost event occurred — refresh the full list
-      // so the grid is always up to date.
+    } else if (type === 'cost_updated') {
+      // Cost event doesn't trigger a snapshot from the server — refresh manually.
       fetchTeams();
     }
+    // Note: team_launched, team_stopped, team_status_changed are NOT handled here
+    // because the server already broadcasts a full 'snapshot' after those events.
   }, [fetchTeams]);
 
   const { connected, lastEvent } = useSSE({ onEvent: handleSSEEvent });

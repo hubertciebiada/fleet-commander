@@ -48,6 +48,13 @@ export function AddProjectDialog({ open, onClose, onAdded }: AddProjectDialogPro
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Clear debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   // Focus first input when dialog opens
   useEffect(() => {
     if (open) {

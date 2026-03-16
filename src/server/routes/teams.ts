@@ -382,7 +382,6 @@ const teamsRoutes: FastifyPluginCallback = (
               state: pr.state,
               mergeStatus: pr.mergeStatus,
               ciStatus: pr.ciStatus,
-              ciConclusion: pr.ciConclusion,
               ciFailCount: pr.ciFailCount,
               checks,
               autoMerge: pr.autoMerge,
@@ -446,20 +445,22 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
-
         const db = getDatabase();
-        const team = db.getTeam(teamId);
+        const idParam = request.params.id;
+        const teamId = parseInt(idParam, 10);
+
+        // Support both integer IDs and worktree names (MCP sends worktree name)
+        let team;
+        if (!isNaN(teamId) && teamId > 0) {
+          team = db.getTeam(teamId);
+        }
+        if (!team) {
+          team = db.getTeamByWorktree(idParam);
+        }
         if (!team) {
           return reply.code(404).send({
             error: 'Not Found',
-            message: `Team ${teamId} not found`,
+            message: `Team ${idParam} not found`,
           });
         }
 

@@ -123,6 +123,7 @@ export class TeamManager {
   private outputBuffers: Map<number, OutputBuffer> = new Map();
   private childProcesses: Map<number, ChildProcess> = new Map();
   private parsedEvents: Map<number, StreamEvent[]> = new Map();
+  private _processingQueue = new Set<number>();
 
   // -------------------------------------------------------------------------
   // launch — create worktree, copy hooks, spawn Claude Code
@@ -517,7 +518,7 @@ export class TeamManager {
     this.childProcesses.delete(teamId);
 
     const updated = db.updateTeam(teamId, {
-      status: 'done',
+      status: 'failed',
       pid: null,
       stoppedAt: new Date().toISOString(),
     });
@@ -816,25 +817,33 @@ export class TeamManager {
   // -------------------------------------------------------------------------
 
   async processQueue(projectId: number): Promise<void> {
-    const db = getDatabase();
-    const project = db.getProject(projectId);
-    if (!project) return;
+    // Guard against concurrent processQueue calls for the same project
+    if (this._processingQueue.has(projectId)) return;
+    this._processingQueue.add(projectId);
 
-    const activeCount = db.getActiveTeamCountByProject(projectId);
-    const available = project.maxActiveTeams - activeCount;
-    if (available <= 0) return;
+    try {
+      const db = getDatabase();
+      const project = db.getProject(projectId);
+      if (!project) return;
 
-    const queued = db.getQueuedTeamsByProject(projectId);
-    const toDequeue = queued.slice(0, available);
+      const activeCount = db.getActiveTeamCountByProject(projectId);
+      const available = project.maxActiveTeams - activeCount;
+      if (available <= 0) return;
 
-    for (const team of toDequeue) {
-      console.log(`[TeamManager] Dequeuing team ${team.id} (${team.worktreeName})`);
-      try {
-        await this.launchQueued(team);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[TeamManager] Failed to dequeue team ${team.id}: ${msg}`);
+      const queued = db.getQueuedTeamsByProject(projectId);
+      const toDequeue = queued.slice(0, available);
+
+      for (const team of toDequeue) {
+        console.log(`[TeamManager] Dequeuing team ${team.id} (${team.worktreeName})`);
+        try {
+          await this.launchQueued(team);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[TeamManager] Failed to dequeue team ${team.id}: ${msg}`);
+        }
       }
+    } finally {
+      this._processingQueue.delete(projectId);
     }
   }
 
@@ -844,6 +853,11 @@ export class TeamManager {
 
   private async launchQueued(team: Team): Promise<void> {
     const db = getDatabase();
+
+    // Re-check status to avoid racing with other dequeue calls
+    const fresh = db.getTeam(team.id);
+    if (!fresh || fresh.status !== 'queued') return;
+
     const projectId = team.projectId;
     if (!projectId) {
       console.error(`[TeamManager] Queued team ${team.id} has no projectId`);
@@ -1196,6 +1210,31 @@ export class TeamManager {
             // Not valid JSON — raw text output (e.g. startup messages)
             console.log(`[CC:${logPrefix}:raw] ${trimmed.substring(0, 200)}`);
           }
+        }
+      });
+
+      child.stdout.on('end', () => {
+        if (stdoutPartial.trim()) {
+          const trimmed = stdoutPartial.trim();
+          buffer.lines.push(stdoutPartial);
+          while (buffer.lines.length > MAX_OUTPUT_LINES) {
+            buffer.lines.shift();
+          }
+          try {
+            const event: StreamEvent = JSON.parse(trimmed);
+            console.log(`[CC:${logPrefix}] ${event.type}: ${summarizeEvent(event)}`);
+            const timestampedEvent: StreamEvent = {
+              ...event,
+              timestamp: new Date().toISOString(),
+            };
+            events.push(timestampedEvent);
+            if (events.length > MAX_PARSED_EVENTS) {
+              events.shift();
+            }
+          } catch {
+            console.log(`[CC:${logPrefix}:raw] ${trimmed.substring(0, 200)}`);
+          }
+          stdoutPartial = '';
         }
       });
     }

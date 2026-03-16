@@ -28,22 +28,25 @@ export type SSEEventType =
   | 'project_added'
   | 'project_updated'
   | 'project_removed'
+  | 'project_cleanup'
   | 'snapshot'
   | 'heartbeat';
 
 /** Payload shapes for each event type */
 export interface SSEEventPayloads {
-  team_status_changed: { team_id: number; status: string; previous_status: string };
-  team_event: { team_id: number; event_type: string; event_id: number };
+  team_status_changed: { team_id: number; status: string; previous_status: string; phase?: string; reason?: string; idle_minutes?: number };
+  team_event: { team_id: number; event_type: string; event_id: number; team?: string; session_id?: string | null; agent_name?: string | null; tool_name?: string | null; timestamp?: string };
   team_output: { team_id: number; event: StreamEvent };
-  pr_updated: { pr_number: number; team_id: number; ci_status: string; merge_status: string };
-  team_launched: { team_id: number; issue_number: number };
+  pr_updated: { pr_number: number; team_id: number; state?: string; ci_status?: string; merge_status?: string; auto_merge?: boolean; ci_fail_count?: number; action?: string };
+  team_launched: { team_id: number; issue_number: number; project_id?: number | null };
   team_stopped: { team_id: number };
   cost_updated: { team_id: number; total_cost_usd: number };
   usage_updated: { daily_percent: number; weekly_percent: number; sonnet_percent: number; extra_percent: number };
   project_added: { project_id: number; name: string; repo_path: string };
   project_updated: { project_id: number; name: string; status: string };
   project_removed: { project_id: number };
+  project_cleanup: { project_id: number; removed_count: number; failed_count: number };
+  snapshot: { teams: unknown[] };
   heartbeat: { timestamp: string };
 }
 
@@ -138,7 +141,7 @@ class SSEBroker {
    *                   either have no filter OR include this team will receive
    *                   the event.
    */
-  broadcast(eventType: string, data: unknown, teamId?: number): void {
+  broadcast(eventType: SSEEventType, data: unknown, teamId?: number): void {
     // Include the event type in the data payload so clients using
     // EventSource.onmessage (unnamed events) can also determine the type.
     const enrichedData = typeof data === 'object' && data !== null

@@ -252,7 +252,7 @@ describe('Events API', () => {
     const events = res.json();
     expect(Array.isArray(events)).toBe(true);
     for (const ev of events) {
-      expect(ev.hookType).toBe('SessionStart');
+      expect(ev.eventType).toBe('SessionStart');
     }
   });
 
@@ -359,9 +359,9 @@ describe('Event -> DB verification', () => {
     // The event we just posted must be present
     const found = events.find((e: any) => e.id === eventId);
     expect(found).toBeDefined();
-    expect(found.hookType).toBe('SessionStart');
+    expect(found.eventType).toBe('SessionStart');
     expect(found.sessionId).toBe('verify-sess-1');
-    expect(found.agentType).toBe('coordinator');
+    expect(found.agentName).toBe('coordinator');
   });
 
   it('multiple events create sequential IDs', async () => {

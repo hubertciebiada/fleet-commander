@@ -22,14 +22,28 @@ if (!existsSync('dist/server/index.js')) {
 
 console.log('\n  Fleet Commander → http://localhost:4680\n');
 
-// Open browser after 2s delay
-setTimeout(() => {
-  const cmd = process.platform === 'win32' ? 'start' :
-              process.platform === 'darwin' ? 'open' : 'xdg-open';
-  try {
-    execSync(`${cmd} http://localhost:4680`, { stdio: 'ignore', shell: true });
-  } catch { /* ignore */ }
-}, 2000);
+// Poll health endpoint before opening browser
+async function waitForServer(url, maxWaitMs = 10000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return true;
+    } catch {}
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+}
+
+waitForServer('http://localhost:4680/api/health').then((ok) => {
+  if (ok) {
+    const cmd = process.platform === 'win32' ? 'start' :
+                process.platform === 'darwin' ? 'open' : 'xdg-open';
+    try {
+      execSync(`${cmd} http://localhost:4680`, { stdio: 'ignore', shell: true });
+    } catch { /* ignore */ }
+  }
+});
 
 // Start server
 const server = spawn('node', ['dist/server/index.js'], {

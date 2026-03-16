@@ -249,9 +249,9 @@ describe('Events CRUD', () => {
 
     expect(event.id).toBe(1);
     expect(event.teamId).toBe(1);
-    expect(event.hookType).toBe('SessionStart');
+    expect(event.eventType).toBe('SessionStart');
     expect(event.sessionId).toBe('sess-1');
-    expect(event.agentType).toBe('coordinator');
+    expect(event.agentName).toBe('coordinator');
     expect(event.createdAt).toBeTruthy();
   });
 
@@ -261,10 +261,10 @@ describe('Events CRUD', () => {
       eventType: 'ToolUse',
     });
 
-    expect(event.hookType).toBe('ToolUse');
+    expect(event.eventType).toBe('ToolUse');
     expect(event.sessionId).toBeNull();
     expect(event.toolName).toBeNull();
-    expect(event.agentType).toBeNull();
+    expect(event.agentName).toBeNull();
   });
 
   it('inserts an event with tool_name and payload', () => {
@@ -304,7 +304,7 @@ describe('Events CRUD', () => {
 
     const latest = db.getLatestEventByTeam(1);
     expect(latest).toBeDefined();
-    expect(latest!.hookType).toBe('SessionEnd');
+    expect(latest!.eventType).toBe('SessionEnd');
   });
 
   it('returns undefined for latest event when no events exist', () => {
@@ -450,8 +450,8 @@ describe('Commands CRUD', () => {
     expect(cmd.id).toBe(1);
     expect(cmd.teamId).toBe(1);
     expect(cmd.message).toBe('Focus on the login page');
-    expect(cmd.delivered).toBe(false);
-    expect(cmd.sentAt).toBeTruthy();
+    expect(cmd.status).toBe('pending');
+    expect(cmd.createdAt).toBeTruthy();
   });
 
   it('inserts a command with target agent', () => {
@@ -481,7 +481,7 @@ describe('Commands CRUD', () => {
 
     const delivered = db.markCommandDelivered(1);
     expect(delivered).toBeDefined();
-    expect(delivered!.delivered).toBe(true);
+    expect(delivered!.status).toBe('delivered');
   });
 
   it('delivered commands are not returned by getPendingCommands', () => {

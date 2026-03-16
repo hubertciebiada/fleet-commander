@@ -6,7 +6,7 @@
 #   or:  send_event.sh <event_type>  (no stdin — sends minimal event)
 #
 # Environment:
-#   FLEET_COMMANDER_URL  — dashboard endpoint (default: http://localhost:4680/api/events)
+#   FLEET_SERVER_URL     — dashboard endpoint (default: http://localhost:4680/api/events)
 #   FLEET_COMMANDER_OFF  — set to "1" to disable all reporting (silent no-op)
 #
 # Design principles:
@@ -14,10 +14,8 @@
 #   - Runs in the worktree directory — extracts team name from path.
 #   - Reads hook stdin JSON to extract session_id, tool_name, etc.
 
-set -e
-
 # ── Configuration ──────────────────────────────────────────────────
-FLEET_URL="${FLEET_COMMANDER_URL:-http://localhost:4680/api/events}"
+FLEET_URL="${FLEET_SERVER_URL:-http://localhost:4680/api/events}"
 EVENT_TYPE="${1:-unknown}"
 
 # Kill switch
@@ -86,6 +84,8 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date +"%Y-%m-%dT%H:%M:%
 json_field() {
     local key="$1" val="$2"
     [ -z "$val" ] && return
+    # Escape backslashes first, then double quotes
+    val=$(printf '%s' "$val" | sed 's|\\|\\\\|g; s|"|\\"|g')
     printf '"%s":"%s",' "$key" "$val"
 }
 

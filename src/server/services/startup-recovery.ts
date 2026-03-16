@@ -34,6 +34,8 @@ export async function recoverOnStartup(): Promise<void> {
   const activeTeams = db.getActiveTeams();
 
   for (const team of activeTeams) {
+    if (team.status === 'queued') continue;
+
     if (!team.pid) {
       // No PID was ever recorded — mark as idle so the PM can re-launch.
       console.log(`[recovery] Team ${team.worktreeName} has no PID — marking idle`);
@@ -91,8 +93,7 @@ export async function recoverOnStartup(): Promise<void> {
 
     for (const dir of dirs) {
       // Only inspect directories that follow the {slug}-{N} naming convention
-      // or the legacy kea-{N} convention
-      if (!dir.startsWith(`${slug}-`) && !dir.startsWith('kea-')) continue;
+      if (!dir.startsWith(`${slug}-`)) continue;
 
       const existsInDb = db.getTeamByWorktree(dir);
       if (!existsInDb) {

@@ -107,15 +107,6 @@ export function TeamRow({ team, selected, onClick }: TeamRowProps) {
               {stopping ? 'Stopping\u2026' : 'Stop'}
             </button>
           )}
-          <button
-            onClick={(e) => e.stopPropagation()}
-            className="px-1.5 py-1 text-xs rounded border border-dark-border text-dark-muted hover:text-dark-accent hover:border-dark-accent/50 transition-colors"
-            title="Send message"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M0 7.76C0 3.301 3.493 0 8 0s8 3.301 8 7.76-3.493 7.76-8 7.76c-.81 0-1.586-.107-2.316-.307a.639.639 0 0 0-.427.03l-1.588.702a.64.64 0 0 1-.898-.566l-.044-1.423a.639.639 0 0 0-.215-.456C.956 12.108 0 10.092 0 7.76Zm5.546-1.459-2.35 3.728c-.225.358.214.761.551.506l2.525-1.916a.48.48 0 0 1 .578-.002l1.869 1.402a1.2 1.2 0 0 0 1.735-.32l2.35-3.728c.226-.358-.214-.761-.551-.506L9.728 7.381a.48.48 0 0 1-.578.002L7.281 5.98a1.2 1.2 0 0 0-1.735.32Z" />
-            </svg>
-          </button>
         </span>
       </td>
     </tr>

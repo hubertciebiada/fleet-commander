@@ -32,10 +32,10 @@ export function CIChecks({ checks }: CIChecksProps) {
 
   return (
     <ul className="space-y-1.5">
-      {checks.map((check) => {
+      {checks.map((check, i) => {
         const { icon, color } = getCheckIcon(check.conclusion, check.status);
         return (
-          <li key={check.name} className="flex items-center gap-2 text-sm">
+          <li key={`${check.name}-${i}`} className="flex items-center gap-2 text-sm">
             <span
               className="font-bold text-base leading-none w-4 text-center shrink-0"
               style={{ color }}

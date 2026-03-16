@@ -9,6 +9,8 @@ import { fileURLToPath } from 'url';
 import type {
   Team,
   PullRequest,
+  PRState,
+  CIStatus,
   Event,
   Command,
   CostEntry,
@@ -262,36 +264,38 @@ export class FleetDatabase {
    * Migrate an existing v1 database to v2 (add projects table, project_id to teams).
    */
   private migrateToV2(): void {
-    // Add projects table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS projects (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT NOT NULL,
-        repo_path       TEXT NOT NULL UNIQUE,
-        github_repo     TEXT,
-        status          TEXT NOT NULL DEFAULT 'active',
-        hooks_installed INTEGER NOT NULL DEFAULT 0,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-      CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-    `);
+    this.db.transaction(() => {
+      // Add projects table
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS projects (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          name            TEXT NOT NULL,
+          repo_path       TEXT NOT NULL UNIQUE,
+          github_repo     TEXT,
+          status          TEXT NOT NULL DEFAULT 'active',
+          hooks_installed INTEGER NOT NULL DEFAULT 0,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+      `);
 
-    // Add project_id column to teams if it doesn't exist
-    try {
-      this.db.exec('ALTER TABLE teams ADD COLUMN project_id INTEGER REFERENCES projects(id)');
-    } catch {
-      // Column may already exist — ignore
-    }
+      // Add project_id column to teams if it doesn't exist
+      try {
+        this.db.exec('ALTER TABLE teams ADD COLUMN project_id INTEGER REFERENCES projects(id)');
+      } catch {
+        // Column may already exist — ignore
+      }
 
-    // Add index on project_id
-    this.db.exec('CREATE INDEX IF NOT EXISTS idx_teams_project ON teams(project_id)');
+      // Add index on project_id
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_teams_project ON teams(project_id)');
 
-    // Drop and recreate the view to include project info
-    this.db.exec('DROP VIEW IF EXISTS v_team_dashboard');
+      // Drop and recreate the view to include project info
+      this.db.exec('DROP VIEW IF EXISTS v_team_dashboard');
 
-    // Insert version 2
-    this.db.exec('INSERT OR IGNORE INTO schema_version (version) VALUES (2)');
+      // Insert version 2
+      this.db.exec('INSERT OR IGNORE INTO schema_version (version) VALUES (2)');
+    })();
   }
 
   /**
@@ -1059,10 +1063,14 @@ export class FleetDatabase {
       WHERE t.status IN ('running', 'idle')
         AND t.last_event_at IS NOT NULL
         AND (julianday('now') - julianday(t.last_event_at)) * 24 * 60 >= @idleMinutes
+        AND (
+          (t.status = 'running')
+          OR (t.status = 'idle' AND (julianday('now') - julianday(t.last_event_at)) * 24 * 60 >= @stuckMinutes)
+        )
       ORDER BY minutes_since_last_event DESC
     `);
 
-    const rows = stmt.all({ idleMinutes }) as Record<string, unknown>[];
+    const rows = stmt.all({ idleMinutes, stuckMinutes }) as Record<string, unknown>[];
     return rows.map((r) => ({
       id: r.id as number,
       issueNumber: r.issue_number as number,
@@ -1125,7 +1133,7 @@ export class FleetDatabase {
       worktreePath: null, // not stored in v1 schema; reserved for future use
       branchName: row.branch_name as string | null,
       prNumber: row.pr_number as number | null,
-      launchedAt: row.launched_at as string,
+      launchedAt: (row.launched_at as string | null) ?? null,
       stoppedAt: row.stopped_at as string | null,
       lastEventAt: row.last_event_at as string | null,
       createdAt: row.created_at as string,
@@ -1136,10 +1144,10 @@ export class FleetDatabase {
     return {
       id: row.id as number,
       teamId: row.team_id as number,
-      hookType: row.event_type as string,
+      eventType: row.event_type as string,
       sessionId: row.session_id as string | null,
       toolName: row.tool_name as string | null,
-      agentType: row.agent_name as string | null,
+      agentName: row.agent_name as string | null,
       payload: row.payload as string | null,
       createdAt: row.created_at as string,
     };
@@ -1149,14 +1157,13 @@ export class FleetDatabase {
     return {
       prNumber: row.pr_number as number,
       teamId: row.team_id as number | null,
+      title: (row.title as string | null) ?? null,
       state: row.state as string | null,
       mergeStatus: row.merge_state as string | null,
       ciStatus: row.ci_status as string | null,
-      ciConclusion: null, // not in v1 schema; reserved for future use
       ciFailCount: row.ci_fail_count as number,
       checksJson: row.checks_json as string | null,
       autoMerge: (row.auto_merge as number) === 1,
-      lastPolledAt: null, // not in v1 schema; reserved for future use
       updatedAt: row.updated_at as string,
     };
   }
@@ -1165,9 +1172,11 @@ export class FleetDatabase {
     return {
       id: row.id as number,
       teamId: row.team_id as number,
+      targetAgent: (row.target_agent as string | null) ?? null,
       message: row.message as string,
-      sentAt: row.created_at as string,
-      delivered: row.status === 'delivered',
+      status: (row.status as 'pending' | 'delivered' | 'failed') ?? 'pending',
+      createdAt: row.created_at as string,
+      deliveredAt: (row.delivered_at as string | null) ?? null,
     };
   }
 
@@ -1209,14 +1218,14 @@ export class FleetDatabase {
       phase: row.phase as TeamPhase,
       worktreeName: row.worktree_name as string,
       prNumber: row.pr_number as number | null,
-      launchedAt: row.launched_at as string,
+      launchedAt: (row.launched_at as string | null) ?? null,
       lastEventAt: row.last_event_at as string | null,
       durationMin: row.duration_min as number,
       idleMin: row.idle_min as number | null,
       totalCost: row.total_cost as number,
       sessionCount: row.session_count as number,
-      prState: row.pr_state as string | null,
-      ciStatus: row.ci_status as string | null,
+      prState: (row.pr_state as PRState | null) ?? null,
+      ciStatus: (row.ci_status as CIStatus | null) ?? null,
       mergeStatus: row.merge_status as string | null,
     };
   }

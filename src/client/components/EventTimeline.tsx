@@ -52,8 +52,8 @@ const EVENT_ICONS: Record<string, React.ReactNode> = {
   CostUpdate: <DollarSignIcon size={14} />,
 };
 
-function getEventIcon(hookType: string): React.ReactNode {
-  return EVENT_ICONS[hookType] ?? <CircleDotIcon size={14} />;
+function getEventIcon(eventType: string): React.ReactNode {
+  return EVENT_ICONS[eventType] ?? <CircleDotIcon size={14} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,12 +64,6 @@ interface EventTimelineProps {
   teamId: number;
   /** Trigger refetch when this value changes (e.g., from SSE updates) */
   refreshKey?: number;
-}
-
-interface EventsResponse {
-  teamId: number;
-  events: Event[];
-  total: number;
 }
 
 export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
@@ -85,9 +79,9 @@ export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
       setLoading(true);
       setError(null);
       try {
-        const data = await api.get<EventsResponse>(`teams/${teamId}/events?limit=20`);
+        const data = await api.get<Event[]>(`teams/${teamId}/events?limit=20`);
         if (!cancelled) {
-          setEvents(data.events ?? []);
+          setEvents(data ?? []);
         }
       } catch (err) {
         if (!cancelled) {
@@ -141,14 +135,14 @@ export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
           >
             {/* Event type icon */}
             <span className="text-dark-muted text-sm mt-0.5 w-5 flex items-center justify-center shrink-0">
-              {getEventIcon(evt.hookType)}
+              {getEventIcon(evt.eventType)}
             </span>
 
             {/* Event info */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-dark-text font-medium">
-                  {evt.hookType}
+                  {evt.eventType}
                 </span>
                 {evt.toolName && (
                   <span className="text-xs text-dark-muted bg-dark-border/30 px-1.5 py-0.5 rounded">
@@ -156,9 +150,9 @@ export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
                   </span>
                 )}
               </div>
-              {evt.agentType && (
+              {evt.agentName && (
                 <span className="text-xs text-dark-muted block mt-0.5">
-                  agent: {evt.agentType}
+                  agent: {evt.agentName}
                 </span>
               )}
             </div>

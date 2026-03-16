@@ -31,6 +31,7 @@ export function ProjectsPage() {
   const [editingLimitId, setEditingLimitId] = useState<number | null>(null);
   const [editLimitValue, setEditLimitValue] = useState<number>(5);
   const limitInputRef = useRef<HTMLInputElement>(null);
+  const committedRef = useRef(false);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -230,10 +231,18 @@ export function ProjectsPage() {
                             value={editLimitValue}
                             onChange={(e) => setEditLimitValue(parseInt(e.target.value, 10) || 1)}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveLimit(project.id);
+                              if (e.key === 'Enter') {
+                                committedRef.current = true;
+                                handleSaveLimit(project.id);
+                              }
                               if (e.key === 'Escape') handleCancelEditLimit();
                             }}
-                            onBlur={() => handleSaveLimit(project.id)}
+                            onBlur={() => {
+                              if (!committedRef.current) {
+                                handleSaveLimit(project.id);
+                              }
+                              committedRef.current = false;
+                            }}
                             min={1}
                             max={50}
                             className="w-12 px-1 py-0 text-xs rounded border border-dark-accent bg-dark-base text-dark-text focus:outline-none"

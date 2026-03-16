@@ -96,12 +96,13 @@ class StuckDetector {
           pr.ciFailCount >= config.maxUniqueCiFailures &&
           team.phase !== 'blocked'
         ) {
-          db.updateTeam(team.id, { phase: 'blocked' });
+          db.updateTeam(team.id, { phase: 'blocked', status: 'stuck' });
 
           sseBroker.broadcast(
             'team_status_changed',
             {
               team_id: team.id,
+              status: 'stuck',
               phase: 'blocked',
               reason: `${pr.ciFailCount} unique CI failures`,
             },

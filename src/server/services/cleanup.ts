@@ -62,7 +62,7 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
       const fullPath = path.join(worktreeDir, dirName);
 
       // Only consider dirs matching this project's naming convention
-      if (!dirName.startsWith(`${slug}-`) && !dirName.startsWith('kea-')) continue;
+      if (!dirName.startsWith(`${slug}-`)) continue;
 
       // Skip worktrees belonging to active teams
       if (activeWorktreeNames.has(dirName)) continue;
@@ -128,7 +128,7 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
       const branch = rawLine.replace(/^[\s*]+/, '').trim();
       if (!branch) continue;
 
-      const worktreeName = branch.replace('worktree-', '');
+      const worktreeName = branch.slice('worktree-'.length);
       const worktreeExists = fs.existsSync(path.join(worktreeDir, worktreeName));
       if (!worktreeExists) {
         items.push({
@@ -150,7 +150,7 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
       const branch = rawLine.replace(/^[\s*]+/, '').trim();
       if (!branch) continue;
 
-      const worktreeName = branch.replace('worktree-', '');
+      const worktreeName = branch.slice('worktree-'.length);
       const worktreeExists = fs.existsSync(path.join(worktreeDir, worktreeName));
       if (!worktreeExists) {
         // Avoid duplicates (if slug is already "kea")

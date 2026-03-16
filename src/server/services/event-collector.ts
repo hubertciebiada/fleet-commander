@@ -15,6 +15,8 @@
  *   Non-tool_use events are NEVER throttled.
  */
 
+import type { SSEEventType } from './sse-broker.js';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -56,7 +58,7 @@ export interface EventCollectorDb {
 
 /** SSE broker interface for broadcasting events */
 export interface SseBroker {
-  broadcast(event: string, data: unknown): void;
+  broadcast(event: SSEEventType, data: unknown): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,16 +138,27 @@ export function processEvent(
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 
-  // ── State transition: launching/idle/stuck -> running ─────────────
-  // Any event from a team proves it is alive. If the team was
-  // launching, idle, or stuck, transition it to running immediately.
+  // ── State transition: idle/stuck -> running on any event ──────────
+  // Any event from an idle or stuck team proves it is alive.
   // This MUST happen before the throttle check so that even
   // deduplicated tool_use events trigger the recovery transition.
-  if (team.status === 'launching' || team.status === 'idle' || team.status === 'stuck') {
+  if (team.status === 'idle' || team.status === 'stuck') {
     db.updateTeam(teamId, {
       status: 'running',
       updatedAt: nowIso,
     });
+  }
+
+  // ── State transition: launching -> running only on session_start/subagent_start
+  // Other events during launching may be noise; wait for an actual session start.
+  if (team.status === 'launching') {
+    const evt = payload.event.toLowerCase();
+    if (evt === 'session_start' || evt === 'subagent_start') {
+      db.updateTeam(teamId, {
+        status: 'running',
+        updatedAt: nowIso,
+      });
+    }
   }
 
   // ── Always update last_event_at (heartbeat) ──────────────────────
@@ -218,9 +231,4 @@ export class EventCollectorError extends Error {
 /** Reset all throttle state. Intended for use in tests only. */
 export function resetThrottleState(): void {
   lastToolUseByTeam.clear();
-}
-
-/** Get the throttle window duration in milliseconds. */
-export function getThrottleMs(): number {
-  return TOOL_USE_THROTTLE_MS;
 }

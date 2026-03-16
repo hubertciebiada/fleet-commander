@@ -153,7 +153,7 @@ describe('Events CRUD', () => {
 
     expect(event.id).toBeGreaterThan(0);
     expect(event.teamId).toBe(teamId);
-    expect(event.hookType).toBe('session_start');
+    expect(event.eventType).toBe('session_start');
     expect(event.sessionId).toBe('sess-001');
   });
 
@@ -176,7 +176,7 @@ describe('Events CRUD', () => {
 
     const latest = db.getLatestEventByTeam(teamId);
     expect(latest).toBeDefined();
-    expect(latest!.hookType).toBe('tool_use');
+    expect(latest!.eventType).toBe('tool_use');
   });
 
   it('getAllEvents supports filters', () => {
@@ -261,7 +261,7 @@ describe('Commands CRUD', () => {
     expect(cmd.id).toBeGreaterThan(0);
     expect(cmd.teamId).toBe(teamId);
     expect(cmd.message).toBe('Focus on the failing test in auth.test.ts');
-    expect(cmd.delivered).toBe(false);
+    expect(cmd.status).toBe('pending');
 
     const pending = db.getPendingCommands(teamId);
     expect(pending.length).toBe(1);
@@ -271,7 +271,7 @@ describe('Commands CRUD', () => {
     const cmd = db.insertCommand({ teamId, message: 'Stop and report' });
     const delivered = db.markCommandDelivered(cmd.id);
     expect(delivered).toBeDefined();
-    expect(delivered!.delivered).toBe(true);
+    expect(delivered!.status).toBe('delivered');
 
     const pending = db.getPendingCommands(teamId);
     expect(pending.length).toBe(0);

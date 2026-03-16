@@ -13,6 +13,7 @@ const STATUS_COLORS: Record<string, string> = {
   done: '#56D4DD',
   failed: '#F85149',
   launching: '#58A6FF',
+  queued: '#D29922',
 };
 
 /** Base colors per usage category */
@@ -74,12 +75,9 @@ export function TopBar() {
       ]
     : [];
 
-  // Compute total fleet cost from all teams
-  const totalFleetCost = teams.reduce((sum, t) => sum + (t.totalCost || 0), 0);
-
   const pills = [
     { label: 'Running', count: counts.running || 0, color: STATUS_COLORS.running },
-    { label: 'Queued', count: counts.queued || 0, color: '#D29922' },
+    { label: 'Queued', count: counts.queued || 0, color: STATUS_COLORS.queued },
     { label: 'Stuck', count: counts.stuck || 0, color: STATUS_COLORS.stuck },
     { label: 'Idle', count: counts.idle || 0, color: STATUS_COLORS.idle },
     { label: 'Done', count: counts.done || 0, color: STATUS_COLORS.done },
@@ -110,19 +108,6 @@ export function TopBar() {
               </span>
             )
           ))}
-          {/* Fleet cost pill */}
-          {totalFleetCost > 0 && (
-            <span
-              className="px-2 py-0.5 rounded-full text-xs font-medium font-mono"
-              style={{
-                backgroundColor: '#D29922' + '20',
-                color: '#D29922',
-                border: '1px solid #D2992240',
-              }}
-            >
-              ${totalFleetCost.toFixed(2)}
-            </span>
-          )}
           {/* Usage indicators — 4 compact inline bars */}
           {usageIndicators.map(ind => {
             const fillColor = getUsageBarColor(ind.percent, ind.baseColor);

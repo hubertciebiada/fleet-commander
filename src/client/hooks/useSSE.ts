@@ -42,10 +42,10 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
     // Named events require addEventListener; onmessage only catches unnamed.
     // We listen for each known named event type AND onmessage as a fallback.
     const namedEventTypes = [
-      'snapshot', 'team_status_changed', 'team_event', 'pr_updated',
-      'team_launched', 'team_stopped', 'cost_updated', 'usage_updated',
-      'project_added', 'project_updated', 'project_removed',
-      'heartbeat', 'teams', 'team_update',
+      'snapshot', 'team_status_changed', 'team_event', 'team_output',
+      'pr_updated', 'team_launched', 'team_stopped', 'cost_updated',
+      'usage_updated', 'project_added', 'project_updated', 'project_removed',
+      'project_cleanup', 'heartbeat',
     ];
 
     const handleSSEMessage = (event: MessageEvent) => {

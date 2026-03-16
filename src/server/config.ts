@@ -17,18 +17,6 @@ const config = Object.freeze({
   /** Absolute path to the fleet-commander installation itself */
   fleetCommanderRoot,
 
-  /**
-   * @deprecated Use per-project repoPath from the projects table instead.
-   * Kept as fallback for services not yet migrated to per-project context.
-   */
-  repoRoot: process.env['FLEET_REPO_ROOT'] || fleetCommanderRoot,
-
-  /**
-   * @deprecated Use per-project githubRepo from the projects table instead.
-   * Kept as fallback for services not yet migrated to per-project context.
-   */
-  githubRepo: process.env['FLEET_GITHUB_REPO'] || '',
-
   githubPollIntervalMs: parseInt(process.env['FLEET_GITHUB_POLL_MS'] || '30000', 10),
   issuePollIntervalMs: parseInt(process.env['FLEET_ISSUE_POLL_MS'] || '60000', 10),
   stuckCheckIntervalMs: parseInt(process.env['FLEET_STUCK_CHECK_MS'] || '60000', 10),

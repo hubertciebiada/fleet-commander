@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { StatusBadge } from './StatusBadge';
 import { PRBadge } from './PRBadge';
 import { PlayIcon } from './Icons';
@@ -82,7 +82,7 @@ interface TreeNodeProps {
   launchErrors: Map<number, string>;
 }
 
-export function TreeNode({ node, depth, onLaunch, launchingIssues, launchErrors }: TreeNodeProps) {
+export const TreeNode = React.memo(function TreeNode({ node, depth, onLaunch, launchingIssues, launchErrors }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasChildren = node.children.length > 0;
   const hasActiveTeam = node.activeTeam != null;
@@ -155,7 +155,9 @@ export function TreeNode({ node, depth, onLaunch, launchingIssues, launchErrors 
         {/* PR badge */}
         {firstPR && (
           <span className="shrink-0 ml-1">
-            <PRBadge prNumber={firstPR.number} ciStatus={null} />
+            {/* ciStatus: map PR state to a CI-like indicator when available;
+               null means no CI data is present on the issue-tree node */}
+            <PRBadge prNumber={firstPR.number} ciStatus={firstPR.state ?? null} />
           </span>
         )}
 
@@ -221,4 +223,4 @@ export function TreeNode({ node, depth, onLaunch, launchingIssues, launchErrors 
       )}
     </div>
   );
-}
+});

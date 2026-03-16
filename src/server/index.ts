@@ -21,15 +21,14 @@ import { errorHandler } from './middleware/error-handler.js';
 import { closeDatabase } from './db.js';
 import { recoverOnStartup } from './services/startup-recovery.js';
 import { usagePoller } from './services/usage-tracker.js';
+import config from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = parseInt(process.env['PORT'] ?? '4680', 10);
-
 async function main() {
   const server = Fastify({
-    logger: { level: process.env['LOG_LEVEL'] || 'info' },
+    logger: { level: config.logLevel },
   });
 
   // Centralized error handler
@@ -94,8 +93,8 @@ async function main() {
     server.log.info('All services stopped, database closed');
   });
 
-  await server.listen({ port: PORT, host: '0.0.0.0' });
-  server.log.info(`Fleet Commander server listening on port ${PORT}`);
+  await server.listen({ port: config.port, host: '0.0.0.0' });
+  server.log.info(`Fleet Commander server listening on port ${config.port}`);
 
   // Signal handlers for graceful shutdown
   const shutdown = async (signal: string) => {

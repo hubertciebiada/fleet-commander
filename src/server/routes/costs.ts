@@ -1,3 +1,4 @@
+// @deprecated — CLAUDE.md rule 15: usage tracking replaces cost tracking
 // =============================================================================
 // Fleet Commander — Cost Routes (aggregated cost data)
 // =============================================================================

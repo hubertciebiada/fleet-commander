@@ -58,9 +58,10 @@ function summarizeEvent(event: StreamEvent): string {
 
 interface TeamOutputProps {
   teamId: number;
+  teamStatus?: string;
 }
 
-export function TeamOutput({ teamId }: TeamOutputProps) {
+export function TeamOutput({ teamId, teamStatus }: TeamOutputProps) {
   const api = useApi();
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -84,12 +85,15 @@ export function TeamOutput({ teamId }: TeamOutputProps) {
     // Initial fetch
     poll();
 
+    // Stop polling when team is in a terminal state
+    if (teamStatus === 'done' || teamStatus === 'failed') return;
+
     const interval = setInterval(poll, 2000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [api, teamId]);
+  }, [api, teamId, teamStatus]);
 
   // Auto-scroll to bottom when new events arrive
   useEffect(() => {
