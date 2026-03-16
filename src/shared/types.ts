@@ -139,11 +139,34 @@ export interface UsageSnapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Cleanup
+// Cleanup (v2 — preview + selective confirm)
 // ---------------------------------------------------------------------------
 
-/** Result of a project cleanup operation */
+/** A single item that could be cleaned up */
+export interface CleanupItem {
+  type: 'worktree' | 'signal_file' | 'stale_branch';
+  name: string;
+  path: string;
+  reason: string;
+}
+
+/** Preview of what would be cleaned (dry run) */
+export interface CleanupPreview {
+  projectId: number;
+  projectName: string;
+  items: CleanupItem[];
+}
+
+/** Result of executing a confirmed cleanup */
 export interface CleanupResult {
+  removed: string[];
+  failed: { name: string; error: string }[];
+}
+
+/**
+ * @deprecated Legacy cleanup result shape (pre-v2). Kept for migration reference.
+ */
+export interface LegacyCleanupResult {
   worktreesRemoved: string[];
   signalFilesRemoved: string[];
   staleDirsRemoved: string[];

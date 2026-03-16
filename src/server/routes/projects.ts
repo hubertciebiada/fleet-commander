@@ -17,10 +17,10 @@ import path from 'path';
 import { getDatabase } from '../db.js';
 import { getTeamManager } from '../services/team-manager.js';
 import { getIssueFetcher } from '../services/issue-fetcher.js';
-import { cleanupProject } from '../services/cleanup.js';
+import { getCleanupPreview, executeCleanup } from '../services/cleanup.js';
 import { sseBroker } from '../services/sse-broker.js';
 import config from '../config.js';
-import type { ProjectStatus, InstallStatus } from '../../shared/types.js';
+import type { ProjectStatus, InstallStatus, CleanupPreview, CleanupResult } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Request body / param / query interfaces
@@ -536,10 +536,10 @@ const projectsRoutes: FastifyPluginCallback = (
   );
 
   // -------------------------------------------------------------------------
-  // POST /api/projects/:id/cleanup — run cleanup for a project
+  // GET /api/projects/:id/cleanup-preview — dry-run: what would be cleaned
   // -------------------------------------------------------------------------
-  fastify.post(
-    '/api/projects/:id/cleanup',
+  fastify.get(
+    '/api/projects/:id/cleanup-preview',
     async (
       request: FastifyRequest<{ Params: ProjectIdParams }>,
       reply: FastifyReply,
@@ -562,19 +562,67 @@ const projectsRoutes: FastifyPluginCallback = (
           });
         }
 
-        const result = await cleanupProject(projectId);
+        const preview: CleanupPreview = getCleanupPreview(projectId);
+        return reply.code(200).send(preview);
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to generate cleanup preview');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /api/projects/:id/cleanup — execute cleanup for confirmed items
+  // -------------------------------------------------------------------------
+  fastify.post(
+    '/api/projects/:id/cleanup',
+    async (
+      request: FastifyRequest<{ Params: ProjectIdParams; Body: { items: string[] } }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const projectId = parseInt(request.params.id, 10);
+        if (isNaN(projectId) || projectId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid project ID',
+          });
+        }
+
+        const db = getDatabase();
+        const project = db.getProject(projectId);
+        if (!project) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Project ${projectId} not found`,
+          });
+        }
+
+        const body = request.body || {};
+        const itemPaths = Array.isArray(body.items) ? body.items : [];
+
+        if (itemPaths.length === 0) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'No items provided. Send { items: [...paths] }.',
+          });
+        }
+
+        const result: CleanupResult = executeCleanup(projectId, itemPaths);
 
         // Broadcast SSE event so dashboards refresh
         sseBroker.broadcast('project_cleanup', {
           project_id: projectId,
-          worktrees_removed: result.worktreesRemoved.length,
-          signal_files_removed: result.signalFilesRemoved.length,
-          zombies_fixed: result.zombiesFixed,
+          removed_count: result.removed.length,
+          failed_count: result.failed.length,
         });
 
         return reply.code(200).send(result);
       } catch (err: unknown) {
-        request.log.error(err, 'Failed to clean up project');
+        request.log.error(err, 'Failed to execute cleanup');
         return reply.code(500).send({
           error: 'Internal Server Error',
           message: err instanceof Error ? err.message : String(err),

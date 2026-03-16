@@ -17,6 +17,7 @@ export type SSEEventType =
   | 'project_added'
   | 'project_updated'
   | 'project_removed'
+  | 'snapshot'
   | 'heartbeat';
 
 /** Payload shapes for each event type */

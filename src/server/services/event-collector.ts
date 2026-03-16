@@ -136,12 +136,12 @@ export function processEvent(
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 
-  // ── State transition: idle/stuck -> running ──────────────────────
+  // ── State transition: launching/idle/stuck -> running ─────────────
   // Any event from a team proves it is alive. If the team was
-  // idle or stuck, transition it back to running immediately.
+  // launching, idle, or stuck, transition it to running immediately.
   // This MUST happen before the throttle check so that even
   // deduplicated tool_use events trigger the recovery transition.
-  if (team.status === 'idle' || team.status === 'stuck') {
+  if (team.status === 'launching' || team.status === 'idle' || team.status === 'stuck') {
     db.updateTeam(teamId, {
       status: 'running',
       updatedAt: nowIso,

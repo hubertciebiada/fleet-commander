@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApi } from '../hooks/useApi';
+import { useFleet } from '../context/FleetContext';
 import { TreeNode, type IssueNode } from '../components/TreeNode';
+import type { ProjectSummary } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
 // API response shape from GET /api/issues
@@ -25,12 +27,32 @@ interface IssueRefreshResponse {
 
 export function IssueTreeView() {
   const api = useApi();
+  const { selectedProjectId } = useFleet();
   const [tree, setTree] = useState<IssueNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [issueCount, setIssueCount] = useState(0);
+  const [launchingIssues, setLaunchingIssues] = useState<Set<number>>(new Set());
+  const [launchErrors, setLaunchErrors] = useState<Map<number, string>>(new Map());
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+
+  // Fetch the project list so we can auto-resolve a project for launches
+  // when "All Projects" is selected (selectedProjectId === null).
+  useEffect(() => {
+    api.get<ProjectSummary[]>('projects').then(setProjects).catch(() => {
+      // Non-fatal — projects list is only used to auto-resolve launch target
+    });
+  }, [api]);
+
+  // Resolve which project to use for launches:
+  // 1. If user explicitly selected a project, use it.
+  // 2. If only one project exists, auto-use it.
+  // 3. Otherwise null — user must pick a project.
+  const activeProjects = projects.filter((p) => p.status === 'active');
+  const launchProjectId = selectedProjectId
+    ?? (activeProjects.length === 1 ? activeProjects[0].id : null);
 
   // -------------------------------------------------------------------------
   // Fetch issue tree
@@ -81,15 +103,75 @@ export function IssueTreeView() {
   // -------------------------------------------------------------------------
 
   const handleLaunch = useCallback(async (issueNumber: number, title: string) => {
+    if (!launchProjectId) {
+      const message = activeProjects.length > 1
+        ? 'Multiple projects exist — select one from the top bar first'
+        : 'Select a project first';
+      setLaunchErrors(prev => {
+        const next = new Map(prev);
+        next.set(issueNumber, message);
+        return next;
+      });
+      setTimeout(() => {
+        setLaunchErrors(prev => {
+          const next = new Map(prev);
+          next.delete(issueNumber);
+          return next;
+        });
+      }, 5000);
+      return;
+    }
+
+    setLaunchingIssues(prev => new Set(prev).add(issueNumber));
+    // Clear any previous error for this issue
+    setLaunchErrors(prev => {
+      if (!prev.has(issueNumber)) return prev;
+      const next = new Map(prev);
+      next.delete(issueNumber);
+      return next;
+    });
+
     try {
-      await api.post('teams/launch', { issueNumber, issueTitle: title });
-      // Re-fetch tree so activeTeam info updates
-      await fetchTree();
+      await api.post('teams/launch', {
+        issueNumber,
+        issueTitle: title,
+        projectId: launchProjectId,
+      });
+      // Don't immediately remove from launchingIssues — let it persist
+      // so the user sees feedback until the tree refreshes with the active team badge.
+      setTimeout(() => {
+        setLaunchingIssues(prev => {
+          const next = new Set(prev);
+          next.delete(issueNumber);
+          return next;
+        });
+        fetchTree();
+      }, 5000);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[IssueTree] Failed to launch team for #${issueNumber}:`, message);
+      // Remove from launching state immediately on error
+      setLaunchingIssues(prev => {
+        const next = new Set(prev);
+        next.delete(issueNumber);
+        return next;
+      });
+      // Show error inline on the tree node
+      setLaunchErrors(prev => {
+        const next = new Map(prev);
+        next.set(issueNumber, message);
+        return next;
+      });
+      // Auto-clear error after 5 seconds
+      setTimeout(() => {
+        setLaunchErrors(prev => {
+          const next = new Map(prev);
+          next.delete(issueNumber);
+          return next;
+        });
+      }, 5000);
     }
-  }, [api, fetchTree]);
+  }, [api, fetchTree, launchProjectId, activeProjects.length]);
 
   // -------------------------------------------------------------------------
   // Loading state
@@ -197,6 +279,8 @@ export function IssueTreeView() {
                 node={node}
                 depth={0}
                 onLaunch={handleLaunch}
+                launchingIssues={launchingIssues}
+                launchErrors={launchErrors}
               />
             ))}
           </div>

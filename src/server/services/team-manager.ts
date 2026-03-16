@@ -14,6 +14,7 @@ import fs from 'fs';
 import config from '../config.js';
 import { getDatabase } from '../db.js';
 import { sseBroker } from './sse-broker.js';
+import { findGitBash } from '../utils/find-git-bash.js';
 import type { Team } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -48,7 +49,6 @@ export class TeamManager {
     issueTitle?: string,
     prompt?: string,
   ): Promise<Team> {
-    console.log(`[TeamManager] launch() called: projectId=${projectId}, issue=#${issueNumber}`);
     const db = getDatabase();
 
     // Look up project to get repo_path, github_repo, name
@@ -56,6 +56,8 @@ export class TeamManager {
     if (!project) {
       throw new Error(`Project ${projectId} not found`);
     }
+
+    console.log(`[TeamManager] Launch started: project=${project.name} issue=#${issueNumber}`);
 
     // Derive a slug from project name (lowercase, alphanumeric + hyphens)
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -76,7 +78,46 @@ export class TeamManager {
       relaunchTeamId = existing.id;
     }
 
-    // 1. Create git worktree in the PROJECT's repo (if it doesn't exist)
+    // ── Step 1: Insert or reuse team record in DB (status: queued) ──
+    // Team appears in FleetGrid immediately at this point.
+    const now = new Date().toISOString();
+    let team: Team;
+
+    if (relaunchTeamId !== null) {
+      // Relaunch: reset the existing terminal team record
+      console.log(`[TeamManager] Relaunching existing team record: id=${relaunchTeamId}, worktree=${worktreeName}`);
+      db.updateTeam(relaunchTeamId, {
+        status: 'queued',
+        phase: 'init',
+        pid: null,
+        sessionId: null,
+        issueTitle: issueTitle ?? null,
+        launchedAt: now,
+        stoppedAt: null,
+        lastEventAt: null,
+      });
+      team = db.getTeam(relaunchTeamId)!;
+    } else {
+      // Fresh launch: insert new team record
+      console.log(`[TeamManager] Inserting team record: worktree=${worktreeName}, branch=${branchName}`);
+      team = db.insertTeam({
+        projectId,
+        issueNumber,
+        issueTitle: issueTitle ?? null,
+        worktreeName,
+        branchName,
+        status: 'queued',
+        phase: 'init',
+        launchedAt: now,
+      });
+    }
+
+    console.log(`[TeamManager] Team queued: id=${team.id}, status=queued, relaunch=${relaunchTeamId !== null}`);
+
+    // Broadcast immediately so the team appears in the grid right away
+    this.broadcastSnapshot();
+
+    // ── Step 2: Create git worktree in the PROJECT's repo ──
     if (!fs.existsSync(worktreeAbsPath)) {
       try {
         execSync(
@@ -92,12 +133,21 @@ export class TeamManager {
           );
         } catch (err2: unknown) {
           const msg = err2 instanceof Error ? err2.message : String(err2);
+          console.error(`[TeamManager] ERROR: Worktree creation failed for team ${team.id}: ${msg}`);
+          db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
+          this.broadcastSnapshot();
           throw new Error(`Failed to create worktree: ${msg}`);
         }
       }
     }
 
-    // 2. Copy hook scripts from FC's own hooks/ directory into worktree
+    console.log(`[TeamManager] Worktree created: ${worktreeName} at ${worktreeAbsPath}`);
+
+    // Update team status to launching now that worktree exists
+    db.updateTeam(team.id, { status: 'launching' });
+    this.broadcastSnapshot();
+
+    // ── Step 3: Copy hook scripts from FC's own hooks/ directory into worktree ──
     const hookSrcDir = config.fcHooksDir;
     const hookDestDir = path.join(worktreeAbsPath, config.hookDir);
 
@@ -118,7 +168,9 @@ export class TeamManager {
       }
     }
 
-    // 3. Generate settings.json from example
+    console.log(`[TeamManager] Hooks copied to worktree`);
+
+    // Generate settings.json from example
     const settingsExamplePath = path.join(hookSrcDir, 'settings.json.example');
     const settingsDestDir = path.join(worktreeAbsPath, '.claude');
     const settingsDestPath = path.join(settingsDestDir, 'settings.json');
@@ -129,42 +181,7 @@ export class TeamManager {
       fs.copyFileSync(settingsExamplePath, settingsDestPath);
     }
 
-    // 4. Insert or reuse team record in DB (with projectId)
-    const now = new Date().toISOString();
-    let team: Team;
-
-    if (relaunchTeamId !== null) {
-      // Relaunch: reset the existing terminal team record
-      console.log(`[TeamManager] Relaunching existing team record: id=${relaunchTeamId}, worktree=${worktreeName}`);
-      db.updateTeam(relaunchTeamId, {
-        status: 'launching',
-        phase: 'init',
-        pid: null,
-        sessionId: null,
-        issueTitle: issueTitle ?? null,
-        launchedAt: now,
-        stoppedAt: null,
-        lastEventAt: null,
-      });
-      team = db.getTeam(relaunchTeamId)!;
-    } else {
-      // Fresh launch: insert new team record
-      console.log(`[TeamManager] Inserting team record: worktree=${worktreeName}, branch=${branchName}`);
-      team = db.insertTeam({
-        projectId,
-        issueNumber,
-        issueTitle: issueTitle ?? null,
-        worktreeName,
-        branchName,
-        status: 'launching',
-        phase: 'init',
-        launchedAt: now,
-      });
-    }
-
-    console.log(`[TeamManager] Team ready: id=${team.id}, status=${team.status}, relaunch=${relaunchTeamId !== null}`);
-
-    // 5. Spawn Claude Code process
+    // ── Step 4: Spawn Claude Code process ──
     const resolvedPrompt = prompt || `${config.defaultPrompt} ${issueNumber}`;
     const args = ['--worktree', worktreeName, resolvedPrompt];
 
@@ -172,16 +189,27 @@ export class TeamManager {
       args.unshift('--dangerously-skip-permissions');
     }
 
+    // Build spawn environment — inherit everything from the server process
+    // and auto-detect Git Bash so Claude Code can find it on Windows.
+    const spawnEnv: Record<string, string | undefined> = {
+      ...process.env,
+      FLEET_TEAM_ID: worktreeName,
+      FLEET_PROJECT_ID: String(projectId),
+      FLEET_GITHUB_REPO: project.githubRepo ?? '',
+    };
+    const gitBash = findGitBash();
+    if (gitBash) {
+      spawnEnv['CLAUDE_CODE_GIT_BASH_PATH'] = gitBash;
+      console.log(`[TeamManager] CLAUDE_CODE_GIT_BASH_PATH=${gitBash}`);
+    }
+
+    console.log(`[TeamManager] Spawning: ${config.claudeCmd} ${args.join(' ')}`);
+
     const child = spawn(config.claudeCmd, args, {
       cwd: project.repoPath,
-      env: {
-        ...process.env,
-        FLEET_TEAM_ID: worktreeName,
-        FLEET_PROJECT_ID: String(projectId),
-        FLEET_GITHUB_REPO: project.githubRepo ?? '',
-      },
+      env: spawnEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // On Windows, use shell to resolve commands in PATH
+      // On Windows, use shell so cmd.exe resolves commands in PATH
       shell: process.platform === 'win32',
       // Detach so parent can exit without killing children (if needed)
       detached: false,
@@ -189,25 +217,26 @@ export class TeamManager {
 
     const pid = child.pid;
     if (pid === undefined) {
-      console.error(`[TeamManager] Spawn failed for team ${team.id}: no PID returned`);
+      console.error(`[TeamManager] ERROR: spawn failed for team ${team.id}: no PID returned`);
       db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
       this.broadcastSnapshot();
       throw new Error('Failed to spawn Claude Code process — no PID returned');
     }
 
-    console.log(`[TeamManager] Process spawned: team=${team.id}, pid=${pid}`);
+    console.log(`[TeamManager] Process spawned: PID ${pid}`);
 
-    // Update team with PID
+    // Update team with PID (status stays 'launching' until first event)
     db.updateTeam(team.id, { pid });
+    this.broadcastSnapshot();
 
     // Store child process reference
     this.childProcesses.set(team.id, child);
 
-    // 6. Set up output capture
+    // Set up output capture
     this.initOutputBuffer(team.id);
     this.captureOutput(team.id, child);
 
-    // 7. Handle process exit
+    // Handle process exit
     child.on('exit', (code, signal) => {
       console.log(`[TeamManager] Process exited for team ${team.id} (code=${code}, signal=${signal})`);
       this.childProcesses.delete(team.id);
@@ -235,7 +264,7 @@ export class TeamManager {
     });
 
     child.on('error', (err) => {
-      console.error(`[TeamManager] Process error for team ${team.id}:`, err);
+      console.error(`[TeamManager] ERROR: process error for team ${team.id}:`, err.message);
       this.childProcesses.delete(team.id);
 
       const currentTeam = db.getTeam(team.id);
@@ -258,15 +287,12 @@ export class TeamManager {
       }
     });
 
-    // 8. Broadcast launch event
+    // Broadcast launch event
     sseBroker.broadcast(
       'team_launched',
       { team_id: team.id, issue_number: issueNumber, project_id: projectId },
       team.id,
     );
-
-    // 9. Broadcast full snapshot so all SSE clients refresh their team list
-    this.broadcastSnapshot();
 
     // Return fresh team record
     return db.getTeam(team.id)!;
@@ -346,14 +372,22 @@ export class TeamManager {
       stoppedAt: null,
     });
 
+    // Build spawn environment with Git Bash auto-detection (same as launch)
+    const resumeEnv: Record<string, string | undefined> = {
+      ...process.env,
+      FLEET_TEAM_ID: team.worktreeName,
+      FLEET_PROJECT_ID: String(project.id),
+      FLEET_GITHUB_REPO: project.githubRepo ?? '',
+    };
+    const resumeGitBash = findGitBash();
+    if (resumeGitBash) {
+      resumeEnv['CLAUDE_CODE_GIT_BASH_PATH'] = resumeGitBash;
+      console.log(`[TeamManager] Resume: CLAUDE_CODE_GIT_BASH_PATH=${resumeGitBash}`);
+    }
+
     const child = spawn(config.claudeCmd, args, {
       cwd: project.repoPath,
-      env: {
-        ...process.env,
-        FLEET_TEAM_ID: team.worktreeName,
-        FLEET_PROJECT_ID: String(project.id),
-        FLEET_GITHUB_REPO: project.githubRepo ?? '',
-      },
+      env: resumeEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
       detached: false,

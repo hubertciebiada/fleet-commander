@@ -1,10 +1,9 @@
 // =============================================================================
-// Fleet Commander — Project Cleanup Service
+// Fleet Commander — Project Cleanup Service (v2: preview + selective confirm)
 // =============================================================================
-// Removes orphan git worktrees, stale signal files, zombie processes, and
-// prunes git worktree references.  Modelled after the manual cleanup script
-// at itsg-kea/scripts/cleanup-claude.sh, but integrated into the Fleet
-// Commander server and scoped per-project.
+// Two-phase cleanup:
+//   1. getCleanupPreview() — scans and returns what WOULD be cleaned (dry run)
+//   2. executeCleanup()    — removes only the items the user confirmed
 // =============================================================================
 
 import { execSync } from 'child_process';
@@ -12,73 +11,30 @@ import fs from 'fs';
 import path from 'path';
 import { getDatabase } from '../db.js';
 import config from '../config.js';
-import type { CleanupResult } from '../../shared/types.js';
+import type { CleanupItem, CleanupPreview, CleanupResult } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
-// Signal file patterns to clean from worktrees
-// ---------------------------------------------------------------------------
-
-const SIGNAL_FILE_PATTERNS = [
-  '.fleet-pm-message',
-  /^\.pr-watcher-/,
-];
-
-// ---------------------------------------------------------------------------
-// Helpers
+// Preview (dry run)
 // ---------------------------------------------------------------------------
 
 /**
- * Check whether a process with the given PID is still alive.
+ * Scan a project and return what WOULD be cleaned, without touching anything.
  */
-function isProcessAlive(pid: number): boolean {
-  try {
-    if (process.platform === 'win32') {
-      const result = execSync(`tasklist /FI "PID eq ${pid}" /NH`, {
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: 'pipe',
-      });
-      return result.includes(String(pid));
-    } else {
-      process.kill(pid, 0);
-      return true;
-    }
-  } catch {
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Main cleanup function
-// ---------------------------------------------------------------------------
-
-/**
- * Clean up a single project: remove orphan worktrees, signal files, fix
- * zombie team records, and prune stale git references.
- */
-export async function cleanupProject(projectId: number): Promise<CleanupResult> {
+export function getCleanupPreview(projectId: number): CleanupPreview {
   const db = getDatabase();
   const project = db.getProject(projectId);
-  if (!project) {
-    throw new Error(`Project ${projectId} not found`);
-  }
+  if (!project) throw new Error('Project not found');
 
-  const result: CleanupResult = {
-    worktreesRemoved: [],
-    signalFilesRemoved: [],
-    staleDirsRemoved: [],
-    branchesPruned: [],
-    zombiesFixed: 0,
-    staleTeamsCleaned: 0,
-    errors: [],
-  };
+  const items: CleanupItem[] = [];
+  const repoPath = project.repoPath;
 
-  const worktreeBaseDir = path.join(project.repoPath, config.worktreeDir);
+  // Derive project slug (same convention used by team-manager)
+  const slug = project.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 
-  // Derive the slug used for naming worktrees in this project
-  const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-  // Build set of worktree names that are tracked by active teams in the DB
+  // Build set of worktree names belonging to active teams
   const allTeams = db.getTeams({ projectId });
   const activeStatuses = ['queued', 'launching', 'running', 'idle', 'stuck'];
   const activeWorktreeNames = new Set(
@@ -86,206 +42,205 @@ export async function cleanupProject(projectId: number): Promise<CleanupResult> 
       .filter((t) => activeStatuses.includes(t.status))
       .map((t) => t.worktreeName),
   );
-  // -------------------------------------------------------------------
-  // 1. Find and remove orphan worktrees
-  // -------------------------------------------------------------------
-  // An "orphan" worktree is one that exists on disk (in .claude/worktrees/)
-  // but has no corresponding active team in the database.
 
-  if (fs.existsSync(worktreeBaseDir)) {
-    let dirs: string[];
+  const worktreeDir = path.join(repoPath, config.worktreeDir);
+
+  // -------------------------------------------------------------------
+  // 1. Scan worktrees directory for orphans + finished teams
+  // -------------------------------------------------------------------
+  if (fs.existsSync(worktreeDir)) {
+    let dirs: fs.Dirent[];
     try {
-      dirs = fs.readdirSync(worktreeBaseDir);
-    } catch (err) {
-      result.errors.push(`Failed to read worktree directory: ${err}`);
+      dirs = fs.readdirSync(worktreeDir, { withFileTypes: true });
+    } catch {
       dirs = [];
     }
 
     for (const dir of dirs) {
-      const dirPath = path.join(worktreeBaseDir, dir);
-
-      // Only consider directories
-      try {
-        if (!fs.statSync(dirPath).isDirectory()) continue;
-      } catch {
-        continue;
-      }
+      if (!dir.isDirectory()) continue;
+      const dirName = dir.name;
+      const fullPath = path.join(worktreeDir, dirName);
 
       // Only consider dirs matching this project's naming convention
-      if (!dir.startsWith(`${slug}-`) && !dir.startsWith('kea-')) continue;
+      if (!dirName.startsWith(`${slug}-`) && !dirName.startsWith('kea-')) continue;
 
-      // Skip if there's an active team using this worktree
-      if (activeWorktreeNames.has(dir)) continue;
+      // Skip worktrees belonging to active teams
+      if (activeWorktreeNames.has(dirName)) continue;
 
-      // This is an orphan — try to remove via git worktree remove
-      try {
-        execSync(`git -C "${project.repoPath}" worktree remove --force "${config.worktreeDir}/${dir}"`, {
-          encoding: 'utf-8',
-          stdio: 'pipe',
-          timeout: 15000,
+      // Check DB for this worktree
+      const team = db.getTeamByWorktree(dirName);
+
+      if (!team) {
+        items.push({
+          type: 'worktree',
+          name: dirName,
+          path: fullPath.replace(/\\/g, '/'),
+          reason: 'Not tracked in database (orphan)',
         });
-        result.worktreesRemoved.push(dir);
-      } catch {
-        // git worktree remove failed — try manual removal + prune
-        try {
-          fs.rmSync(dirPath, { recursive: true, force: true });
-          result.staleDirsRemoved.push(dir);
-        } catch (err) {
-          result.errors.push(`Failed to remove orphan dir ${dir}: ${err}`);
-        }
+      } else if (['done', 'failed'].includes(team.status)) {
+        items.push({
+          type: 'worktree',
+          name: dirName,
+          path: fullPath.replace(/\\/g, '/'),
+          reason: `Team status: ${team.status}`,
+        });
       }
-    }
-  }
+      // Active teams are never listed
 
-  // -------------------------------------------------------------------
-  // 2. Clean signal files in remaining worktrees
-  // -------------------------------------------------------------------
-
-  if (fs.existsSync(worktreeBaseDir)) {
-    let dirs: string[];
-    try {
-      dirs = fs.readdirSync(worktreeBaseDir);
-    } catch {
-      dirs = [];
-    }
-
-    for (const dir of dirs) {
-      const dirPath = path.join(worktreeBaseDir, dir);
-      try {
-        if (!fs.statSync(dirPath).isDirectory()) continue;
-      } catch {
-        continue;
-      }
-
-      // Scan for signal files
+      // -----------------------------------------------------------
+      // 2. Check for signal files inside this worktree
+      // -----------------------------------------------------------
       let files: string[];
       try {
-        files = fs.readdirSync(dirPath);
+        files = fs.readdirSync(fullPath);
       } catch {
-        continue;
+        files = [];
       }
 
-      for (const file of files) {
-        const isSignal = SIGNAL_FILE_PATTERNS.some((pattern) => {
-          if (typeof pattern === 'string') return file === pattern;
-          return pattern.test(file);
-        });
+      const signalPatterns = ['.fleet-pm-message'];
+      const prWatcherFiles = files.filter((f) => f.startsWith('.pr-watcher-'));
 
-        if (isSignal) {
-          try {
-            fs.unlinkSync(path.join(dirPath, file));
-            result.signalFilesRemoved.push(`${dir}/${file}`);
-          } catch (err) {
-            result.errors.push(`Failed to remove signal file ${dir}/${file}: ${err}`);
-          }
+      for (const sf of [...signalPatterns, ...prWatcherFiles]) {
+        const sfPath = path.join(fullPath, sf);
+        if (fs.existsSync(sfPath)) {
+          items.push({
+            type: 'signal_file',
+            name: `${dirName}/${sf}`,
+            path: sfPath.replace(/\\/g, '/'),
+            reason: 'Stale signal file',
+          });
         }
       }
     }
   }
 
   // -------------------------------------------------------------------
-  // 3. Prune git worktrees (cleans stale references)
+  // 3. Check for stale worktree branches (branch exists, worktree gone)
   // -------------------------------------------------------------------
-
   try {
-    execSync(`git -C "${project.repoPath}" worktree prune`, {
-      encoding: 'utf-8',
-      stdio: 'pipe',
-      timeout: 10000,
-    });
-  } catch (err) {
-    result.errors.push(`git worktree prune failed: ${err}`);
-  }
-
-  // -------------------------------------------------------------------
-  // 4. Clean stale worktree branches (worktree-{slug}-* without a
-  //    linked worktree)
-  // -------------------------------------------------------------------
-
-  try {
-    // Get branches that ARE linked to active worktrees
-    const activeWtBranches = new Set<string>();
-    try {
-      const porcelain = execSync(`git -C "${project.repoPath}" worktree list --porcelain`, {
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 10000,
-      });
-      for (const line of porcelain.split('\n')) {
-        if (line.startsWith('branch refs/heads/')) {
-          activeWtBranches.add(line.slice('branch refs/heads/'.length).trim());
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    // List local branches matching the worktree pattern
     const branchPrefix = `worktree-${slug}-`;
-    const branchOutput = execSync(`git -C "${project.repoPath}" branch --list "${branchPrefix}*"`, {
-      encoding: 'utf-8',
-      stdio: 'pipe',
-      timeout: 10000,
-    });
+    const branchOutput = execSync(
+      `git -C "${repoPath}" branch --list "${branchPrefix}*"`,
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 10000 },
+    );
 
     for (const rawLine of branchOutput.split('\n')) {
       const branch = rawLine.replace(/^[\s*]+/, '').trim();
       if (!branch) continue;
 
-      // Skip if actively linked to a worktree
-      if (activeWtBranches.has(branch)) continue;
-
-      try {
-        execSync(`git -C "${project.repoPath}" branch -D "${branch}"`, {
-          encoding: 'utf-8',
-          stdio: 'pipe',
-          timeout: 10000,
+      const worktreeName = branch.replace('worktree-', '');
+      const worktreeExists = fs.existsSync(path.join(worktreeDir, worktreeName));
+      if (!worktreeExists) {
+        items.push({
+          type: 'stale_branch',
+          name: branch,
+          path: branch,
+          reason: 'Branch without worktree',
         });
-        result.branchesPruned.push(branch);
-      } catch (err) {
-        result.errors.push(`Failed to delete branch ${branch}: ${err}`);
+      }
+    }
+
+    // Also check legacy kea-* pattern
+    const keaOutput = execSync(
+      `git -C "${repoPath}" branch --list "worktree-kea-*"`,
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 10000 },
+    );
+
+    for (const rawLine of keaOutput.split('\n')) {
+      const branch = rawLine.replace(/^[\s*]+/, '').trim();
+      if (!branch) continue;
+
+      const worktreeName = branch.replace('worktree-', '');
+      const worktreeExists = fs.existsSync(path.join(worktreeDir, worktreeName));
+      if (!worktreeExists) {
+        // Avoid duplicates (if slug is already "kea")
+        const alreadyListed = items.some(
+          (it) => it.type === 'stale_branch' && it.name === branch,
+        );
+        if (!alreadyListed) {
+          items.push({
+            type: 'stale_branch',
+            name: branch,
+            path: branch,
+            reason: 'Legacy branch without worktree',
+          });
+        }
       }
     }
   } catch {
-    // No matching branches — normal
+    // git command failed — skip branch check
   }
 
-  // -------------------------------------------------------------------
-  // 5. Fix zombie team records
-  // -------------------------------------------------------------------
-  // Teams in DB with active status but whose PID is dead
+  return { projectId, projectName: project.name, items };
+}
 
-  for (const team of allTeams) {
-    if (!activeStatuses.includes(team.status)) continue;
-    if (!team.pid) continue;
+// ---------------------------------------------------------------------------
+// Execute (confirmed items only)
+// ---------------------------------------------------------------------------
 
-    if (!isProcessAlive(team.pid)) {
-      db.updateTeam(team.id, {
-        status: 'failed',
-        pid: null,
-        stoppedAt: new Date().toISOString(),
+/**
+ * Remove only the items the user selected from the preview.
+ * @param projectId   The project to clean
+ * @param itemPaths   Array of `item.path` values the user checked in the modal
+ */
+export function executeCleanup(
+  projectId: number,
+  itemPaths: string[],
+): CleanupResult {
+  const db = getDatabase();
+  const project = db.getProject(projectId);
+  if (!project) throw new Error('Project not found');
+
+  // Re-scan to get the current preview (ensures we only remove items that
+  // still exist AND were in the original preview — prevents stale requests)
+  const preview = getCleanupPreview(projectId);
+  const allowedPaths = new Set(itemPaths);
+
+  const removed: string[] = [];
+  const failed: { name: string; error: string }[] = [];
+
+  for (const item of preview.items) {
+    if (!allowedPaths.has(item.path)) continue; // User didn't select this one
+
+    try {
+      if (item.type === 'worktree') {
+        // Try git worktree remove first (properly unlinks)
+        try {
+          execSync(
+            `git -C "${project.repoPath}" worktree remove --force "${config.worktreeDir}/${item.name}"`,
+            { encoding: 'utf-8', stdio: 'pipe', timeout: 15000 },
+          );
+        } catch {
+          // Fallback: rm -rf the directory
+          fs.rmSync(item.path, { recursive: true, force: true });
+        }
+        // Prune stale worktree references
+        try {
+          execSync(`git -C "${project.repoPath}" worktree prune`, {
+            stdio: 'pipe',
+            timeout: 5000,
+          });
+        } catch {
+          // non-fatal
+        }
+        removed.push(item.name);
+      } else if (item.type === 'signal_file') {
+        fs.unlinkSync(item.path);
+        removed.push(item.name);
+      } else if (item.type === 'stale_branch') {
+        execSync(
+          `git -C "${project.repoPath}" branch -D "${item.name}"`,
+          { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 },
+        );
+        removed.push(item.name);
+      }
+    } catch (err) {
+      failed.push({
+        name: item.name,
+        error: err instanceof Error ? err.message : String(err),
       });
-      result.zombiesFixed++;
     }
   }
 
-  // -------------------------------------------------------------------
-  // 6. Clean stale team records (done/failed older than 7 days)
-  // -------------------------------------------------------------------
-
-  const STALE_DAYS = 7;
-  const staleCutoff = new Date();
-  staleCutoff.setDate(staleCutoff.getDate() - STALE_DAYS);
-  const staleCutoffIso = staleCutoff.toISOString();
-
-  for (const team of allTeams) {
-    if (team.status !== 'done' && team.status !== 'failed') continue;
-
-    const teamDate = team.stoppedAt || team.launchedAt;
-    if (teamDate && teamDate < staleCutoffIso) {
-      result.staleTeamsCleaned++;
-    }
-  }
-
-  return result;
+  return { removed, failed };
 }

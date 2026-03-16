@@ -10,33 +10,10 @@
  */
 
 import { execSync } from 'child_process';
-import fs from 'fs';
 import { getDatabase } from '../db.js';
 import { sseBroker } from './sse-broker.js';
 import config from '../config.js';
-
-/** Find bash.exe for CLAUDE_CODE_GIT_BASH_PATH on Windows */
-function findGitBash(): string | undefined {
-  if (process.platform !== 'win32') return undefined;
-  if (process.env['CLAUDE_CODE_GIT_BASH_PATH']) return process.env['CLAUDE_CODE_GIT_BASH_PATH'];
-  const candidates = [
-    'C:\\Program Files\\Git\\bin\\bash.exe',
-    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
-    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-    'C:\\Git\\scm\\usr\\bin\\bash.exe',
-    'C:\\Git\\scm\\bin\\bash.exe',
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  // Try to find via where command
-  try {
-    const result = execSync('where bash.exe 2>nul', { encoding: 'utf-8', timeout: 5000 });
-    const first = result.trim().split('\n')[0]?.trim();
-    if (first && fs.existsSync(first)) return first;
-  } catch { /* ignore */ }
-  return undefined;
-}
+import { findGitBash } from '../utils/find-git-bash.js';
 
 // ---------------------------------------------------------------------------
 // Manual snapshot helper (kept for POST /api/usage testing endpoint)
