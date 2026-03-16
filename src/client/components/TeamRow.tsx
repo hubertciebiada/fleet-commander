@@ -1,0 +1,123 @@
+import type { TeamDashboardRow } from '../../shared/types';
+import { StatusBadge } from './StatusBadge';
+import { PRBadge } from './PRBadge';
+import { useApi } from '../hooks/useApi';
+import { useState } from 'react';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Format duration in minutes to "Xh Ym" or "Xm" */
+function formatDuration(minutes: number): string {
+  if (minutes < 0) return '0m';
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+/** Truncate a string to maxLen characters with ellipsis */
+function truncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen - 1) + '\u2026';
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+interface TeamRowProps {
+  team: TeamDashboardRow;
+  selected: boolean;
+  onClick: () => void;
+}
+
+export function TeamRow({ team, selected, onClick }: TeamRowProps) {
+  const api = useApi();
+  const [stopping, setStopping] = useState(false);
+
+  const handleStop = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await api.post(`teams/${team.id}/stop`);
+    } catch {
+      // Ignore — the SSE stream will reflect actual state
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const isActive = team.status === 'running' || team.status === 'stuck' || team.status === 'idle' || team.status === 'launching';
+  const title = team.issueTitle ? truncate(team.issueTitle, 40) : 'Untitled';
+
+  return (
+    <tr
+      onClick={onClick}
+      className={`h-16 border-b border-dark-border cursor-pointer transition-colors group ${
+        selected
+          ? 'bg-dark-accent/10'
+          : 'bg-dark-surface hover:bg-[#1C2128]'
+      }`}
+    >
+      {/* Status */}
+      <td className="px-4 whitespace-nowrap">
+        <StatusBadge status={team.status} />
+      </td>
+
+      {/* Issue */}
+      <td className="px-4 whitespace-nowrap">
+        <span className="text-sm">
+          <span className="text-dark-muted mr-1.5">#{team.issueNumber}</span>
+          <span className="text-dark-text">{title}</span>
+        </span>
+      </td>
+
+      {/* Duration */}
+      <td className="px-4 whitespace-nowrap">
+        <span className="text-sm text-dark-muted">
+          {formatDuration(team.durationMin)}
+        </span>
+      </td>
+
+      {/* Cost */}
+      <td className="px-4 whitespace-nowrap">
+        <span className="text-sm text-dark-muted">
+          ${(team.totalCost ?? 0).toFixed(2)}
+        </span>
+      </td>
+
+      {/* PR */}
+      <td className="px-4 whitespace-nowrap">
+        <PRBadge prNumber={team.prNumber} ciStatus={team.ciStatus} />
+      </td>
+
+      {/* Actions */}
+      <td className="px-4 whitespace-nowrap">
+        <span className="inline-flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          {isActive && (
+            <button
+              onClick={handleStop}
+              disabled={stopping}
+              className="px-2 py-1 text-xs rounded border border-dark-border text-dark-muted hover:text-[#F85149] hover:border-[#F85149]/50 transition-colors disabled:opacity-50"
+              title="Stop team"
+            >
+              {stopping ? 'Stopping\u2026' : 'Stop'}
+            </button>
+          )}
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="px-1.5 py-1 text-xs rounded border border-dark-border text-dark-muted hover:text-dark-accent hover:border-dark-accent/50 transition-colors"
+            title="Send message"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 7.76C0 3.301 3.493 0 8 0s8 3.301 8 7.76-3.493 7.76-8 7.76c-.81 0-1.586-.107-2.316-.307a.639.639 0 0 0-.427.03l-1.588.702a.64.64 0 0 1-.898-.566l-.044-1.423a.639.639 0 0 0-.215-.456C.956 12.108 0 10.092 0 7.76Zm5.546-1.459-2.35 3.728c-.225.358.214.761.551.506l2.525-1.916a.48.48 0 0 1 .578-.002l1.869 1.402a1.2 1.2 0 0 0 1.735-.32l2.35-3.728c.226-.358-.214-.761-.551-.506L9.728 7.381a.48.48 0 0 1-.578.002L7.281 5.98a1.2 1.2 0 0 0-1.735.32Z" />
+            </svg>
+          </button>
+        </span>
+      </td>
+    </tr>
+  );
+}

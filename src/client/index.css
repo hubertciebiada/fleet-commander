@@ -11,3 +11,22 @@
     @apply bg-dark-base text-dark-text;
   }
 }
+
+/* Status badge animations */
+@keyframes pulse-stuck {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.animate-pulse-stuck {
+  animation: pulse-stuck 1.5s ease-in-out infinite;
+}
+
+.animate-blink {
+  animation: blink 1.2s step-end infinite;
+}

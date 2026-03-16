@@ -1,18 +1,8 @@
-// =============================================================================
-// Fleet Commander -- Event Routes (POST /api/events + GET /api/events)
-// =============================================================================
-// Fastify plugin that registers the event collector endpoints.
-// POST receives hook events from Claude Code instances via send_event.sh.
-// GET queries stored events with optional filters.
-// =============================================================================
-
 import type { FastifyInstance, FastifyPluginCallback, FastifyRequest, FastifyReply } from 'fastify';
-import { processEvent, validatePayload, PayloadError } from '../services/event-collector.js';
+import { processEvent, EventCollectorError } from '../services/event-collector.js';
+import type { EventPayload, EventCollectorDb, SseBroker } from '../services/event-collector.js';
 import { getDatabase } from '../db.js';
-
-// ---------------------------------------------------------------------------
-// Query string interface for GET /api/events
-// ---------------------------------------------------------------------------
+import { sseBroker } from '../services/sse-broker.js';
 
 interface EventQuerystring {
   team_id?: string;
@@ -21,38 +11,47 @@ interface EventQuerystring {
   limit?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Plugin
-// ---------------------------------------------------------------------------
-
 const eventsRoutes: FastifyPluginCallback = (
   fastify: FastifyInstance,
   _opts: Record<string, unknown>,
   done: (err?: Error) => void
 ) => {
-  // -------------------------------------------------------------------------
-  // POST /api/events -- receive a hook event
-  // -------------------------------------------------------------------------
+  // POST /api/events — receive a hook event
   fastify.post(
     '/api/events',
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        // Validate the incoming payload
-        const payload = validatePayload(request.body);
+        const body = request.body as Record<string, unknown>;
+        if (!body || typeof body !== 'object' || !body.event || !body.team) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Missing required fields: event, team',
+          });
+        }
 
-        // Process the event (insert, resolve team, apply transitions)
-        const result = processEvent(payload);
+        const payload: EventPayload = {
+          event: String(body.event),
+          team: String(body.team),
+          timestamp: body.timestamp ? String(body.timestamp) : undefined,
+          session_id: body.session_id ? String(body.session_id) : undefined,
+          tool_name: body.tool_name ? String(body.tool_name) : undefined,
+          agent_type: body.agent_type ? String(body.agent_type) : undefined,
+          teammate_name: body.teammate_name ? String(body.teammate_name) : undefined,
+          message: body.message ? String(body.message) : undefined,
+          stop_reason: body.stop_reason ? String(body.stop_reason) : undefined,
+          worktree_root: body.worktree_root ? String(body.worktree_root) : undefined,
+        };
 
+        const db = getDatabase();
+        const result = processEvent(payload, db as unknown as EventCollectorDb, sseBroker as unknown as SseBroker);
         return reply.code(200).send(result);
       } catch (err: unknown) {
-        if (err instanceof PayloadError) {
+        if (err instanceof EventCollectorError) {
           return reply.code(400).send({
             error: 'Bad Request',
             message: err.message,
           });
         }
-
-        // Unexpected errors: log and return 500 but never crash
         request.log.error(err, 'Unexpected error processing event');
         return reply.code(500).send({
           error: 'Internal Server Error',
@@ -62,9 +61,7 @@ const eventsRoutes: FastifyPluginCallback = (
     }
   );
 
-  // -------------------------------------------------------------------------
-  // GET /api/events -- query events with filters
-  // -------------------------------------------------------------------------
+  // GET /api/events — query events with filters
   fastify.get(
     '/api/events',
     async (
@@ -74,41 +71,23 @@ const eventsRoutes: FastifyPluginCallback = (
       try {
         const query = request.query;
         const db = getDatabase();
-
-        // Parse optional filters
         const teamId = query.team_id ? parseInt(query.team_id, 10) : undefined;
         const eventType = query.type || undefined;
         const since = query.since || undefined;
         const limit = query.limit ? parseInt(query.limit, 10) : 100;
 
-        // Validate parsed numbers
         if (query.team_id && (isNaN(teamId!) || teamId! < 1)) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team_id parameter',
-          });
+          return reply.code(400).send({ error: 'Bad Request', message: 'Invalid team_id' });
         }
         if (query.limit && (isNaN(limit) || limit < 1)) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid limit parameter',
-          });
+          return reply.code(400).send({ error: 'Bad Request', message: 'Invalid limit' });
         }
 
-        const events = db.getAllEvents({
-          teamId,
-          eventType,
-          since,
-          limit,
-        });
-
+        const events = db.getAllEvents({ teamId, eventType, since, limit });
         return reply.code(200).send(events);
       } catch (err: unknown) {
         request.log.error(err, 'Unexpected error querying events');
-        return reply.code(500).send({
-          error: 'Internal Server Error',
-          message: 'Failed to query events',
-        });
+        return reply.code(500).send({ error: 'Internal Server Error', message: 'Failed to query events' });
       }
     }
   );

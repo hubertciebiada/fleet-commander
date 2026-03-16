@@ -1,316 +1,226 @@
-// =============================================================================
-// Fleet Commander -- Event Collector Service
-// =============================================================================
-// Business logic for processing incoming hook events from Claude Code instances.
-// Receives parsed payloads, resolves teams, inserts events, and applies state
-// machine transitions per docs/state-machines.md.
-// =============================================================================
-
-import { getDatabase } from '../db.js';
-import type { Team } from '../../shared/types.js';
+/**
+ * Event Collector — Hook event ingestion service
+ *
+ * Receives events from Claude Code hooks (via POST /api/events),
+ * stores them in SQLite, triggers state transitions, and broadcasts
+ * via SSE. Includes throttling for high-volume tool_use events.
+ *
+ * Data flow:
+ *   Claude hook -> send_event.sh -> POST /api/events -> EventCollector
+ *     -> SQLite insert -> state machine evaluation -> SSE broadcast
+ *
+ * Throttling:
+ *   tool_use events from the same team within 5 seconds are deduplicated.
+ *   last_event_at is ALWAYS updated (heartbeat must work for stuck detection).
+ *   Non-tool_use events are NEVER throttled.
+ */
 
 // ---------------------------------------------------------------------------
-// Payload shape (matches hooks/DESIGN.md section 2.2)
+// Types
 // ---------------------------------------------------------------------------
 
+/** Payload received from Claude Code hooks via send_event.sh */
 export interface EventPayload {
-  event: string;
-  team: string;
-  timestamp?: string;
-  session_id?: string;
-  tool_name?: string;
-  agent_type?: string;
+  event: string;         // e.g. "tool_use", "session_start", "session_end", "stop", etc.
+  team: string;          // worktree name, e.g. "kea-763"
+  timestamp?: string;    // ISO 8601
+  session_id?: string;   // Claude Code session UUID
+  tool_name?: string;    // e.g. "Bash", "Read", "Edit"
+  agent_type?: string;   // e.g. "kea-coordinator", "kea-csharp-dev"
   teammate_name?: string;
   message?: string;
   stop_reason?: string;
   worktree_root?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Result type
-// ---------------------------------------------------------------------------
-
+/** Result returned from processEvent */
 export interface ProcessEventResult {
-  event_id: number;
+  event_id: number | null;
   team_id: number;
-  processed: true;
+  processed: boolean;
+}
+
+/** Minimal DB abstraction (subset of methods used by EventCollector) */
+export interface EventCollectorDb {
+  getTeamByWorktree(worktreeName: string): { id: number; status: string; phase: string } | undefined;
+  insertEvent(event: {
+    teamId: number;
+    sessionId: string | null;
+    agentName: string | null;
+    eventType: string;
+    payload: string;
+    createdAt: string;
+  }): number;
+  updateTeam(teamId: number, fields: Record<string, unknown>): void;
+}
+
+/** SSE broker interface for broadcasting events */
+export interface SseBroker {
+  broadcast(event: string, data: unknown): void;
 }
 
 // ---------------------------------------------------------------------------
-// Recognised event types (hooks/DESIGN.md section 2.2)
+// Throttle state — module-level, persists across requests
 // ---------------------------------------------------------------------------
 
-const VALID_EVENT_TYPES = new Set([
-  'session_start',
-  'session_end',
-  'stop',
-  'subagent_start',
-  'subagent_stop',
-  'notification',
-  'tool_use',
-  'tool_error',
-  'pre_compact',
-]);
+/** Track last tool_use event time per team for throttling */
+const lastToolUseByTeam = new Map<string, number>();
+
+/** Throttle window: tool_use events from the same team within this period are deduplicated */
+const TOOL_USE_THROTTLE_MS = 5000; // 5 seconds
 
 // ---------------------------------------------------------------------------
-// Validation
+// Event type normalization
 // ---------------------------------------------------------------------------
 
-export function validatePayload(body: unknown): EventPayload {
-  if (body === null || body === undefined || typeof body !== 'object') {
-    throw new PayloadError('Request body must be a JSON object');
-  }
+/**
+ * Normalize event type strings from hooks to canonical EventType values.
+ * Hooks may send "tool_use", "session_start", etc. (snake_case).
+ * The DB schema uses PascalCase: "ToolUse", "SessionStart", etc.
+ */
+function normalizeEventType(raw: string): string {
+  const map: Record<string, string> = {
+    'tool_use': 'ToolUse',
+    'session_start': 'SessionStart',
+    'session_end': 'SessionEnd',
+    'stop': 'Stop',
+    'subagent_start': 'SubagentStart',
+    'subagent_stop': 'SubagentStop',
+    'notification': 'Notification',
+    'teammate_idle': 'TeammateIdle',
+    'cost_update': 'CostUpdate',
+  };
+  return map[raw.toLowerCase()] || raw;
+}
 
-  const obj = body as Record<string, unknown>;
+// ---------------------------------------------------------------------------
+// Core processing
+// ---------------------------------------------------------------------------
 
-  if (typeof obj.event !== 'string' || obj.event.length === 0) {
-    throw new PayloadError('Missing or invalid "event" field');
-  }
-
-  if (typeof obj.team !== 'string' || obj.team.length === 0) {
-    throw new PayloadError('Missing or invalid "team" field');
-  }
-
-  if (!VALID_EVENT_TYPES.has(obj.event)) {
-    throw new PayloadError(
-      `Unknown event type "${obj.event}". Valid types: ${[...VALID_EVENT_TYPES].join(', ')}`
+/**
+ * Process an incoming event from a Claude Code hook.
+ *
+ * Steps:
+ * 1. Look up team by worktree name
+ * 2. If team is idle or stuck, transition back to running
+ * 3. Always update last_event_at (heartbeat for stuck detection)
+ * 4. Throttle tool_use events (same team, within 5s window)
+ * 5. Insert event into DB
+ * 6. Broadcast via SSE
+ *
+ * @returns ProcessEventResult with event_id (null if deduplicated), team_id, and processed flag
+ */
+export function processEvent(
+  payload: EventPayload,
+  db: EventCollectorDb,
+  sse: SseBroker,
+): ProcessEventResult {
+  // ── Validate required fields ─────────────────────────────────────
+  if (!payload.event || !payload.team) {
+    throw new EventCollectorError(
+      'Missing required fields: event and team',
+      'VALIDATION_ERROR',
     );
   }
 
-  return {
-    event: obj.event,
-    team: obj.team,
-    timestamp: optString(obj.timestamp),
-    session_id: optString(obj.session_id),
-    tool_name: optString(obj.tool_name),
-    agent_type: optString(obj.agent_type),
-    teammate_name: optString(obj.teammate_name),
-    message: optString(obj.message),
-    stop_reason: optString(obj.stop_reason),
-    worktree_root: optString(obj.worktree_root),
-  };
-}
-
-export class PayloadError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'PayloadError';
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Main entry point
-// ---------------------------------------------------------------------------
-
-export function processEvent(payload: EventPayload): ProcessEventResult {
-  const db = getDatabase();
-  const now = new Date().toISOString();
-
-  // 1. Resolve team by worktree name (e.g. "kea-763")
-  let team = db.getTeamByWorktree(payload.team);
-
+  // ── Look up team ─────────────────────────────────────────────────
+  const team = db.getTeamByWorktree(payload.team);
   if (!team) {
-    // Auto-create team row for unknown team names.
-    // Extract issue number from team name (e.g. "kea-763" -> 763)
-    const issueNumber = extractIssueNumber(payload.team);
-    team = db.insertTeam({
-      issueNumber,
-      worktreeName: payload.team,
-      status: 'launching',
-      phase: 'init',
-      sessionId: payload.session_id ?? null,
-      launchedAt: now,
+    throw new EventCollectorError(
+      `Team not found for worktree: ${payload.team}`,
+      'TEAM_NOT_FOUND',
+    );
+  }
+
+  const teamId = team.id;
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+
+  // ── State transition: idle/stuck -> running ──────────────────────
+  // Any event from a team proves it is alive. If the team was
+  // idle or stuck, transition it back to running immediately.
+  // This MUST happen before the throttle check so that even
+  // deduplicated tool_use events trigger the recovery transition.
+  if (team.status === 'idle' || team.status === 'stuck') {
+    db.updateTeam(teamId, {
+      status: 'running',
+      updatedAt: nowIso,
     });
   }
 
-  // 2. Build extra payload JSON (fields not stored in dedicated columns)
-  const extraPayload: Record<string, unknown> = {};
-  if (payload.message) extraPayload.message = payload.message;
-  if (payload.stop_reason) extraPayload.stop_reason = payload.stop_reason;
-  if (payload.worktree_root) extraPayload.worktree_root = payload.worktree_root;
-  if (payload.teammate_name) extraPayload.teammate_name = payload.teammate_name;
-  if (payload.timestamp) extraPayload.timestamp = payload.timestamp;
+  // ── Always update last_event_at (heartbeat) ──────────────────────
+  // Stuck detection depends on last_event_at being fresh.
+  // Even throttled/deduplicated events must update this timestamp
+  // so the stuck detector doesn't falsely flag active teams.
+  db.updateTeam(teamId, { lastEventAt: nowIso });
 
-  const payloadJson =
-    Object.keys(extraPayload).length > 0 ? JSON.stringify(extraPayload) : null;
+  // ── Throttle tool_use events ─────────────────────────────────────
+  if (payload.event === 'tool_use') {
+    const teamKey = payload.team;
+    const lastTime = lastToolUseByTeam.get(teamKey) || 0;
 
-  // 3. Insert event row
-  const event = db.insertEvent({
-    teamId: team.id,
-    sessionId: payload.session_id ?? null,
-    agentName: payload.agent_type ?? payload.teammate_name ?? null,
-    eventType: payload.event,
-    toolName: payload.tool_name ?? null,
-    payload: payloadJson,
+    if (now - lastTime < TOOL_USE_THROTTLE_MS) {
+      // Deduplicated: don't insert into DB or broadcast SSE.
+      // Return 200 with processed: false (not an error, just deduped).
+      return { event_id: null, team_id: teamId, processed: false };
+    }
+
+    // Outside throttle window: allow this event through and record time
+    lastToolUseByTeam.set(teamKey, now);
+  }
+
+  // ── Normalize event type ─────────────────────────────────────────
+  const eventType = normalizeEventType(payload.event);
+
+  // ── Insert event into database ───────────────────────────────────
+  const eventId = db.insertEvent({
+    teamId,
+    sessionId: payload.session_id || null,
+    agentName: payload.agent_type || null,
+    eventType,
+    payload: JSON.stringify(payload),
+    createdAt: payload.timestamp || nowIso,
   });
 
-  // 4. Update teams.last_event_at
-  db.updateTeam(team.id, { lastEventAt: now });
+  // ── Broadcast via SSE ────────────────────────────────────────────
+  sse.broadcast('team_event', {
+    event_id: eventId,
+    team_id: teamId,
+    team: payload.team,
+    event_type: eventType,
+    session_id: payload.session_id || null,
+    agent_name: payload.agent_type || null,
+    tool_name: payload.tool_name || null,
+    timestamp: payload.timestamp || nowIso,
+  });
 
-  // 5. Apply state machine transitions
-  applyTransitions(team, payload, now);
-
-  return {
-    event_id: event.id,
-    team_id: team.id,
-    processed: true,
-  };
+  return { event_id: eventId, team_id: teamId, processed: true };
 }
 
 // ---------------------------------------------------------------------------
-// State machine transitions (docs/state-machines.md section 1 + 5)
+// Error class
 // ---------------------------------------------------------------------------
 
-function applyTransitions(
-  team: Team,
-  payload: EventPayload,
-  now: string
-): void {
-  const db = getDatabase();
-  const eventType = payload.event;
-  const currentStatus = team.status;
+export class EventCollectorError extends Error {
+  code: string;
 
-  switch (eventType) {
-    case 'session_start': {
-      // launching -> running (first event received)
-      if (currentStatus === 'launching') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      // idle -> running (new activity)
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      // stuck -> running (new event after human intervention)
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      // Store session_id on the team
-      if (payload.session_id) {
-        db.updateTeam(team.id, { sessionId: payload.session_id });
-      }
-      break;
-    }
-
-    case 'session_end': {
-      // Check if the team should transition to done.
-      // A session_end on a running/idle team may signal completion.
-      // Only transition to done if the team is running and this is the active session.
-      if (
-        (currentStatus === 'running' || currentStatus === 'idle') &&
-        payload.session_id &&
-        team.sessionId === payload.session_id
-      ) {
-        db.updateTeam(team.id, {
-          status: 'done',
-          stoppedAt: now,
-        });
-      }
-      break;
-    }
-
-    case 'stop': {
-      // Record the stop event. The stop_reason is stored in the event payload.
-      // idle -> keep idle (stop is already passive)
-      // If team was idle, new event keeps it running
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      break;
-    }
-
-    case 'tool_use': {
-      // Heartbeat: just update last_event_at (already done above).
-      // If team was idle, return to running.
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      break;
-    }
-
-    case 'tool_error': {
-      // Update last_event_at (already done). Return idle/stuck to running.
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      break;
-    }
-
-    case 'notification': {
-      // Record notification. If idle, return to running.
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      break;
-    }
-
-    case 'subagent_start': {
-      // Record subagent lifecycle. If idle/stuck, return to running.
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      // launching -> running on first subagent start
-      if (currentStatus === 'launching') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      break;
-    }
-
-    case 'subagent_stop': {
-      // Record subagent lifecycle. If idle, return to running.
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      break;
-    }
-
-    case 'pre_compact': {
-      // Record context pressure signal. If idle, return to running.
-      if (currentStatus === 'idle') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      if (currentStatus === 'stuck') {
-        db.updateTeam(team.id, { status: 'running' });
-      }
-      break;
-    }
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'EventCollectorError';
+    this.code = code;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Utility: clear throttle state (for testing)
 // ---------------------------------------------------------------------------
 
-function extractIssueNumber(teamName: string): number {
-  // "kea-763" -> 763, "kea-1234" -> 1234
-  const match = teamName.match(/(\d+)$/);
-  if (match) {
-    return parseInt(match[1], 10);
-  }
-  // Fallback: use 0 for team names that don't contain a number
-  return 0;
+/** Reset all throttle state. Intended for use in tests only. */
+export function resetThrottleState(): void {
+  lastToolUseByTeam.clear();
 }
 
-function optString(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.length > 0) {
-    return value;
-  }
-  return undefined;
+/** Get the throttle window duration in milliseconds. */
+export function getThrottleMs(): number {
+  return TOOL_USE_THROTTLE_MS;
 }

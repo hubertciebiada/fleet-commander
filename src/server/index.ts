@@ -8,6 +8,8 @@ import eventsRoutes from './routes/events.js';
 import streamRoutes from './routes/stream.js';
 import issueRoutes from './routes/issues.js';
 import teamsRoutes from './routes/teams.js';
+import systemRoutes from './routes/system.js';
+import costsRoutes from './routes/costs.js';
 import { sseBroker } from './services/sse-broker.js';
 import { getIssueFetcher } from './services/issue-fetcher.js';
 import { stuckDetector } from './services/stuck-detector.js';
@@ -40,6 +42,8 @@ async function main() {
   await server.register(streamRoutes);
   await server.register(issueRoutes);
   await server.register(teamsRoutes);
+  await server.register(systemRoutes);
+  await server.register(costsRoutes);
 
   // Static file serving for production builds
   const clientDistPath = path.resolve(__dirname, '..', 'client');

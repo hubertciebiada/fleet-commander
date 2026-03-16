@@ -616,6 +616,48 @@ export class FleetDatabase {
     }));
   }
 
+  /**
+   * Get cost summary broken down by team (all teams).
+   */
+  getCostByTeamBreakdown(): Array<CostSummary & { teamId: number; worktreeName: string }> {
+    const stmt = this.db.prepare(`
+      SELECT
+        c.team_id,
+        t.worktree_name,
+        COALESCE(SUM(c.cost_usd), 0) AS total_cost_usd,
+        COALESCE(SUM(c.input_tokens), 0) AS total_input_tokens,
+        COALESCE(SUM(c.output_tokens), 0) AS total_output_tokens,
+        COUNT(*) AS entry_count
+      FROM cost_entries c
+      JOIN teams t ON t.id = c.team_id
+      GROUP BY c.team_id
+      ORDER BY total_cost_usd DESC
+    `);
+
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => ({
+      teamId: r.team_id as number,
+      worktreeName: r.worktree_name as string,
+      totalCostUsd: r.total_cost_usd as number,
+      totalInputTokens: r.total_input_tokens as number,
+      totalOutputTokens: r.total_output_tokens as number,
+      entryCount: r.entry_count as number,
+    }));
+  }
+
+  /**
+   * Get the file size of the database in bytes.
+   */
+  getDbFileSize(): number {
+    try {
+      const dbPath = this.db.name;
+      const stats = fs.statSync(dbPath);
+      return stats.size;
+    } catch {
+      return 0;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Views / aggregations
   // -------------------------------------------------------------------------

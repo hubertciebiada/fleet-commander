@@ -1,8 +1,9 @@
 // =============================================================================
-// Fleet Commander — Team Routes (CRUD + lifecycle management)
+// Fleet Commander — Team Routes (CRUD + lifecycle + intervention)
 // =============================================================================
 // Fastify plugin that registers all team-related API endpoints:
-// launch, stop, resume, restart, batch-launch, stop-all, list, detail, output.
+// launch, stop, resume, restart, batch-launch, stop-all, list, detail, output,
+// send-message, set-phase, acknowledge.
 // =============================================================================
 
 import type {
@@ -11,8 +12,13 @@ import type {
   FastifyRequest,
   FastifyReply,
 } from 'fastify';
+import fs from 'fs';
+import path from 'path';
 import { getTeamManager } from '../services/team-manager.js';
 import { getDatabase } from '../db.js';
+import { sseBroker } from '../services/sse-broker.js';
+import config from '../config.js';
+import type { TeamPhase } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Request body / param interfaces
@@ -40,6 +46,15 @@ interface TeamIdParams {
 
 interface OutputQuerystring {
   lines?: string;
+}
+
+interface SendMessageBody {
+  message: string;
+}
+
+interface SetPhaseBody {
+  phase: TeamPhase;
+  reason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +470,205 @@ const teamsRoutes: FastifyPluginCallback = (
         return reply.code(200).send(events);
       } catch (err: unknown) {
         request.log.error(err, 'Failed to get team events');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /api/teams/:id/send-message — send a PM message to a team
+  // -------------------------------------------------------------------------
+  fastify.post(
+    '/api/teams/:id/send-message',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams; Body: SendMessageBody }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseInt(request.params.id, 10);
+        if (isNaN(teamId) || teamId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid team ID',
+          });
+        }
+
+        const { message } = request.body || {};
+        if (!message || typeof message !== 'string' || message.trim().length === 0) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'message is required and must be a non-empty string',
+          });
+        }
+
+        const db = getDatabase();
+        const team = db.getTeam(teamId);
+        if (!team) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Team ${teamId} not found`,
+          });
+        }
+
+        // Write .fleet-pm-message file into the worktree directory
+        const worktreePath = path.join(
+          config.repoRoot, config.worktreeDir, team.worktreeName,
+        );
+        const messagePath = path.join(worktreePath, '.fleet-pm-message');
+
+        try {
+          fs.writeFileSync(messagePath, message.trim(), 'utf-8');
+        } catch (fsErr: unknown) {
+          const fsMsg = fsErr instanceof Error ? fsErr.message : String(fsErr);
+          request.log.warn({ worktreePath, error: fsMsg }, 'Failed to write .fleet-pm-message file');
+          // Continue anyway — the command record is still useful
+        }
+
+        // Insert command row in the database
+        const command = db.insertCommand({
+          teamId,
+          message: message.trim(),
+        });
+
+        return reply.code(201).send(command);
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to send message to team');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /api/teams/:id/set-phase — manually set team phase
+  // -------------------------------------------------------------------------
+  fastify.post(
+    '/api/teams/:id/set-phase',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams; Body: SetPhaseBody }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseInt(request.params.id, 10);
+        if (isNaN(teamId) || teamId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid team ID',
+          });
+        }
+
+        const { phase, reason } = request.body || {};
+
+        const validPhases: TeamPhase[] = [
+          'init', 'analyzing', 'implementing', 'reviewing', 'pr', 'done', 'blocked',
+        ];
+        if (!phase || !validPhases.includes(phase)) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: `phase is required and must be one of: ${validPhases.join(', ')}`,
+          });
+        }
+
+        const db = getDatabase();
+        const team = db.getTeam(teamId);
+        if (!team) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Team ${teamId} not found`,
+          });
+        }
+
+        const previousPhase = team.phase;
+        const updated = db.updateTeam(teamId, { phase });
+
+        // Broadcast SSE event for phase change
+        sseBroker.broadcast(
+          'team_status_changed',
+          {
+            team_id: teamId,
+            status: team.status,
+            previous_status: team.status,
+            phase,
+            previous_phase: previousPhase,
+            reason: reason ?? null,
+          },
+          teamId,
+        );
+
+        return reply.code(200).send(updated);
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to set team phase');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /api/teams/:id/acknowledge — clear stuck/failed alert
+  // -------------------------------------------------------------------------
+  fastify.post(
+    '/api/teams/:id/acknowledge',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseInt(request.params.id, 10);
+        if (isNaN(teamId) || teamId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid team ID',
+          });
+        }
+
+        const db = getDatabase();
+        const team = db.getTeam(teamId);
+        if (!team) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Team ${teamId} not found`,
+          });
+        }
+
+        // Only acknowledge stuck or failed teams
+        if (team.status !== 'stuck' && team.status !== 'failed') {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: `Team ${teamId} is not stuck or failed (current status: ${team.status})`,
+          });
+        }
+
+        const previousStatus = team.status;
+
+        // Transition stuck -> idle (so it can be re-evaluated), failed -> done
+        const newStatus = team.status === 'stuck' ? 'idle' : 'done';
+        const updated = db.updateTeam(teamId, {
+          status: newStatus,
+          lastEventAt: new Date().toISOString(),
+        });
+
+        // Broadcast status change
+        sseBroker.broadcast(
+          'team_status_changed',
+          {
+            team_id: teamId,
+            status: newStatus,
+            previous_status: previousStatus,
+          },
+          teamId,
+        );
+
+        return reply.code(200).send(updated);
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to acknowledge team alert');
         return reply.code(500).send({
           error: 'Internal Server Error',
           message: err instanceof Error ? err.message : String(err),
