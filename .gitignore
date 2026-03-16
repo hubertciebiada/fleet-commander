@@ -4,3 +4,5 @@ fleet.db
 .env
 *.log
 .claude/worktrees/
+fleet.db-shm
+fleet.db-wal
