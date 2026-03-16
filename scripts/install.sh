@@ -132,16 +132,45 @@ if [ -z "$BASE_BRANCH" ]; then
 fi
 
 # Copy workflow template with placeholder replacement
-sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+WORKFLOW_TARGET="$PROMPTS_DIR/fleet-workflow.md"
+NEW_WORKFLOW_CONTENT=$(sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
     -e "s|{{project_slug}}|$project_slug|g" \
     -e "s|{{BASE_BRANCH}}|$BASE_BRANCH|g" \
-    "$FC_ROOT/templates/workflow.md" > "$PROMPTS_DIR/fleet-workflow.md"
-echo "  Installed workflow template to $PROMPTS_DIR/fleet-workflow.md"
+    "$FC_ROOT/templates/workflow.md")
+
+if [ -f "$WORKFLOW_TARGET" ]; then
+  EXISTING_WORKFLOW_CONTENT=$(cat "$WORKFLOW_TARGET")
+  if [ "$NEW_WORKFLOW_CONTENT" = "$EXISTING_WORKFLOW_CONTENT" ]; then
+    echo "  Workflow template already up to date"
+  else
+    BACKUP="$WORKFLOW_TARGET.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$WORKFLOW_TARGET" "$BACKUP"
+    echo "  ⚠ Backed up existing workflow to $(basename "$BACKUP")"
+    echo "$NEW_WORKFLOW_CONTENT" > "$WORKFLOW_TARGET"
+    echo "  Installed workflow template to $WORKFLOW_TARGET"
+  fi
+else
+  echo "$NEW_WORKFLOW_CONTENT" > "$WORKFLOW_TARGET"
+  echo "  Installed workflow template to $WORKFLOW_TARGET"
+fi
 echo "    PROJECT_NAME=$PROJECT_NAME  project_slug=$project_slug  BASE_BRANCH=$BASE_BRANCH"
 
 # Copy command template (no placeholders needed)
-cp "$FC_ROOT/templates/next-issue.md" "$COMMANDS_DIR/next-issue.md"
-echo "  Installed command to $COMMANDS_DIR/next-issue.md"
+COMMAND_TARGET="$COMMANDS_DIR/next-issue.md"
+if [ -f "$COMMAND_TARGET" ]; then
+  if diff -q "$FC_ROOT/templates/next-issue.md" "$COMMAND_TARGET" > /dev/null 2>&1; then
+    echo "  Command template already up to date"
+  else
+    BACKUP="$COMMAND_TARGET.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$COMMAND_TARGET" "$BACKUP"
+    echo "  ⚠ Backed up existing command to $(basename "$BACKUP")"
+    cp "$FC_ROOT/templates/next-issue.md" "$COMMAND_TARGET"
+    echo "  Installed command to $COMMAND_TARGET"
+  fi
+else
+  cp "$FC_ROOT/templates/next-issue.md" "$COMMAND_TARGET"
+  echo "  Installed command to $COMMAND_TARGET"
+fi
 
 # ── Done ──────────────────────────────────────────────────────────
 echo ""
