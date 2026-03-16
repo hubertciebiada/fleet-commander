@@ -233,16 +233,34 @@ export class TeamManager {
       // ── Interactive mode (Windows): open Claude Code in a new terminal window ──
       const fullCmd = `${config.claudeCmd} ${args.join(' ')}`;
       const windowTitle = `Team ${worktreeName}`;
-      const interactiveChild = spawn(
-        'cmd.exe',
-        ['/c', 'start', `"${windowTitle}"`, 'cmd.exe', '/k', `cd /d "${worktreeAbsPath}" && ${fullCmd}`],
-        {
-          env: spawnEnv,
-          shell: false,
-          detached: true,
-          stdio: 'ignore',
-        },
-      );
+
+      // Build the entire command as a single string for cmd.exe /c.
+      //
+      // Windows `start` syntax: start "title" command args...
+      // CRITICAL: The first quoted string is ALWAYS interpreted as the window
+      // title by `start`. We must pass the full command as one string to
+      // cmd.exe /c, because:
+      //   1. Node's spawn() on Windows auto-quotes arguments containing spaces,
+      //      which double-quotes our already-quoted title (""Team kea-765""),
+      //      causing `start` to misparse it and try to open "kea-765" as a file.
+      //   2. The && in the inner command gets interpreted by the outer cmd.exe
+      //      as a command separator unless the whole thing is properly wrapped.
+      //
+      // Solution: use shell: true (which invokes cmd.exe /c) and pass the
+      // entire start command as a single pre-formatted string. The inner
+      // command that runs inside the new window uses cmd.exe /k with a quoted
+      // command block so && stays inside the new window's context.
+      const innerCommand = `cd /d "${worktreeAbsPath}" && set CLAUDE_CODE_GIT_BASH_PATH=${gitBash || ''} && set FLEET_TEAM_ID=${worktreeName} && set FLEET_PROJECT_ID=${projectId} && ${fullCmd}`;
+      const startCommand = `start "${windowTitle}" cmd.exe /k "${innerCommand}"`;
+
+      console.log(`[TeamManager] Interactive spawn command: ${startCommand}`);
+
+      const interactiveChild = spawn(startCommand, [], {
+        env: spawnEnv,
+        shell: true,
+        detached: true,
+        stdio: 'ignore',
+      });
       interactiveChild.unref();
 
       console.log(`[TeamManager] Interactive window opened for team ${team.id} (worktree: ${worktreeName})`);
