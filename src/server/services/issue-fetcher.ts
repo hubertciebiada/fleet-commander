@@ -4,6 +4,9 @@
 // Fetches issue hierarchy from GitHub using `gh api graphql` via child_process.
 // Caches results in memory with periodic auto-refresh.
 // Enriches issues with active team info from the database.
+//
+// Per-project: issue cache is keyed by projectId. Each project fetches from
+// its own github_repo. The polling loop iterates over all active projects.
 // =============================================================================
 
 import { execSync } from 'child_process';
@@ -53,6 +56,15 @@ interface GraphQLResponse {
     };
   };
   errors?: Array<{ message: string }>;
+}
+
+// ---------------------------------------------------------------------------
+// Per-project cache entry
+// ---------------------------------------------------------------------------
+
+interface ProjectIssueCache {
+  issues: IssueNode[];
+  cachedAt: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,8 +141,8 @@ query GetHierarchy($owner: String!, $repo: String!, $cursor: String) {
 // ---------------------------------------------------------------------------
 
 export class IssueFetcher {
-  private cache: IssueNode[] = [];
-  private cachedAt: string | null = null;
+  // Per-project cache: projectId -> cache entry
+  private cacheByProject: Map<number, ProjectIssueCache> = new Map();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
 
@@ -139,11 +151,23 @@ export class IssueFetcher {
   // -------------------------------------------------------------------------
 
   /**
-   * Full fetch from GitHub. Paginates through all open issues.
-   * Returns the full hierarchy tree.
+   * Full fetch from GitHub for a specific project.
+   * Paginates through all open issues. Returns the full hierarchy tree.
    */
-  fetchIssueHierarchy(): IssueNode[] {
-    const [owner, repo] = this.parseRepo();
+  fetchIssueHierarchy(projectId: number): IssueNode[] {
+    const db = getDatabase();
+    const project = db.getProject(projectId);
+    if (!project) {
+      console.error(`[IssueFetcher] Project ${projectId} not found`);
+      return [];
+    }
+
+    if (!project.githubRepo) {
+      console.error(`[IssueFetcher] Project ${projectId} has no githubRepo configured`);
+      return [];
+    }
+
+    const [owner, repo] = this.parseRepo(project.githubRepo);
     let allNodes: GraphQLIssueNode[] = [];
     let cursor: string | null = null;
     let hasNextPage = true;
@@ -178,36 +202,82 @@ export class IssueFetcher {
     };
     collectChildNumbers(issueTree);
 
-    this.cache = issueTree.filter((issue) => !childNumbers.has(issue.number));
-    this.cachedAt = new Date().toISOString();
+    const rootIssues = issueTree.filter((issue) => !childNumbers.has(issue.number));
 
-    return this.cache;
+    // Update the per-project cache
+    this.cacheByProject.set(projectId, {
+      issues: rootIssues,
+      cachedAt: new Date().toISOString(),
+    });
+
+    return rootIssues;
   }
 
   /**
-   * Returns cached issues. If cache is empty, fetches first.
+   * Fetch issue hierarchies for all active projects.
    */
-  getIssues(): IssueNode[] {
-    if (this.cache.length === 0 && !this.cachedAt) {
-      this.fetchIssueHierarchy();
+  fetchAllProjects(): void {
+    const db = getDatabase();
+    const projects = db.getProjects({ status: 'active' });
+
+    for (const project of projects) {
+      try {
+        this.fetchIssueHierarchy(project.id);
+      } catch (err) {
+        console.error(
+          `[IssueFetcher] Failed to fetch issues for project ${project.id} (${project.name}):`,
+          err instanceof Error ? err.message : err
+        );
+      }
     }
-    return this.cache;
+  }
+
+  /**
+   * Returns cached issues for a project. If cache is empty, fetches first.
+   */
+  getIssues(projectId?: number): IssueNode[] {
+    if (projectId !== undefined) {
+      const cached = this.cacheByProject.get(projectId);
+      if (!cached || (cached.issues.length === 0 && !cached.cachedAt)) {
+        return this.fetchIssueHierarchy(projectId);
+      }
+      return cached.issues;
+    }
+
+    // Legacy: return all cached issues across all projects
+    const allIssues: IssueNode[] = [];
+    for (const cache of this.cacheByProject.values()) {
+      allIssues.push(...cache.issues);
+    }
+    return allIssues;
   }
 
   /**
    * Get a single issue by number from the cache (searches recursively).
+   * Searches across all project caches if projectId is not specified.
    */
-  getIssue(number: number): IssueNode | undefined {
-    return this.findInTree(this.cache, number);
+  getIssue(number: number, projectId?: number): IssueNode | undefined {
+    if (projectId !== undefined) {
+      const cached = this.cacheByProject.get(projectId);
+      if (!cached) return undefined;
+      return this.findInTree(cached.issues, number);
+    }
+
+    // Search all project caches
+    for (const cache of this.cacheByProject.values()) {
+      const found = this.findInTree(cache.issues, number);
+      if (found) return found;
+    }
+    return undefined;
   }
 
   /**
-   * Suggest the next issue to work on.
+   * Suggest the next issue to work on for a specific project.
    * Criteria: Ready status, no active team, not in activeTeamIssues list.
    * Returns the highest priority issue (P0 > P1 > P2 > unlabeled).
    */
-  getNextIssue(activeTeamIssues: number[]): IssueNode | null {
-    const available = this.getAvailableIssues(activeTeamIssues);
+  getNextIssue(activeTeamIssues: number[], projectId?: number): IssueNode | null {
+    const available = this.getAvailableIssues(activeTeamIssues, projectId);
 
     if (available.length === 0) return null;
 
@@ -225,9 +295,10 @@ export class IssueFetcher {
    * Get all issues that have no active team assigned.
    * Filters by Ready board status and excludes issues in activeTeamIssues.
    */
-  getAvailableIssues(activeTeamIssues: number[]): IssueNode[] {
+  getAvailableIssues(activeTeamIssues: number[], projectId?: number): IssueNode[] {
     const activeSet = new Set(activeTeamIssues);
-    const allIssues = this.flattenTree(this.cache);
+    const issues = this.getIssues(projectId);
+    const allIssues = this.flattenTree(issues);
 
     return allIssues.filter((issue) => {
       // Must be open
@@ -248,37 +319,55 @@ export class IssueFetcher {
   }
 
   /**
-   * Force a re-fetch from GitHub.
+   * Force a re-fetch from GitHub for a specific project.
    */
-  refresh(): IssueNode[] {
-    return this.fetchIssueHierarchy();
+  refresh(projectId?: number): IssueNode[] {
+    if (projectId !== undefined) {
+      return this.fetchIssueHierarchy(projectId);
+    }
+
+    // Refresh all projects
+    this.fetchAllProjects();
+    return this.getIssues();
   }
 
   /**
-   * Get the time the cache was last refreshed.
+   * Get the time the cache was last refreshed for a project.
    */
-  getCachedAt(): string | null {
-    return this.cachedAt;
+  getCachedAt(projectId?: number): string | null {
+    if (projectId !== undefined) {
+      return this.cacheByProject.get(projectId)?.cachedAt ?? null;
+    }
+
+    // Return the most recent cachedAt across all projects
+    let latest: string | null = null;
+    for (const cache of this.cacheByProject.values()) {
+      if (cache.cachedAt && (!latest || cache.cachedAt > latest)) {
+        latest = cache.cachedAt;
+      }
+    }
+    return latest;
   }
 
   /**
    * Start the auto-refresh polling timer.
+   * Fetches issues for all active projects on each cycle.
    */
   start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    // Initial fetch
+    // Initial fetch for all active projects
     try {
-      this.fetchIssueHierarchy();
+      this.fetchAllProjects();
     } catch (err) {
       console.error('[IssueFetcher] Initial fetch failed:', err instanceof Error ? err.message : err);
     }
 
-    // Set up polling
+    // Set up polling — fetches for all active projects each cycle
     this.pollTimer = setInterval(() => {
       try {
-        this.fetchIssueHierarchy();
+        this.fetchAllProjects();
       } catch (err) {
         console.error('[IssueFetcher] Polling fetch failed:', err instanceof Error ? err.message : err);
       }
@@ -299,11 +388,14 @@ export class IssueFetcher {
   /**
    * Enrich issue nodes with active team info from the database.
    * Modifies nodes in place and returns the same array.
+   * When projectId is specified, only teams for that project are matched.
    */
-  enrichWithTeamInfo(issues: IssueNode[]): IssueNode[] {
+  enrichWithTeamInfo(issues: IssueNode[], projectId?: number): IssueNode[] {
     try {
       const db = getDatabase();
-      const activeTeams = db.getActiveTeams();
+      const activeTeams = projectId !== undefined
+        ? db.getActiveTeamsByProject(projectId)
+        : db.getActiveTeams();
 
       // Build a map of issue number -> active team
       const teamByIssue = new Map<number, { id: number; status: string }>();
@@ -338,12 +430,12 @@ export class IssueFetcher {
   // -------------------------------------------------------------------------
 
   /**
-   * Parse the configured repo into owner and name.
+   * Parse a github_repo string (e.g. "owner/repo") into [owner, repo].
    */
-  private parseRepo(): [string, string] {
-    const parts = config.githubRepo.split('/');
+  private parseRepo(githubRepo: string): [string, string] {
+    const parts = githubRepo.split('/');
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      console.error(`[IssueFetcher] Invalid githubRepo config: "${config.githubRepo}"`);
+      console.error(`[IssueFetcher] Invalid githubRepo: "${githubRepo}"`);
       return ['unknown', 'unknown'];
     }
     return [parts[0], parts[1]];

@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import path from 'path';
 
-function findGitRoot(): string {
+function findFleetCommanderRoot(): string {
   try {
     return execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
   } catch {
@@ -9,9 +9,24 @@ function findGitRoot(): string {
   }
 }
 
+const fleetCommanderRoot = process.env['FLEET_COMMANDER_ROOT'] || findFleetCommanderRoot();
+
 const config = Object.freeze({
   port: parseInt(process.env['PORT'] || '4680', 10),
-  repoRoot: process.env['FLEET_REPO_ROOT'] || findGitRoot(),
+
+  /** Absolute path to the fleet-commander installation itself */
+  fleetCommanderRoot,
+
+  /**
+   * @deprecated Use per-project repoPath from the projects table instead.
+   * Kept as fallback for services not yet migrated to per-project context.
+   */
+  repoRoot: process.env['FLEET_REPO_ROOT'] || fleetCommanderRoot,
+
+  /**
+   * @deprecated Use per-project githubRepo from the projects table instead.
+   * Kept as fallback for services not yet migrated to per-project context.
+   */
   githubRepo: process.env['FLEET_GITHUB_REPO'] || 'itsg-global-agentic/itsg-kea',
 
   githubPollIntervalMs: parseInt(process.env['FLEET_GITHUB_POLL_MS'] || '30000', 10),
@@ -26,12 +41,15 @@ const config = Object.freeze({
   defaultPrompt: process.env['FLEET_DEFAULT_PROMPT'] || '/next-issue-kea',
   skipPermissions: process.env['FLEET_SKIP_PERMISSIONS'] !== 'false',
 
-  dbPath: process.env['FLEET_DB_PATH'] || path.join(findGitRoot(), 'fleet.db'),
+  dbPath: process.env['FLEET_DB_PATH'] || path.join(fleetCommanderRoot, 'fleet.db'),
 
   logLevel: process.env['LOG_LEVEL'] || 'info',
 
   worktreeDir: '.claude/worktrees',
   hookDir: '.claude/hooks/fleet-commander',
+
+  // FC's own hooks/ directory (source for copying into project worktrees)
+  fcHooksDir: path.join(fleetCommanderRoot, 'hooks'),
 
   outputBufferLines: 500,
   sseHeartbeatMs: 30000,

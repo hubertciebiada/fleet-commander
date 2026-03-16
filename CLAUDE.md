@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude Code agent teams working on GitHub issues in parallel. It replaces manual CLI-based team management (`claude-bonanza.ps1`) with a unified web interface where a PM can launch, monitor, intervene, and resume teams from a single dashboard. The project targets the `itsg-global-agentic/itsg-kea` repository.
+Fleet Commander is a standalone TypeScript web dashboard for orchestrating multiple Claude Code agent teams working on GitHub issues in parallel across multiple repositories. It replaces manual CLI-based team management (`claude-bonanza.ps1`) with a unified web interface where a PM can launch, monitor, intervene, and resume teams from a single dashboard. Each project maps to one repository — Fleet Commander manages them all from one instance.
 
 ## Current State
 
-**Design phase.** The hook infrastructure (10 bash scripts) and MCP server are implemented. The backend server, frontend, database layer, and tests do not exist yet. All design documents are finalized and authoritative.
+**Implemented.** Backend server (Fastify), React frontend, SQLite database, hook infrastructure (10 bash scripts), MCP server, and test suites are all built. Phase 2 work adds multi-project support and usage tracking.
 
 ## Quick Start
 
@@ -28,13 +28,17 @@ Browser (localhost:4680)
   |-- REST API (CRUD, commands)
   v
 Fastify Server (Node.js)
-  |-- Team Manager (spawn/stop/resume via child_process.spawn)
-  |-- GitHub Poller (gh CLI, every 30s for PR/CI status)
+  |-- Projects Manager (multi-repo project registry)
+  |-- Team Manager (per-project spawn/stop/resume via child_process.spawn)
+  |-- GitHub Poller (per-project gh CLI, every 30s for PR/CI status)
   |-- Event Collector (receives hook HTTP POSTs)
+  |-- Usage Tracker (usage % of plan limits)
   |-- MCP Server (fleet_status tool, stdio transport)
   v
 SQLite (fleet.db, WAL mode, better-sqlite3)
 ```
+
+Fleet Commander is a standalone application. Each project is a separate repository (repo path + GitHub remote stored in the `projects` table). Teams are scoped to a project via `project_id`.
 
 Hook events flow from Claude Code instances via `curl POST` to `/api/events`. The dashboard also polls GitHub independently via `gh` CLI for PR and CI status. See design docs for full details.
 
@@ -47,7 +51,7 @@ Hook events flow from Claude Code instances via `curl POST` to `/api/events`. Th
 | Frontend      | React + Vite + Tailwind CSS         | Dark theme default                 |
 | Database      | SQLite + better-sqlite3             | WAL mode, file: `fleet.db`         |
 | Real-time     | SSE (Server-Sent Events)            | EventSource API                    |
-| GitHub API    | `gh` CLI (pre-authenticated)        | NOT Octokit                        |
+| GitHub API    | `gh` CLI (pre-authenticated)        | NOT Octokit; per-project repo      |
 | Process mgmt  | `child_process.spawn`               | Launches Claude Code teams         |
 | Hooks         | POSIX bash scripts + curl           | Fire-and-forget, always exit 0     |
 | MCP           | `@modelcontextprotocol/sdk`         | stdio transport, `fleet_status` tool |
@@ -83,7 +87,7 @@ fleet-commander/
 │   ├── tsconfig.json
 │   ├── src/                # TypeScript source (implemented)
 │   └── dist/               # Compiled JS output
-└── src/                    # (NOT YET CREATED) Backend + frontend source
+└── src/                    # Backend + frontend source
 ```
 
 ## Development Commands
@@ -106,11 +110,14 @@ npm start                 # node dist/server.js
 ## Key Conventions
 
 ### Naming
-- **Team ID** = worktree name = `kea-{ISSUE_NUMBER}` (e.g., `kea-763`)
+- **Team ID** = worktree name = `{project_slug}-{ISSUE_NUMBER}` (e.g., `kea-763`, `billing-42`)
+- **Project slug** = short identifier derived from project name, used as team ID prefix
+- **`project_id`** is required for all team operations (launch, batch launch)
 - **Database columns** use `snake_case`
 - **TypeScript interfaces** use `PascalCase`; fields use `camelCase`
 - **Hook event types** use `snake_case` in payloads (e.g., `tool_use`, `session_start`)
-- **API routes** follow `/api/{resource}` pattern
+- **API routes** follow `/api/{resource}` pattern; `/api/projects` is the top-level resource
+- Each project is a separate repository path — `project.repo_root` is the worktree parent
 
 ### State Machines (follow exactly as defined)
 - **Team status:** `queued -> launching -> running -> idle (5min) -> stuck (15min) -> done/failed`
@@ -140,8 +147,8 @@ const GITHUB_POLL_INTERVAL_SEC = 30;
 
 | Document                     | Covers                                                         |
 |------------------------------|----------------------------------------------------------------|
-| `docs/prd.md`                | Full requirements, architecture diagram, API endpoints, UI     |
-| `docs/prd.md` section 4      | **V1 database schema** (5 tables + 1 view) — use this for implementation |
+| `docs/prd.md`                | Full requirements, architecture diagram, API endpoints, UI (partially updated for Phase 2) |
+| `docs/prd.md` section 4      | **V1 database schema** (5 tables + 1 view); see Amendments for `projects` and `usage_snapshots` |
 | `docs/state-machines.md`     | All 5 FSMs with transition tables, event-to-transition mapping |
 | `docs/data-model.sql`        | Expanded schema (8 tables, 3 views) — reference for future expansion |
 | `docs/types.ts`              | All TypeScript interfaces and enum types (aligned with expanded schema) |
@@ -150,13 +157,16 @@ const GITHUB_POLL_INTERVAL_SEC = 30;
 
 ## Environment Variables
 
-| Variable             | Default                    | Description                                |
-|----------------------|----------------------------|--------------------------------------------|
-| `FLEET_SERVER_URL`   | `http://localhost:4680`    | Dashboard API base URL                     |
-| `FLEET_TEAM_ID`      | (auto-detected)            | Override team ID detection                 |
-| `FLEET_COMMANDER_OFF`| (unset)                    | Set to `1` to disable hook event sending   |
-| `FLEET_TIMEOUT_MS`   | `5000`                     | HTTP timeout for MCP -> dashboard API      |
-| `PORT`               | `4680`                     | Dashboard server port                      |
+| Variable              | Default                    | Description                                |
+|-----------------------|----------------------------|--------------------------------------------|
+| `PORT`                | `4680`                     | Dashboard server port                      |
+| `FLEET_SERVER_URL`    | `http://localhost:4680`    | Dashboard API base URL                     |
+| `FLEET_COMMANDER_ROOT`| (auto-detected)           | Root directory of the Fleet Commander installation |
+| `FLEET_TEAM_ID`       | (auto-detected)           | Override team ID detection                 |
+| `FLEET_COMMANDER_OFF` | (unset)                   | Set to `1` to disable hook event sending   |
+| `FLEET_TIMEOUT_MS`    | `5000`                    | HTTP timeout for MCP -> dashboard API      |
+
+Note: `FLEET_REPO_ROOT` and `FLEET_GITHUB_REPO` are **not** global env vars. Repository root and GitHub remote are per-project fields stored in the `projects` table.
 
 ## Rules for AI Agents
 
@@ -174,7 +184,7 @@ const GITHUB_POLL_INTERVAL_SEC = 30;
 
 7. **Windows compatibility is required.** Test with Git Bash on Windows 10. Avoid Linux-only commands. Use forward slashes in paths within bash scripts.
 
-8. **Team ID format is `kea-{ISSUE_NUMBER}`.** This is the worktree name and the primary identifier across hooks, database, and API.
+8. **Team ID format is `{project_slug}-{ISSUE_NUMBER}`** (e.g., `kea-763`, `billing-42`). The slug comes from the project record. This is the worktree name and the primary identifier across hooks, database, and API.
 
 9. **Port 4680** is the canonical dashboard port. Do not change it.
 
@@ -184,4 +194,20 @@ const GITHUB_POLL_INTERVAL_SEC = 30;
 
 12. **Coexist with existing infrastructure.** Do not modify or replace `pr-watcher-idle.sh`, `bash-worktree-fix.sh`, or other existing hooks. Fleet Commander hooks are additive observers only.
 
-13. **Two schemas exist — use the PRD schema for v1.** The PRD section 4 has a simpler 5-table schema (`teams`, `pull_requests`, `events`, `commands`, `cost_entries` + `v_team_dashboard` view). The file `docs/data-model.sql` has an expanded 8-table schema (adding `issues`, `sessions`, `agents`, `ci_runs`). For v1, implement the PRD schema. The expanded schema in `docs/data-model.sql` and `docs/types.ts` is reference material for future iterations. Note: the PRD includes an `init` phase not present in `docs/state-machines.md` — implement with `init` as the default phase value matching the PRD.
+13. **Two schemas exist — use the PRD schema for v1, extended with `projects` and `usage_snapshots`.** The PRD section 4 has the base schema (`teams`, `pull_requests`, `events`, `commands` + `v_team_dashboard` view). Phase 2 adds the `projects` table (multi-repo) and `usage_snapshots` table (replacing `cost_entries`). The `teams` table gains a `project_id` foreign key. The file `docs/data-model.sql` has an expanded schema for reference. Note: the PRD includes an `init` phase not present in `docs/state-machines.md` — implement with `init` as the default phase value matching the PRD.
+
+14. **Projects are per-repo.** Each project record stores `repo_root` (local path) and `github_repo` (owner/name). Teams are always scoped to a project. Never assume a single global repository.
+
+15. **Usage tracking, not cost tracking.** Track Claude Code usage as a percentage of plan limits (input tokens, output tokens, cache read tokens as % of org quota). Do not track dollar cost amounts. The `usage_snapshots` table replaces `cost_entries`.
+
+## Database Tables
+
+| Table              | Purpose                                                        |
+|--------------------|----------------------------------------------------------------|
+| `projects`         | Multi-repo registry: `id`, `slug`, `name`, `repo_root`, `github_repo`, `default_prompt`, `team_prefix`, `created_at` |
+| `teams`            | Agent teams: includes `project_id` FK to `projects`            |
+| `pull_requests`    | PR status, CI checks, merge state                             |
+| `events`           | Hook events from Claude Code instances                        |
+| `commands`         | PM commands sent to teams                                     |
+| `usage_snapshots`  | Usage tracking: `id`, `team_id`, `project_id`, `timestamp`, `usage_pct`, `input_tokens`, `output_tokens`, `cache_read_tokens` |
+| `v_team_dashboard` | View joining teams, PRs, projects for dashboard display       |

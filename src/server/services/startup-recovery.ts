@@ -5,6 +5,10 @@
 // filesystem state.  Running teams whose PIDs are still alive are kept;
 // dead processes are marked idle or failed.  Orphan worktrees (present on
 // disk but absent from the database) are logged as warnings.
+//
+// Per-project: iterates over all active projects from the DB and scans
+// each project's repo_path for orphan worktrees. Graceful no-op if no
+// projects are configured (fresh install).
 // =============================================================================
 
 import { execSync } from 'child_process';
@@ -18,8 +22,8 @@ import config from '../config.js';
  *
  * 1. Re-evaluate every team that was in an "active" status (queued, launching,
  *    running, idle, stuck) before the server went down.
- * 2. Scan the worktree directory for directories that are not tracked in the
- *    database (orphan worktrees).
+ * 2. For each active project, scan the worktree directory for directories
+ *    that are not tracked in the database (orphan worktrees).
  */
 export async function recoverOnStartup(): Promise<void> {
   const db = getDatabase();
@@ -58,27 +62,42 @@ export async function recoverOnStartup(): Promise<void> {
   }
 
   // -------------------------------------------------------------------
-  // 2. Scan for orphan worktrees (on disk but not in database)
+  // 2. Scan for orphan worktrees per-project
   // -------------------------------------------------------------------
-  const worktreeDir = path.join(config.repoRoot, config.worktreeDir);
+  const projects = db.getProjects({ status: 'active' });
 
-  if (fs.existsSync(worktreeDir)) {
+  if (projects.length === 0) {
+    console.log('[recovery] No active projects configured — skipping worktree scan');
+    return;
+  }
+
+  for (const project of projects) {
+    const worktreeDir = path.join(project.repoPath, config.worktreeDir);
+
+    if (!fs.existsSync(worktreeDir)) {
+      continue;
+    }
+
     let dirs: string[];
     try {
       dirs = fs.readdirSync(worktreeDir);
     } catch (err) {
-      console.warn(`[recovery] Could not read worktree directory: ${worktreeDir}`, err);
-      return;
+      console.warn(`[recovery] Could not read worktree directory for project "${project.name}": ${worktreeDir}`, err);
+      continue;
     }
 
+    // Derive slug from project name for matching worktree directories
+    const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
     for (const dir of dirs) {
-      // Only inspect directories that follow the kea-{N} naming convention.
-      if (!dir.startsWith('kea-')) continue;
+      // Only inspect directories that follow the {slug}-{N} naming convention
+      // or the legacy kea-{N} convention
+      if (!dir.startsWith(`${slug}-`) && !dir.startsWith('kea-')) continue;
 
       const existsInDb = db.getTeamByWorktree(dir);
       if (!existsInDb) {
         console.warn(
-          `[recovery] Orphan worktree found: ${dir} (not in database)`
+          `[recovery] Orphan worktree found in project "${project.name}": ${dir} (not in database)`
         );
       }
     }

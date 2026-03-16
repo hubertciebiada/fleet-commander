@@ -16,6 +16,9 @@ import type {
   TeamDashboardRow,
   TeamStatus,
   TeamPhase,
+  Project,
+  ProjectSummary,
+  ProjectStatus,
 } from '../shared/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,6 +31,7 @@ const __dirname = path.dirname(__filename);
 export interface TeamFilter {
   status?: TeamStatus;
   issueNumber?: number;
+  projectId?: number;
 }
 
 export interface EventFilter {
@@ -40,6 +44,7 @@ export interface EventFilter {
 export interface TeamInsert {
   issueNumber: number;
   issueTitle?: string | null;
+  projectId?: number | null;
   worktreeName: string;
   branchName?: string | null;
   status?: TeamStatus;
@@ -148,6 +153,27 @@ export interface StuckCandidate {
 }
 
 // ---------------------------------------------------------------------------
+// Project input types
+// ---------------------------------------------------------------------------
+
+export interface ProjectInsert {
+  name: string;
+  repoPath: string;
+  githubRepo?: string | null;
+}
+
+export interface ProjectUpdate {
+  name?: string;
+  githubRepo?: string | null;
+  status?: ProjectStatus;
+  hooksInstalled?: boolean;
+}
+
+export interface ProjectFilter {
+  status?: ProjectStatus;
+}
+
+// ---------------------------------------------------------------------------
 // Database class
 // ---------------------------------------------------------------------------
 
@@ -173,8 +199,16 @@ export class FleetDatabase {
   /**
    * Read and execute schema.sql to create all tables, indexes, and views.
    * Idempotent — uses IF NOT EXISTS throughout.
+   * Also runs migrations for existing v1 databases.
    */
   initSchema(): void {
+    // Check if this is an existing v1 database that needs migration
+    const needsMigration = this.needsV2Migration();
+
+    if (needsMigration) {
+      this.migrateToV2();
+    }
+
     // Resolve schema.sql relative to this file.
     // In dev (tsx): __dirname is src/server
     // In compiled (node): __dirname is dist/server/server
@@ -204,6 +238,58 @@ export class FleetDatabase {
   }
 
   /**
+   * Check if a v1 database exists that needs migration to v2.
+   */
+  private needsV2Migration(): boolean {
+    try {
+      const row = this.db.prepare(
+        'SELECT MAX(version) AS version FROM schema_version'
+      ).get() as { version: number } | undefined;
+      const version = row?.version ?? 0;
+      return version === 1;
+    } catch {
+      // schema_version table doesn't exist yet — fresh database
+      return false;
+    }
+  }
+
+  /**
+   * Migrate an existing v1 database to v2 (add projects table, project_id to teams).
+   */
+  private migrateToV2(): void {
+    // Add projects table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        repo_path       TEXT NOT NULL UNIQUE,
+        github_repo     TEXT,
+        status          TEXT NOT NULL DEFAULT 'active',
+        hooks_installed INTEGER NOT NULL DEFAULT 0,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+    `);
+
+    // Add project_id column to teams if it doesn't exist
+    try {
+      this.db.exec('ALTER TABLE teams ADD COLUMN project_id INTEGER REFERENCES projects(id)');
+    } catch {
+      // Column may already exist — ignore
+    }
+
+    // Add index on project_id
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_teams_project ON teams(project_id)');
+
+    // Drop and recreate the view to include project info
+    this.db.exec('DROP VIEW IF EXISTS v_team_dashboard');
+
+    // Insert version 2
+    this.db.exec('INSERT OR IGNORE INTO schema_version (version) VALUES (2)');
+  }
+
+  /**
    * Get the current schema version.
    */
   getSchemaVersion(): number {
@@ -218,19 +304,132 @@ export class FleetDatabase {
   }
 
   // -------------------------------------------------------------------------
+  // Projects
+  // -------------------------------------------------------------------------
+
+  insertProject(data: ProjectInsert): Project {
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare(`
+      INSERT INTO projects (name, repo_path, github_repo, created_at, updated_at)
+      VALUES (@name, @repoPath, @githubRepo, @createdAt, @updatedAt)
+    `);
+
+    const info = stmt.run({
+      name: data.name,
+      repoPath: data.repoPath,
+      githubRepo: data.githubRepo ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return this.getProject(Number(info.lastInsertRowid))!;
+  }
+
+  getProject(id: number): Project | undefined {
+    const stmt = this.db.prepare('SELECT * FROM projects WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapProjectRow(row) : undefined;
+  }
+
+  getProjectByRepoPath(repoPath: string): Project | undefined {
+    const stmt = this.db.prepare('SELECT * FROM projects WHERE repo_path = ?');
+    const row = stmt.get(repoPath) as Record<string, unknown> | undefined;
+    return row ? this.mapProjectRow(row) : undefined;
+  }
+
+  getProjects(filter?: ProjectFilter): Project[] {
+    let sql = 'SELECT * FROM projects';
+    const params: Record<string, unknown> = {};
+
+    if (filter?.status) {
+      sql += ' WHERE status = @status';
+      params.status = filter.status;
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(params) as Record<string, unknown>[];
+    return rows.map((r) => this.mapProjectRow(r));
+  }
+
+  getProjectSummaries(): ProjectSummary[] {
+    const stmt = this.db.prepare(`
+      SELECT
+        p.*,
+        COUNT(t.id) AS team_count,
+        COUNT(CASE WHEN t.status IN ('launching', 'running', 'idle', 'stuck') THEN 1 END) AS active_team_count
+      FROM projects p
+      LEFT JOIN teams t ON t.project_id = p.id
+      GROUP BY p.id
+      ORDER BY p.created_at DESC
+    `);
+
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => ({
+      ...this.mapProjectRow(r),
+      teamCount: r.team_count as number,
+      activeTeamCount: r.active_team_count as number,
+    }));
+  }
+
+  updateProject(id: number, fields: ProjectUpdate): Project | undefined {
+    const setClauses: string[] = [];
+    const params: Record<string, unknown> = { id };
+
+    if (fields.name !== undefined) {
+      setClauses.push('name = @name');
+      params.name = fields.name;
+    }
+    if (fields.githubRepo !== undefined) {
+      setClauses.push('github_repo = @githubRepo');
+      params.githubRepo = fields.githubRepo;
+    }
+    if (fields.status !== undefined) {
+      setClauses.push('status = @status');
+      params.status = fields.status;
+    }
+    if (fields.hooksInstalled !== undefined) {
+      setClauses.push('hooks_installed = @hooksInstalled');
+      params.hooksInstalled = fields.hooksInstalled ? 1 : 0;
+    }
+
+    if (setClauses.length === 0) return this.getProject(id);
+
+    // Always update updated_at
+    setClauses.push("updated_at = datetime('now')");
+
+    const sql = `UPDATE projects SET ${setClauses.join(', ')} WHERE id = @id`;
+    this.db.prepare(sql).run(params);
+    return this.getProject(id);
+  }
+
+  deleteProject(id: number): boolean {
+    const result = this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+    return result.changes > 0;
+  }
+
+  getProjectTeams(projectId: number): TeamDashboardRow[] {
+    const stmt = this.db.prepare('SELECT * FROM v_team_dashboard WHERE project_id = ?');
+    const rows = stmt.all(projectId) as Record<string, unknown>[];
+    return rows.map((r) => this.mapDashboardRow(r));
+  }
+
+  // -------------------------------------------------------------------------
   // Teams
   // -------------------------------------------------------------------------
 
   insertTeam(data: TeamInsert): Team {
     const now = new Date().toISOString();
     const stmt = this.db.prepare(`
-      INSERT INTO teams (issue_number, issue_title, worktree_name, branch_name, status, phase, pid, session_id, pr_number, launched_at, created_at, updated_at)
-      VALUES (@issueNumber, @issueTitle, @worktreeName, @branchName, @status, @phase, @pid, @sessionId, @prNumber, @launchedAt, @createdAt, @updatedAt)
+      INSERT INTO teams (issue_number, issue_title, project_id, worktree_name, branch_name, status, phase, pid, session_id, pr_number, launched_at, created_at, updated_at)
+      VALUES (@issueNumber, @issueTitle, @projectId, @worktreeName, @branchName, @status, @phase, @pid, @sessionId, @prNumber, @launchedAt, @createdAt, @updatedAt)
     `);
 
     const info = stmt.run({
       issueNumber: data.issueNumber,
       issueTitle: data.issueTitle ?? null,
+      projectId: data.projectId ?? null,
       worktreeName: data.worktreeName,
       branchName: data.branchName ?? null,
       status: data.status ?? 'queued',
@@ -271,6 +470,10 @@ export class FleetDatabase {
       conditions.push('issue_number = @issueNumber');
       params.issueNumber = filter.issueNumber;
     }
+    if (filter?.projectId) {
+      conditions.push('project_id = @projectId');
+      params.projectId = filter.projectId;
+    }
 
     if (conditions.length > 0) {
       sql += ' WHERE ' + conditions.join(' AND ');
@@ -287,6 +490,14 @@ export class FleetDatabase {
       "SELECT * FROM teams WHERE status IN ('queued', 'launching', 'running', 'idle', 'stuck') ORDER BY created_at DESC"
     );
     const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => this.mapTeamRow(r));
+  }
+
+  getActiveTeamsByProject(projectId: number): Team[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM teams WHERE project_id = ? AND status IN ('queued', 'launching', 'running', 'idle', 'stuck') ORDER BY created_at DESC"
+    );
+    const rows = stmt.all(projectId) as Record<string, unknown>[];
     return rows.map((r) => this.mapTeamRow(r));
   }
 
@@ -833,11 +1044,25 @@ export class FleetDatabase {
   // Row mappers (snake_case DB rows -> camelCase TypeScript interfaces)
   // -------------------------------------------------------------------------
 
+  private mapProjectRow(row: Record<string, unknown>): Project {
+    return {
+      id: row.id as number,
+      name: row.name as string,
+      repoPath: row.repo_path as string,
+      githubRepo: row.github_repo as string | null,
+      status: row.status as ProjectStatus,
+      hooksInstalled: (row.hooks_installed as number) === 1,
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
+    };
+  }
+
   private mapTeamRow(row: Record<string, unknown>): Team {
     return {
       id: row.id as number,
       issueNumber: row.issue_number as number,
       issueTitle: row.issue_title as string | null,
+      projectId: (row.project_id as number | null) ?? null,
       status: row.status as TeamStatus,
       phase: row.phase as TeamPhase,
       pid: row.pid as number | null,
@@ -924,6 +1149,8 @@ export class FleetDatabase {
       id: row.id as number,
       issueNumber: row.issue_number as number,
       issueTitle: row.issue_title as string | null,
+      projectId: (row.project_id as number | null) ?? null,
+      projectName: (row.project_name as string | null) ?? null,
       status: row.status as TeamStatus,
       phase: row.phase as TeamPhase,
       worktreeName: row.worktree_name as string,

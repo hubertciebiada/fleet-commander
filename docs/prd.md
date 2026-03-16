@@ -1049,3 +1049,66 @@ export const CONFIG = {
 | child_process vs SDK | child_process.spawn | claude-agent-sdk query() | Spawn zachowuje interaktywny tryb Claude (teams, subagents). SDK print mode nie wspiera multi-turn teams. |
 | Rows vs Cards | Rows (64px) | Card grid | Density: 12 teamów widocznych na 1080p. PM chce overview, nie wizualizację. |
 | Phase tracking | Dual (status + phase) | Single status | Rozdziela "czy agent żyje?" (operational) od "na jakim etapie workflow?" (domain). |
+
+---
+
+## Amendments (Phase 2)
+
+### Multi-Project Support
+
+Fleet Commander is a standalone application managing multiple repositories. Each project is a top-level entity that maps to one GitHub repository. The `projects` table stores `repo_root` (local path), `github_repo` (owner/name), `default_prompt`, and `team_prefix` (slug used for team ID generation, e.g., `kea`, `billing`).
+
+Team IDs follow the format `{project_slug}-{ISSUE_NUMBER}` (e.g., `kea-763`, `billing-42`). The `teams` table gains a `project_id` foreign key. All team operations (launch, batch launch) require a `project_id`.
+
+The global environment variables `FLEET_REPO_ROOT` and `FLEET_GITHUB_REPO` are removed. These values are now per-project fields in the `projects` table. `FLEET_COMMANDER_ROOT` replaces them to point to the Fleet Commander installation directory.
+
+```sql
+CREATE TABLE projects (
+  id              INTEGER PRIMARY KEY,
+  slug            TEXT NOT NULL UNIQUE,
+  name            TEXT NOT NULL,
+  repo_root       TEXT NOT NULL,
+  github_repo     TEXT NOT NULL,       -- e.g., 'itsg-global-agentic/itsg-kea'
+  default_prompt  TEXT,
+  team_prefix     TEXT NOT NULL,       -- used in team ID: {prefix}-{issue}
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- teams table gains: project_id INTEGER REFERENCES projects(id)
+```
+
+**API endpoints:**
+- `GET /api/projects` — list all projects
+- `GET /api/projects/:id` — project detail
+- `POST /api/projects` — create project
+- `PUT /api/projects/:id` — update project
+- `DELETE /api/projects/:id` — remove project
+
+### Usage Tracking
+
+Dollar cost tracking (`cost_entries` table, `cost-tracker.ts`, `/api/costs`) is replaced by usage percentage tracking. Fleet Commander now tracks Claude Code usage as a percentage of organization plan limits (input tokens, output tokens, cache read tokens as % of org quota) rather than dollar cost amounts.
+
+```sql
+CREATE TABLE usage_snapshots (
+  id                INTEGER PRIMARY KEY,
+  team_id           INTEGER NOT NULL REFERENCES teams(id),
+  project_id        INTEGER REFERENCES projects(id),
+  timestamp         TEXT NOT NULL DEFAULT (datetime('now')),
+  usage_pct         REAL,              -- overall usage % of plan limit
+  input_tokens      INTEGER DEFAULT 0,
+  output_tokens     INTEGER DEFAULT 0,
+  cache_read_tokens INTEGER DEFAULT 0
+);
+```
+
+**API endpoints (replacing `/api/costs`):**
+- `GET /api/usage` — aggregated usage
+- `GET /api/usage/by-team` — per-team usage breakdown
+- `GET /api/usage/by-day` — daily usage summary
+- `GET /api/usage/current` — current usage percentage
+
+The `v_team_dashboard` view is updated to join through `projects` and use `usage_snapshots` instead of `cost_entries`.
+
+**File renames:**
+- `src/server/routes/costs.ts` -> `src/server/routes/usage.ts`
+- `src/server/services/cost-tracker.ts` -> `src/server/services/usage-tracker.ts`

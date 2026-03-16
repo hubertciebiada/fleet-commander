@@ -2,20 +2,28 @@
 
 ## Overview
 
-Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude Code agent teams working on GitHub issues. The repository currently contains design documents (PRD, state machines, data model, types), implemented hook shell scripts (10 bash scripts including `send_event.sh`), and an MCP server (`fleet-mcp-server`). This task list covers building the complete application: Fastify backend, SQLite database layer, core services, React frontend, and integration/testing.
+Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude Code agent teams working on GitHub issues across multiple repositories. The application includes a Fastify backend, React frontend, SQLite database, hook infrastructure, MCP server, and comprehensive test suites.
 
 **Tech stack:** Fastify + TypeScript + Node.js 20+ | React + Vite + Tailwind CSS | SQLite (better-sqlite3, WAL) | SSE | gh CLI | child_process.spawn
 
-**What already exists:**
-- Hook scripts: `hooks/send_event.sh` + 9 wrapper scripts + `settings.json.example`
-- MCP server: `mcp/src/server.ts`, `dashboard-client.ts`, `detect-team.ts`, `types.ts` (built, with `dist/`)
-- Design docs: `docs/prd.md` (1051 lines), `docs/state-machines.md`, `docs/data-model.sql`, `docs/types.ts`
+---
+
+## Phase 2 Tasks
+
+Multi-project support and usage tracking. See GitHub issues #32-#35.
+
+| Issue | Task | Status |
+|-------|------|--------|
+| #32 | Documentation update for multi-project architecture and usage tracking | In Progress |
+| #33 | Projects entity: DB migration, model, routes, service, project selector UI | Open |
+| #34 | Usage tracking: replace cost tracker with usage snapshots, API endpoints, usage dashboard | Open |
+| #35 | Hook + config migration: hooks resolve project context from worktree path, remove global repo vars | Open |
 
 ---
 
-## Tasks
+## Phase 1 Tasks (Completed)
 
-### T01: Project Scaffolding and Build Configuration
+### T01: Project Scaffolding and Build Configuration [DONE]
 **Priority:** P0
 **Depends on:** none
 **Estimated complexity:** M
@@ -42,7 +50,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T02: SQLite Database Layer
+### T02: SQLite Database Layer [DONE]
 **Priority:** P0
 **Depends on:** T01
 **Estimated complexity:** M
@@ -73,7 +81,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T03: Server Configuration Module
+### T03: Server Configuration Module [DONE]
 **Priority:** P0
 **Depends on:** T01
 **Estimated complexity:** S
@@ -104,7 +112,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T04: Event Collector (POST /api/events + GET /api/events)
+### T04: Event Collector (POST /api/events + GET /api/events) [DONE]
 **Priority:** P0
 **Depends on:** T02, T03
 **Estimated complexity:** M
@@ -137,7 +145,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T05: SSE Broker (Real-time Updates)
+### T05: SSE Broker (Real-time Updates) [DONE]
 **Priority:** P0
 **Depends on:** T01, T03
 **Estimated complexity:** M
@@ -167,7 +175,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T06: Team Manager Service (Spawn/Stop/Resume)
+### T06: Team Manager Service (Spawn/Stop/Resume) [DONE]
 **Priority:** P0
 **Depends on:** T02, T03, T05
 **Estimated complexity:** L
@@ -205,7 +213,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T07: Stuck Detector Service
+### T07: Stuck Detector Service [DONE]
 **Priority:** P1
 **Depends on:** T02, T05
 **Estimated complexity:** S
@@ -232,7 +240,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T08: GitHub Poller Service (PR/CI Status)
+### T08: GitHub Poller Service (PR/CI Status) [DONE]
 **Priority:** P1
 **Depends on:** T02, T03, T05
 **Estimated complexity:** L
@@ -260,7 +268,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T09: Team Intervention Endpoints
+### T09: Team Intervention Endpoints [DONE]
 **Priority:** P1
 **Depends on:** T06
 **Estimated complexity:** M
@@ -293,7 +301,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T10: Issue Hierarchy Service (GraphQL + REST)
+### T10: Issue Hierarchy Service (GraphQL + REST) [DONE]
 **Priority:** P1
 **Depends on:** T02, T03
 **Estimated complexity:** L
@@ -323,7 +331,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T11: React App Shell and Routing
+### T11: React App Shell and Routing [DONE]
 **Priority:** P1
 **Depends on:** T01
 **Estimated complexity:** M
@@ -350,7 +358,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T12: Fleet Grid View (Main Dashboard)
+### T12: Fleet Grid View (Main Dashboard) [DONE]
 **Priority:** P1
 **Depends on:** T11, T06
 **Estimated complexity:** L
@@ -383,7 +391,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T13: TopBar with Summary Pills
+### T13: TopBar with Summary Pills [DONE]
 **Priority:** P1
 **Depends on:** T11, T04
 **Estimated complexity:** S
@@ -401,7 +409,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T14: Team Detail Slide-over Panel
+### T14: Team Detail Slide-over Panel [DONE]
 **Priority:** P1
 **Depends on:** T12, T09
 **Estimated complexity:** L
@@ -427,7 +435,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T15: Issue Tree View
+### T15: Issue Tree View [DONE]
 **Priority:** P2
 **Depends on:** T10, T11
 **Estimated complexity:** M
@@ -451,7 +459,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T16: Cost View
+### T16: Cost View [DONE]
 **Priority:** P2
 **Depends on:** T09, T11
 **Estimated complexity:** M
@@ -473,7 +481,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T17: Install/Uninstall Mechanism
+### T17: Install/Uninstall Mechanism [DONE]
 **Priority:** P1
 **Depends on:** T01, T06
 **Estimated complexity:** M
@@ -515,7 +523,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T18: PR Management Endpoints
+### T18: PR Management Endpoints [DONE]
 **Priority:** P2
 **Depends on:** T08
 **Estimated complexity:** M
@@ -543,7 +551,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T19: MCP Server Dashboard Integration
+### T19: MCP Server Dashboard Integration [DONE]
 **Priority:** P2
 **Depends on:** T04, T09
 **Estimated complexity:** S
@@ -563,7 +571,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T20: Startup Recovery and Worktree Discovery
+### T20: Startup Recovery and Worktree Discovery [DONE]
 **Priority:** P2
 **Depends on:** T02, T06
 **Estimated complexity:** M
@@ -589,7 +597,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T21: Cost Tracking Service
+### T21: Cost Tracking Service [DONE]
 **Priority:** P2
 **Depends on:** T02, T04
 **Estimated complexity:** M
@@ -613,7 +621,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T22: Static File Serving and Production Build
+### T22: Static File Serving and Production Build [DONE]
 **Priority:** P1
 **Depends on:** T01, T11
 **Estimated complexity:** S
@@ -634,7 +642,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T23: Backend Unit Tests
+### T23: Backend Unit Tests [DONE]
 **Priority:** P1
 **Depends on:** T02, T04, T05, T07
 **Estimated complexity:** L
@@ -666,7 +674,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T24: Frontend Unit Tests
+### T24: Frontend Unit Tests [DONE]
 **Priority:** P2
 **Depends on:** T12, T14, T15
 **Estimated complexity:** M
@@ -690,7 +698,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T25: API Integration Tests
+### T25: API Integration Tests [DONE]
 **Priority:** P2
 **Depends on:** T04, T06, T08, T09, T10
 **Estimated complexity:** M
@@ -711,7 +719,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T26: Error Handling and Logging
+### T26: Error Handling and Logging [DONE]
 **Priority:** P1
 **Depends on:** T01, T04, T06
 **Estimated complexity:** M
@@ -734,7 +742,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T27: Event Throttling and Deduplication
+### T27: Event Throttling and Deduplication [DONE]
 **Priority:** P2
 **Depends on:** T04
 **Estimated complexity:** S
@@ -753,7 +761,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T28: Launch Dialog and Batch Launch UI
+### T28: Launch Dialog and Batch Launch UI [DONE]
 **Priority:** P2
 **Depends on:** T06, T12, T15
 **Estimated complexity:** M
@@ -775,7 +783,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T29: End-to-End Smoke Test
+### T29: End-to-End Smoke Test [DONE]
 **Priority:** P2
 **Depends on:** T04, T06, T11, T12, T17
 **Estimated complexity:** M
@@ -807,7 +815,7 @@ Fleet Commander is a TypeScript web dashboard for orchestrating multiple Claude 
 
 ---
 
-### T30: Documentation and Developer Guide
+### T30: Documentation and Developer Guide [DONE]
 **Priority:** P2
 **Depends on:** T17, T22
 **Estimated complexity:** S

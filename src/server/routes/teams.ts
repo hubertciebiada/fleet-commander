@@ -25,12 +25,14 @@ import type { TeamPhase } from '../../shared/types.js';
 // ---------------------------------------------------------------------------
 
 interface LaunchBody {
+  projectId: number;
   issueNumber: number;
   issueTitle?: string;
   prompt?: string;
 }
 
 interface LaunchBatchBody {
+  projectId: number;
   issues: Array<{ number: number; title?: string }>;
   prompt?: string;
   delayMs?: number;
@@ -76,7 +78,14 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const { issueNumber, issueTitle, prompt } = request.body;
+        const { projectId, issueNumber, issueTitle, prompt } = request.body;
+
+        if (!projectId || typeof projectId !== 'number' || projectId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'projectId is required and must be a positive integer',
+          });
+        }
 
         if (!issueNumber || typeof issueNumber !== 'number' || issueNumber < 1) {
           return reply.code(400).send({
@@ -86,7 +95,7 @@ const teamsRoutes: FastifyPluginCallback = (
         }
 
         const manager = getTeamManager();
-        const team = await manager.launch(issueNumber, issueTitle, prompt);
+        const team = await manager.launch(projectId, issueNumber, issueTitle, prompt);
         return reply.code(201).send(team);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -114,7 +123,14 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const { issues, prompt, delayMs } = request.body;
+        const { projectId, issues, prompt, delayMs } = request.body;
+
+        if (!projectId || typeof projectId !== 'number' || projectId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'projectId is required and must be a positive integer',
+          });
+        }
 
         if (!issues || !Array.isArray(issues) || issues.length === 0) {
           return reply.code(400).send({
@@ -134,7 +150,7 @@ const teamsRoutes: FastifyPluginCallback = (
         }
 
         const manager = getTeamManager();
-        const teams = await manager.launchBatch(issues, prompt, delayMs);
+        const teams = await manager.launchBatch(projectId, issues, prompt, delayMs);
         return reply.code(201).send(teams);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -513,10 +529,16 @@ const teamsRoutes: FastifyPluginCallback = (
           });
         }
 
-        // Write .fleet-pm-message file into the worktree directory
-        const worktreePath = path.join(
-          config.repoRoot, config.worktreeDir, team.worktreeName,
-        );
+        // Resolve worktree path from the team's project
+        let worktreePath: string;
+        if (team.projectId) {
+          const project = db.getProject(team.projectId);
+          worktreePath = project
+            ? path.join(project.repoPath, config.worktreeDir, team.worktreeName)
+            : path.join(config.worktreeDir, team.worktreeName);
+        } else {
+          worktreePath = path.join(config.worktreeDir, team.worktreeName);
+        }
         const messagePath = path.join(worktreePath, '.fleet-pm-message');
 
         try {

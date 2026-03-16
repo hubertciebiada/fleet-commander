@@ -5,6 +5,9 @@
 // readiness. Detects new PRs by branch name. Updates the database and
 // broadcasts changes via SSE.
 //
+// Per-project: each team's github_repo is resolved from its project record.
+// Teams in paused/archived projects are skipped during polling.
+//
 // Uses `gh` CLI exclusively (never Octokit) as per project conventions.
 // All gh CLI errors are handled gracefully — a single failed poll never
 // crashes the service.
@@ -70,7 +73,7 @@ class GitHubPoller {
     }
 
     console.log(
-      `[GitHubPoller] Started — polling every ${config.githubPollIntervalMs}ms for repo ${config.githubRepo}`
+      `[GitHubPoller] Started — polling every ${config.githubPollIntervalMs}ms across all active projects`
     );
   }
 
@@ -86,24 +89,48 @@ class GitHubPoller {
   }
 
   /**
-   * Execute a single poll cycle. Iterates over all active teams and
-   * checks their PR / branch status.
+   * Execute a single poll cycle. Iterates over all active projects,
+   * then checks teams within each project.
    */
   poll(): void {
     const db = getDatabase();
+
+    // Get all active projects — skip paused/archived
+    const projects = db.getProjects({ status: 'active' });
+
+    if (projects.length === 0) {
+      // No projects configured — nothing to poll
+      return;
+    }
+
+    // Build a map of projectId -> githubRepo for quick lookup
+    const projectRepoMap = new Map<number, string>();
+    for (const project of projects) {
+      if (project.githubRepo) {
+        projectRepoMap.set(project.id, project.githubRepo);
+      }
+    }
+
     const teams = db.getActiveTeams();
 
     for (const team of teams) {
       try {
+        // Resolve the github repo for this team's project
+        const githubRepo = team.projectId ? projectRepoMap.get(team.projectId) : undefined;
+        if (!githubRepo) {
+          // Team has no project or project is not active — skip
+          continue;
+        }
+
         if (team.prNumber) {
-          this.pollPR(team.prNumber, team.id);
+          this.pollPR(team.prNumber, team.id, githubRepo);
         } else if (team.branchName) {
-          this.detectPR(team.branchName, team.id);
+          this.detectPR(team.branchName, team.id, githubRepo);
         }
       } catch (err) {
         // Log and continue — never let one team's failure stop the others
         console.error(
-          `[GitHubPoller] Error polling team ${team.id} (issue #${team.issueNumber}):`,
+          `[GitHubPoller] Error polling team ${team.id} (issue #${team.issueNumber}, project ${team.projectId}):`,
           err instanceof Error ? err.message : err
         );
       }
@@ -114,10 +141,10 @@ class GitHubPoller {
   // Private: poll an existing PR
   // -------------------------------------------------------------------------
 
-  private pollPR(prNumber: number, teamId: number): void {
+  private pollPR(prNumber: number, teamId: number, githubRepo: string): void {
     // Use gh pr view to get PR status, CI checks, merge state, and auto-merge
     const result = this.execGH(
-      `gh pr view ${prNumber} --repo ${config.githubRepo} ` +
+      `gh pr view ${prNumber} --repo ${githubRepo} ` +
         `--json number,title,state,mergeStateStatus,statusCheckRollup,autoMergeRequest,headRefName`
     );
     if (!result) return; // gh CLI failed — skip this cycle
@@ -191,7 +218,7 @@ class GitHubPoller {
           teamId
         );
         console.log(
-          `[GitHubPoller] PR #${prNumber} updated — state=${state} ci=${ciStatus} merge=${mergeState}`
+          `[GitHubPoller] PR #${prNumber} updated — state=${state} ci=${ciStatus} merge=${mergeState} (repo: ${githubRepo})`
         );
       }
     } else {
@@ -216,7 +243,7 @@ class GitHubPoller {
         teamId
       );
       console.log(
-        `[GitHubPoller] PR #${prNumber} discovered — state=${state} ci=${ciStatus}`
+        `[GitHubPoller] PR #${prNumber} discovered — state=${state} ci=${ciStatus} (repo: ${githubRepo})`
       );
     }
 
@@ -265,9 +292,9 @@ class GitHubPoller {
   // Private: detect a PR for a branch that doesn't have one yet
   // -------------------------------------------------------------------------
 
-  private detectPR(branchName: string, teamId: number): void {
+  private detectPR(branchName: string, teamId: number, githubRepo: string): void {
     const result = this.execGH(
-      `gh pr list --head ${branchName} --repo ${config.githubRepo} --json number --limit 1`
+      `gh pr list --head ${branchName} --repo ${githubRepo} --json number --limit 1`
     );
     if (!result) return; // gh CLI failed — skip
 
@@ -282,7 +309,7 @@ class GitHubPoller {
       const db = getDatabase();
       db.updateTeam(teamId, { prNumber: prs[0]!.number });
       console.log(
-        `[GitHubPoller] Detected PR #${prs[0]!.number} for branch "${branchName}" (team ${teamId})`
+        `[GitHubPoller] Detected PR #${prs[0]!.number} for branch "${branchName}" (team ${teamId}, repo: ${githubRepo})`
       );
     }
   }

@@ -2,11 +2,12 @@
 // Fleet Commander -- Issue Routes (REST endpoints for issue hierarchy)
 // =============================================================================
 // Registered as a Fastify plugin. Provides endpoints for:
-//   GET  /api/issues           — full hierarchy tree (cached)
-//   GET  /api/issues/next      — suggest next issue to work on
-//   GET  /api/issues/available — issues with no active team
-//   GET  /api/issues/:number   — single issue detail
-//   POST /api/issues/refresh   — force re-fetch from GitHub
+//   GET  /api/issues                        — full hierarchy tree (cached, all projects)
+//   GET  /api/issues/next                   — suggest next issue to work on
+//   GET  /api/issues/available              — issues with no active team
+//   GET  /api/issues/:number                — single issue detail
+//   POST /api/issues/refresh                — force re-fetch from GitHub
+//   GET  /api/projects/:projectId/issues    — per-project issue tree
 // =============================================================================
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -17,10 +18,12 @@ import { getDatabase } from '../db.js';
 // Helper: get issue numbers for all active teams from the database
 // ---------------------------------------------------------------------------
 
-function getActiveTeamIssueNumbers(): number[] {
+function getActiveTeamIssueNumbers(projectId?: number): number[] {
   try {
     const db = getDatabase();
-    const activeTeams = db.getActiveTeams();
+    const activeTeams = projectId !== undefined
+      ? db.getActiveTeamsByProject(projectId)
+      : db.getActiveTeams();
     return activeTeams.map((t) => t.issueNumber);
   } catch (err) {
     console.error('[IssueRoutes] Failed to get active teams:', err instanceof Error ? err.message : err);
@@ -34,7 +37,7 @@ function getActiveTeamIssueNumbers(): number[] {
 
 async function issueRoutes(server: FastifyInstance): Promise<void> {
   /**
-   * GET /api/issues — Full hierarchy tree (cached)
+   * GET /api/issues — Full hierarchy tree (cached, all projects)
    * Returns the complete issue tree enriched with active team info.
    */
   server.get('/api/issues', async (_request: FastifyRequest, _reply: FastifyReply) => {
@@ -51,6 +54,48 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
       count: countIssues(cloned),
     };
   });
+
+  /**
+   * GET /api/projects/:projectId/issues — Per-project issue tree
+   * Returns the issue hierarchy for a specific project.
+   */
+  server.get<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/issues',
+    async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
+      const projectId = parseInt(request.params.projectId, 10);
+
+      if (isNaN(projectId) || projectId < 1) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'projectId must be a positive integer',
+        });
+      }
+
+      const db = getDatabase();
+      const project = db.getProject(projectId);
+      if (!project) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: `Project ${projectId} not found`,
+        });
+      }
+
+      const fetcher = getIssueFetcher();
+      const issues = fetcher.getIssues(projectId);
+
+      // Deep clone to avoid mutating the cache when enriching
+      const cloned = structuredClone(issues);
+      fetcher.enrichWithTeamInfo(cloned, projectId);
+
+      return {
+        projectId,
+        projectName: project.name,
+        tree: cloned,
+        cachedAt: fetcher.getCachedAt(projectId),
+        count: countIssues(cloned),
+      };
+    }
+  );
 
   /**
    * GET /api/issues/next — Suggest next issue to work on
@@ -133,7 +178,7 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
 
   /**
    * POST /api/issues/refresh — Force re-fetch from GitHub
-   * Clears the cache and re-fetches the full hierarchy.
+   * Clears the cache and re-fetches the full hierarchy for all projects.
    */
   server.post('/api/issues/refresh', async (_request: FastifyRequest, _reply: FastifyReply) => {
     const fetcher = getIssueFetcher();

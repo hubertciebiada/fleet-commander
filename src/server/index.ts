@@ -12,6 +12,7 @@ import systemRoutes from './routes/system.js';
 import costsRoutes from './routes/costs.js';
 import usageRoutes from './routes/usage.js';
 import prsRoutes from './routes/prs.js';
+import projectsRoutes from './routes/projects.js';
 import { sseBroker } from './services/sse-broker.js';
 import { getIssueFetcher } from './services/issue-fetcher.js';
 import { stuckDetector } from './services/stuck-detector.js';
@@ -49,6 +50,7 @@ async function main() {
   await server.register(costsRoutes);
   await server.register(usageRoutes);
   await server.register(prsRoutes);
+  await server.register(projectsRoutes);
 
   // Static file serving for production builds
   const clientDistPath = path.resolve(__dirname, '..', 'client');

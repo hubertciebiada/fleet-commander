@@ -24,15 +24,37 @@ export type MergeState = 'unknown' | 'clean' | 'behind' | 'blocked' | 'dirty';
 /** Issue board status */
 export type BoardStatus = 'Backlog' | 'Ready' | 'InProgress' | 'Done' | 'Blocked';
 
+/** Project status */
+export type ProjectStatus = 'active' | 'paused' | 'archived';
+
 // ---------------------------------------------------------------------------
 // Core Entities (matching PRD section 4 schema)
 // ---------------------------------------------------------------------------
+
+/** A project representing a local git repository */
+export interface Project {
+  id: number;
+  name: string;
+  repoPath: string;
+  githubRepo: string | null;
+  status: ProjectStatus;
+  hooksInstalled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Project with team count for list view */
+export interface ProjectSummary extends Project {
+  teamCount: number;
+  activeTeamCount: number;
+}
 
 /** A team of agents working on a single issue in a worktree */
 export interface Team {
   id: number;
   issueNumber: number;
   issueTitle: string | null;
+  projectId: number | null;
   status: TeamStatus;
   phase: TeamPhase;
   pid: number | null;
@@ -117,6 +139,8 @@ export interface TeamDashboardRow {
   id: number;
   issueNumber: number;
   issueTitle: string | null;
+  projectId: number | null;
+  projectName: string | null;
   status: TeamStatus;
   phase: TeamPhase;
   worktreeName: string;

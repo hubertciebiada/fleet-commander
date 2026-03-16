@@ -20,7 +20,11 @@ npm run dev          # Development (Fastify + Vite HMR)
 npm start            # Production (port 4680)
 ```
 
-Open http://localhost:4680 in your browser.
+Open http://localhost:4680 in your browser, then:
+
+1. **Add a project** -- provide a repository path and GitHub remote (e.g., `itsg-global-agentic/itsg-kea`)
+2. **Launch teams** against issues in that project
+3. **Monitor** all teams across all projects from the dashboard
 
 ## Installing Hooks into a Target Repo
 
@@ -63,7 +67,8 @@ fleet-commander/
 │   │   │   ├── events.ts    # Hook event ingestion
 │   │   │   ├── prs.ts       # Pull request management
 │   │   │   ├── issues.ts    # GitHub issue tracking
-│   │   │   ├── costs.ts     # Cost aggregation
+│   │   │   ├── projects.ts  # Project CRUD (multi-repo)
+│   │   │   ├── usage.ts     # Usage tracking aggregation
 │   │   │   ├── stream.ts    # SSE real-time stream
 │   │   │   └── system.ts    # Diagnostics + health
 │   │   ├── services/        # Business logic
@@ -72,7 +77,7 @@ fleet-commander/
 │   │   │   ├── github-poller.ts     # Poll GitHub via gh CLI (30s)
 │   │   │   ├── stuck-detector.ts    # Detect idle/stuck teams (60s)
 │   │   │   ├── sse-broker.ts        # Server-Sent Events broadcaster
-│   │   │   ├── cost-tracker.ts      # Token/cost accounting
+│   │   │   ├── usage-tracker.ts      # Usage % tracking
 │   │   │   ├── startup-recovery.ts  # Recover state on restart
 │   │   │   └── issue-fetcher.ts     # Fetch issues from GitHub
 │   │   └── middleware/
@@ -111,15 +116,18 @@ Browser --> React SPA (dark theme, Tailwind CSS)
   |  SSE (real-time updates) + REST API
   v
 Fastify Server (port 4680)
-  |-- Team Manager     (child_process.spawn for Claude Code)
+  |-- Projects Manager (multi-repo project registry)
+  |-- Team Manager     (per-project child_process.spawn)
   |-- Event Collector  (receives hook POST events)
-  |-- GitHub Poller    (gh CLI, every 30s for PR/CI status)
+  |-- GitHub Poller    (per-project, gh CLI, every 30s)
   |-- Stuck Detector   (60s check for idle/stuck teams)
-  |-- Cost Tracker     (token usage aggregation)
+  |-- Usage Tracker    (% of plan limits)
   |-- Startup Recovery (reconstruct state on restart)
   v
 SQLite (fleet.db, WAL mode, better-sqlite3)
 ```
+
+Fleet Commander is a standalone application managing multiple repositories. Each project stores its repo path and GitHub remote. Teams are scoped to a project.
 
 Hook events flow from Claude Code instances via `curl POST` to `/api/events`. The dashboard independently polls GitHub via `gh` CLI for PR and CI status. State can be reconstructed from git and GitHub if events are lost.
 
@@ -127,11 +135,12 @@ Hook events flow from Claude Code instances via `curl POST` to `/api/events`. Th
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
-| **Teams** | `GET /api/teams`, `GET /api/teams/:id`, `POST /api/teams/launch`, `POST /api/teams/launch-batch`, `POST /api/teams/:id/stop`, `POST /api/teams/:id/resume`, `POST /api/teams/:id/restart`, `POST /api/teams/stop-all`, `POST /api/teams/:id/send-message`, `POST /api/teams/:id/set-phase`, `POST /api/teams/:id/acknowledge`, `GET /api/teams/:id/output` | Team lifecycle and intervention |
+| **Projects** | `GET /api/projects`, `GET /api/projects/:id`, `POST /api/projects`, `PUT /api/projects/:id`, `DELETE /api/projects/:id` | Multi-repo project management |
+| **Teams** | `GET /api/teams`, `GET /api/teams/:id`, `POST /api/teams/launch`, `POST /api/teams/launch-batch`, `POST /api/teams/:id/stop`, `POST /api/teams/:id/resume`, `POST /api/teams/:id/restart`, `POST /api/teams/stop-all`, `POST /api/teams/:id/send-message`, `POST /api/teams/:id/set-phase`, `POST /api/teams/:id/acknowledge`, `GET /api/teams/:id/output` | Team lifecycle and intervention (launch/batch-launch require `project_id`) |
 | **Events** | `POST /api/events`, `GET /api/events` | Hook event ingestion and query |
 | **PRs** | `GET /api/prs`, `GET /api/prs/:number`, `POST /api/prs/refresh`, `POST /api/prs/:number/auto-merge`, `POST /api/prs/:number/update-branch`, `POST /api/prs/:number/retry-ci` | Pull request management |
-| **Issues** | `GET /api/issues`, `GET /api/issues/next`, `GET /api/issues/available`, `POST /api/issues/refresh` | GitHub issue tracking |
-| **Costs** | `GET /api/costs`, `GET /api/costs/by-team`, `GET /api/costs/by-day` | Cost aggregation and breakdown |
+| **Issues** | `GET /api/issues`, `GET /api/issues/next`, `GET /api/issues/available`, `POST /api/issues/refresh` | GitHub issue tracking (per-project) |
+| **Usage** | `GET /api/usage`, `GET /api/usage/by-team`, `GET /api/usage/by-day`, `GET /api/usage/current` | Usage tracking (% of plan limits) |
 | **Diagnostics** | `GET /api/diagnostics/stuck`, `GET /api/diagnostics/blocked`, `GET /api/diagnostics/health`, `GET /api/status` | Fleet health and diagnostics |
 | **Stream** | `GET /api/stream` | SSE real-time event stream |
 
@@ -159,6 +168,9 @@ Ensure only one server instance is running. Fleet Commander uses SQLite in WAL m
 git worktree list          # see all worktrees
 git worktree prune         # clean up stale entries
 ```
+
+**No projects configured**
+Add at least one project via the UI or `POST /api/projects` before launching teams. Each project needs a local repo path and GitHub remote (e.g., `itsg-global-agentic/itsg-kea`).
 
 **Hook events not arriving**
 - Verify the server is running on the expected port

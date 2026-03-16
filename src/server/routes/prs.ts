@@ -18,7 +18,6 @@ import type {
 } from 'fastify';
 import { execSync } from 'child_process';
 import { getDatabase } from '../db.js';
-import config from '../config.js';
 import { githubPoller } from '../services/github-poller.js';
 import { sseBroker } from '../services/sse-broker.js';
 
@@ -67,6 +66,22 @@ function execGH(command: string): GHResult {
     }
     return { ok: false, error: stderr.trim() || message };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: resolve github_repo for a PR by looking up the team's project
+// ---------------------------------------------------------------------------
+
+function resolveGithubRepoForPR(prNumber: number): string | null {
+  const db = getDatabase();
+  const pr = db.getPullRequest(prNumber);
+  if (!pr || !pr.teamId) return null;
+
+  const team = db.getTeam(pr.teamId);
+  if (!team || !team.projectId) return null;
+
+  const project = db.getProject(team.projectId);
+  return project?.githubRepo ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +205,17 @@ const prsRoutes: FastifyPluginCallback = (
           });
         }
 
+        // Resolve github_repo from the PR's team's project
+        const githubRepo = resolveGithubRepoForPR(prNumber);
+        if (!githubRepo) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Cannot resolve GitHub repo for PR #${prNumber} — team or project not found`,
+          });
+        }
+
         const result = execGH(
-          `gh pr merge ${prNumber} --auto --squash --repo ${config.githubRepo}`,
+          `gh pr merge ${prNumber} --auto --squash --repo ${githubRepo}`,
         );
 
         if (!result.ok) {
@@ -258,8 +282,17 @@ const prsRoutes: FastifyPluginCallback = (
           });
         }
 
+        // Resolve github_repo from the PR's team's project
+        const githubRepo = resolveGithubRepoForPR(prNumber);
+        if (!githubRepo) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Cannot resolve GitHub repo for PR #${prNumber} — team or project not found`,
+          });
+        }
+
         const result = execGH(
-          `gh pr merge ${prNumber} --disable-auto --repo ${config.githubRepo}`,
+          `gh pr merge ${prNumber} --disable-auto --repo ${githubRepo}`,
         );
 
         if (!result.ok) {
@@ -326,8 +359,17 @@ const prsRoutes: FastifyPluginCallback = (
           });
         }
 
+        // Resolve github_repo from the PR's team's project
+        const githubRepo = resolveGithubRepoForPR(prNumber);
+        if (!githubRepo) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Cannot resolve GitHub repo for PR #${prNumber} — team or project not found`,
+          });
+        }
+
         const result = execGH(
-          `gh api repos/${config.githubRepo}/pulls/${prNumber}/update-branch -X PUT`,
+          `gh api repos/${githubRepo}/pulls/${prNumber}/update-branch -X PUT`,
         );
 
         if (!result.ok) {

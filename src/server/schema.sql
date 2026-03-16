@@ -1,5 +1,5 @@
 -- =============================================================================
--- Fleet Commander — SQLite Schema (v1, aligned with PRD section 4)
+-- Fleet Commander — SQLite Schema (v2, with projects entity)
 -- =============================================================================
 
 -- Schema version tracking for migrations
@@ -9,6 +9,22 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 -- ---------------------------------------------------------------------------
+-- PROJECTS — a local git repository managed by Fleet Commander
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS projects (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT NOT NULL,                      -- user-friendly, e.g. "itsg-kea"
+  repo_path       TEXT NOT NULL UNIQUE,               -- absolute path, e.g. "C:/Git/itsg-kea"
+  github_repo     TEXT,                               -- e.g. "itsg-global-agentic/itsg-kea"
+  status          TEXT NOT NULL DEFAULT 'active',     -- active | paused | archived
+  hooks_installed INTEGER NOT NULL DEFAULT 0,         -- 0 | 1
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+
+-- ---------------------------------------------------------------------------
 -- TEAMS — a Claude Code worktree session working on an issue
 -- ---------------------------------------------------------------------------
 -- Lifecycle: queued -> launching -> running -> idle (5min) -> stuck (15min) -> done/failed
@@ -16,6 +32,7 @@ CREATE TABLE IF NOT EXISTS teams (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   issue_number    INTEGER NOT NULL,
   issue_title     TEXT,
+  project_id      INTEGER REFERENCES projects(id),
   worktree_name   TEXT NOT NULL UNIQUE,           -- e.g. "kea-763"
   branch_name     TEXT,
   status          TEXT NOT NULL DEFAULT 'queued',  -- queued|launching|running|idle|stuck|done|failed
@@ -32,6 +49,7 @@ CREATE TABLE IF NOT EXISTS teams (
 
 CREATE INDEX IF NOT EXISTS idx_teams_status ON teams(status);
 CREATE INDEX IF NOT EXISTS idx_teams_issue ON teams(issue_number);
+CREATE INDEX IF NOT EXISTS idx_teams_project ON teams(project_id);
 
 -- ---------------------------------------------------------------------------
 -- PULL REQUESTS — associated with teams, tracked through CI lifecycle
@@ -99,11 +117,14 @@ CREATE TABLE IF NOT EXISTS cost_entries (
 -- ---------------------------------------------------------------------------
 -- VIEW: Dashboard overview (one row per team)
 -- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_team_dashboard;
 CREATE VIEW IF NOT EXISTS v_team_dashboard AS
 SELECT
   t.id,
   t.issue_number,
   t.issue_title,
+  t.project_id,
+  p.name AS project_name,
   t.status,
   t.phase,
   t.worktree_name,
@@ -122,6 +143,7 @@ SELECT
   t.created_at,
   t.updated_at
 FROM teams t
+LEFT JOIN projects p ON p.id = t.project_id
 LEFT JOIN cost_entries c ON c.team_id = t.id
 LEFT JOIN pull_requests pr ON pr.team_id = t.id
 GROUP BY t.id;
@@ -144,6 +166,5 @@ CREATE TABLE IF NOT EXISTS usage_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_usage_recorded ON usage_snapshots(recorded_at);
 
--- Insert initial schema version
-INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+-- Insert schema version 2 (or upgrade from 1)
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);

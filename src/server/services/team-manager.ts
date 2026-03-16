@@ -3,6 +3,9 @@
 // =============================================================================
 // Manages Claude Code agent processes: creates git worktrees, copies hooks,
 // spawns child processes, captures output, and handles lifecycle transitions.
+//
+// Per-project: launch() accepts a projectId and resolves repo path, github
+// repo, and worktree naming from the project record in the database.
 // =============================================================================
 
 import { spawn, execSync, ChildProcess } from 'child_process';
@@ -40,15 +43,25 @@ export class TeamManager {
   // -------------------------------------------------------------------------
 
   async launch(
+    projectId: number,
     issueNumber: number,
     issueTitle?: string,
     prompt?: string,
   ): Promise<Team> {
     const db = getDatabase();
-    const worktreeName = `kea-${issueNumber}`;
-    const branchName = `worktree-kea-${issueNumber}`;
+
+    // Look up project to get repo_path, github_repo, name
+    const project = db.getProject(projectId);
+    if (!project) {
+      throw new Error(`Project ${projectId} not found`);
+    }
+
+    // Derive a slug from project name (lowercase, alphanumeric + hyphens)
+    const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const worktreeName = `${slug}-${issueNumber}`;
+    const branchName = `worktree-${slug}-${issueNumber}`;
     const worktreeRelPath = path.posix.join(config.worktreeDir, worktreeName);
-    const worktreeAbsPath = path.join(config.repoRoot, config.worktreeDir, worktreeName);
+    const worktreeAbsPath = path.join(project.repoPath, config.worktreeDir, worktreeName);
 
     // Check if a team already exists and is active for this issue
     const existing = db.getTeamByWorktree(worktreeName);
@@ -56,19 +69,19 @@ export class TeamManager {
       throw new Error(`Team ${worktreeName} is already active (status: ${existing.status})`);
     }
 
-    // 1. Create git worktree (if it doesn't exist)
+    // 1. Create git worktree in the PROJECT's repo (if it doesn't exist)
     if (!fs.existsSync(worktreeAbsPath)) {
       try {
         execSync(
-          `git worktree add "${worktreeRelPath}" -b "${branchName}"`,
-          { cwd: config.repoRoot, encoding: 'utf-8', stdio: 'pipe' },
+          `git -C "${project.repoPath}" worktree add "${worktreeRelPath}" -b "${branchName}"`,
+          { encoding: 'utf-8', stdio: 'pipe' },
         );
       } catch (err: unknown) {
         // Branch may already exist — try without -b
         try {
           execSync(
-            `git worktree add "${worktreeRelPath}" "${branchName}"`,
-            { cwd: config.repoRoot, encoding: 'utf-8', stdio: 'pipe' },
+            `git -C "${project.repoPath}" worktree add "${worktreeRelPath}" "${branchName}"`,
+            { encoding: 'utf-8', stdio: 'pipe' },
           );
         } catch (err2: unknown) {
           const msg = err2 instanceof Error ? err2.message : String(err2);
@@ -77,22 +90,24 @@ export class TeamManager {
       }
     }
 
-    // 2. Copy hook scripts into worktree's .claude/hooks/fleet-commander/
-    const hookSrcDir = path.join(config.repoRoot, 'hooks');
+    // 2. Copy hook scripts from FC's own hooks/ directory into worktree
+    const hookSrcDir = config.fcHooksDir;
     const hookDestDir = path.join(worktreeAbsPath, config.hookDir);
 
     fs.mkdirSync(hookDestDir, { recursive: true });
 
-    const hookFiles = fs.readdirSync(hookSrcDir).filter(
-      (f) => f.endsWith('.sh'),
-    );
-    for (const file of hookFiles) {
-      const src = path.join(hookSrcDir, file);
-      const dest = path.join(hookDestDir, file);
-      fs.copyFileSync(src, dest);
-      // Ensure executable on Unix
-      if (process.platform !== 'win32') {
-        fs.chmodSync(dest, 0o755);
+    if (fs.existsSync(hookSrcDir)) {
+      const hookFiles = fs.readdirSync(hookSrcDir).filter(
+        (f) => f.endsWith('.sh'),
+      );
+      for (const file of hookFiles) {
+        const src = path.join(hookSrcDir, file);
+        const dest = path.join(hookDestDir, file);
+        fs.copyFileSync(src, dest);
+        // Ensure executable on Unix
+        if (process.platform !== 'win32') {
+          fs.chmodSync(dest, 0o755);
+        }
       }
     }
 
@@ -107,9 +122,10 @@ export class TeamManager {
       fs.copyFileSync(settingsExamplePath, settingsDestPath);
     }
 
-    // 4. Insert team record in DB
+    // 4. Insert team record in DB (with projectId)
     const now = new Date().toISOString();
     const team = db.insertTeam({
+      projectId,
       issueNumber,
       issueTitle: issueTitle ?? null,
       worktreeName,
@@ -128,10 +144,12 @@ export class TeamManager {
     }
 
     const child = spawn(config.claudeCmd, args, {
-      cwd: config.repoRoot,
+      cwd: project.repoPath,
       env: {
         ...process.env,
         FLEET_TEAM_ID: worktreeName,
+        FLEET_PROJECT_ID: String(projectId),
+        FLEET_GITHUB_REPO: project.githubRepo ?? '',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       // On Windows, use shell to resolve commands in PATH
@@ -204,7 +222,7 @@ export class TeamManager {
     // 8. Broadcast launch event
     sseBroker.broadcast(
       'team_launched',
-      { team_id: team.id, issue_number: issueNumber },
+      { team_id: team.id, issue_number: issueNumber, project_id: projectId },
       team.id,
     );
 
@@ -256,9 +274,15 @@ export class TeamManager {
       throw new Error(`Team ${teamId} not found`);
     }
 
+    // Resolve project for repo path
+    const project = team.projectId ? db.getProject(team.projectId) : undefined;
+    if (!project) {
+      throw new Error(`Project for team ${teamId} not found (projectId: ${team.projectId})`);
+    }
+
     // Verify worktree still exists
     const worktreeAbsPath = path.join(
-      config.repoRoot, config.worktreeDir, team.worktreeName,
+      project.repoPath, config.worktreeDir, team.worktreeName,
     );
     if (!fs.existsSync(worktreeAbsPath)) {
       throw new Error(`Worktree ${team.worktreeName} no longer exists at ${worktreeAbsPath}`);
@@ -279,10 +303,12 @@ export class TeamManager {
     });
 
     const child = spawn(config.claudeCmd, args, {
-      cwd: config.repoRoot,
+      cwd: project.repoPath,
       env: {
         ...process.env,
         FLEET_TEAM_ID: team.worktreeName,
+        FLEET_PROJECT_ID: String(project.id),
+        FLEET_GITHUB_REPO: project.githubRepo ?? '',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
@@ -366,8 +392,13 @@ export class TeamManager {
       await this.stop(teamId);
     }
 
-    // Re-launch
-    return this.launch(team.issueNumber, team.issueTitle ?? undefined, prompt);
+    // Re-launch with the team's project
+    const projectId = team.projectId;
+    if (!projectId) {
+      throw new Error(`Team ${teamId} has no projectId — cannot restart`);
+    }
+
+    return this.launch(projectId, team.issueNumber, team.issueTitle ?? undefined, prompt);
   }
 
   // -------------------------------------------------------------------------
@@ -414,6 +445,7 @@ export class TeamManager {
   // -------------------------------------------------------------------------
 
   async launchBatch(
+    projectId: number,
     issues: Array<{ number: number; title?: string }>,
     prompt?: string,
     delayMs?: number,
@@ -424,7 +456,7 @@ export class TeamManager {
     for (let i = 0; i < issues.length; i++) {
       const issue = issues[i]!;
       try {
-        const team = await this.launch(issue.number, issue.title, prompt);
+        const team = await this.launch(projectId, issue.number, issue.title, prompt);
         results.push(team);
       } catch (err: unknown) {
         // Push a synthetic error indicator — don't stop the batch
