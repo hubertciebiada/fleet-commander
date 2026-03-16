@@ -36,13 +36,10 @@ interface GraphQLIssueNode {
   state: string;
   url: string;
   labels?: { nodes?: Array<{ name: string }> };
-  projectItems?: { nodes?: Array<{ fieldValueByName?: { name?: string } | null }> };
+  parent?: { number: number; title: string } | null;
   subIssuesSummary?: { total: number; completed: number; percentCompleted: number };
   closedByPullRequestsReferences?: {
     nodes?: Array<{ number: number; state: string }>;
-  };
-  subIssues?: {
-    nodes?: Array<GraphQLIssueNode>;
   };
 }
 
@@ -68,65 +65,26 @@ interface ProjectIssueCache {
 }
 
 // ---------------------------------------------------------------------------
-// GraphQL query — 3-level hierarchy with PR references and board status
+// GraphQL query — flat list of all open issues with parent reference
+// ---------------------------------------------------------------------------
+// Fetches ~100 issues per page with ~10 sub-fields each = ~1,000 nodes/page.
+// The tree is built client-side from parent references instead of nested
+// subIssues, avoiding GitHub's 500,000 node limit.
 // ---------------------------------------------------------------------------
 
-const HIERARCHY_QUERY = `
-query GetHierarchy($owner: String!, $repo: String!, $cursor: String) {
+const ISSUES_QUERY = `
+query GetIssues($owner: String!, $repo: String!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
-    issues(first: 50, after: $cursor, states: [OPEN]) {
+    issues(first: 100, after: $cursor, states: [OPEN]) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number
         title
         state
         url
-        labels(first: 10) { nodes { name } }
-        projectItems(first: 5) {
-          nodes {
-            fieldValueByName(name: "Status") {
-              ... on ProjectV2ItemFieldSingleSelectValue { name }
-            }
-          }
-        }
+        labels(first: 5) { nodes { name } }
+        parent { number title }
         subIssuesSummary { total completed percentCompleted }
-        subIssues(first: 50) {
-          nodes {
-            number
-            title
-            state
-            url
-            labels(first: 10) { nodes { name } }
-            projectItems(first: 5) {
-              nodes {
-                fieldValueByName(name: "Status") {
-                  ... on ProjectV2ItemFieldSingleSelectValue { name }
-                }
-              }
-            }
-            subIssuesSummary { total completed percentCompleted }
-            subIssues(first: 50) {
-              nodes {
-                number
-                title
-                state
-                url
-                labels(first: 10) { nodes { name } }
-                projectItems(first: 5) {
-                  nodes {
-                    fieldValueByName(name: "Status") {
-                      ... on ProjectV2ItemFieldSingleSelectValue { name }
-                    }
-                  }
-                }
-                subIssuesSummary { total completed percentCompleted }
-              }
-            }
-            closedByPullRequestsReferences(first: 3, includeClosedPrs: true) {
-              nodes { number state }
-            }
-          }
-        }
         closedByPullRequestsReferences(first: 3, includeClosedPrs: true) {
           nodes { number state }
         }
@@ -187,22 +145,31 @@ export class IssueFetcher {
       cursor = issues.pageInfo?.endCursor ?? null;
     }
 
-    // Convert GraphQL nodes to our IssueNode format
-    const issueTree = allNodes.map((node) => this.mapGraphQLNode(node));
+    // Convert GraphQL nodes to our IssueNode format (flat, no children yet)
+    const flatIssues = allNodes.map((node) => this.mapGraphQLNode(node));
 
-    // Filter to only root-level issues (those not appearing as children of other issues)
+    // Build parent->children map from parent references
+    const issueByNumber = new Map<number, IssueNode>();
+    for (const issue of flatIssues) {
+      issueByNumber.set(issue.number, issue);
+    }
+
+    // Track which issues have a parent (so we can identify roots)
     const childNumbers = new Set<number>();
-    const collectChildNumbers = (nodes: IssueNode[]): void => {
-      for (const node of nodes) {
-        for (const child of node.children) {
-          childNumbers.add(child.number);
-          collectChildNumbers([child]);
+
+    for (const node of allNodes) {
+      if (node.parent?.number) {
+        childNumbers.add(node.number);
+        const parentIssue = issueByNumber.get(node.parent.number);
+        const childIssue = issueByNumber.get(node.number);
+        if (parentIssue && childIssue) {
+          parentIssue.children.push(childIssue);
         }
       }
-    };
-    collectChildNumbers(issueTree);
+    }
 
-    const rootIssues = issueTree.filter((issue) => !childNumbers.has(issue.number));
+    // Root issues are those with no parent
+    const rootIssues = flatIssues.filter((issue) => !childNumbers.has(issue.number));
 
     // Update the per-project cache
     this.cacheByProject.set(projectId, {
@@ -452,7 +419,7 @@ export class IssueFetcher {
   ): GraphQLResponse | null {
     try {
       // Collapse whitespace for a compact query string
-      const compactQuery = HIERARCHY_QUERY.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+      const compactQuery = ISSUES_QUERY.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
 
       // Build the full GraphQL request body as JSON.
       // Passing via stdin avoids all shell escaping issues on Windows/Git Bash.
@@ -488,27 +455,11 @@ export class IssueFetcher {
   private mapGraphQLNode(node: GraphQLIssueNode): IssueNode {
     const labels = (node.labels?.nodes ?? []).map((l) => l.name);
 
-    // Extract board status from project items
-    let boardStatus: string | undefined;
-    const projectItems = node.projectItems?.nodes ?? [];
-    for (const item of projectItems) {
-      const fieldValue = item.fieldValueByName;
-      if (fieldValue && 'name' in fieldValue && fieldValue.name) {
-        boardStatus = fieldValue.name;
-        break;
-      }
-    }
-
     // Extract PR references
     const prRefs = (node.closedByPullRequestsReferences?.nodes ?? []).map((pr) => ({
       number: pr.number,
       state: pr.state,
     }));
-
-    // Recursively map sub-issues (children)
-    const children = (node.subIssues?.nodes ?? []).map((child) =>
-      this.mapGraphQLNode(child)
-    );
 
     const issueNode: IssueNode = {
       number: node.number,
@@ -516,13 +467,9 @@ export class IssueFetcher {
       state: node.state.toLowerCase() === 'open' ? 'open' : 'closed',
       labels,
       url: node.url,
-      children,
+      children: [],   // populated later by buildHierarchy in fetchIssueHierarchy
       activeTeam: null,
     };
-
-    if (boardStatus) {
-      issueNode.boardStatus = boardStatus;
-    }
 
     if (node.subIssuesSummary) {
       issueNode.subIssueSummary = {
