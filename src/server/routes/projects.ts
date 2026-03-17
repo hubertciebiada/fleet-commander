@@ -681,7 +681,7 @@ const projectsRoutes: FastifyPluginCallback = (
   fastify.get(
     '/api/projects/:id/cleanup-preview',
     async (
-      request: FastifyRequest<{ Params: ProjectIdParams }>,
+      request: FastifyRequest<{ Params: ProjectIdParams; Querystring: { resetTeams?: string } }>,
       reply: FastifyReply,
     ) => {
       try {
@@ -702,7 +702,8 @@ const projectsRoutes: FastifyPluginCallback = (
           });
         }
 
-        const preview: CleanupPreview = getCleanupPreview(projectId);
+        const resetTeams = (request.query as { resetTeams?: string }).resetTeams === 'true';
+        const preview: CleanupPreview = getCleanupPreview(projectId, resetTeams);
         return reply.code(200).send(preview);
       } catch (err: unknown) {
         request.log.error(err, 'Failed to generate cleanup preview');
@@ -720,7 +721,7 @@ const projectsRoutes: FastifyPluginCallback = (
   fastify.post(
     '/api/projects/:id/cleanup',
     async (
-      request: FastifyRequest<{ Params: ProjectIdParams; Body: { items: string[] } }>,
+      request: FastifyRequest<{ Params: ProjectIdParams; Body: { items: string[]; resetTeams?: boolean } }>,
       reply: FastifyReply,
     ) => {
       try {
@@ -743,6 +744,7 @@ const projectsRoutes: FastifyPluginCallback = (
 
         const body = request.body || {};
         const itemPaths = Array.isArray(body.items) ? body.items : [];
+        const resetTeams = body.resetTeams === true;
 
         if (itemPaths.length === 0) {
           return reply.code(400).send({
@@ -751,7 +753,7 @@ const projectsRoutes: FastifyPluginCallback = (
           });
         }
 
-        const result: CleanupResult = executeCleanup(projectId, itemPaths);
+        const result: CleanupResult = executeCleanup(projectId, itemPaths, resetTeams);
 
         // Broadcast SSE event so dashboards refresh
         sseBroker.broadcast('project_cleanup', {

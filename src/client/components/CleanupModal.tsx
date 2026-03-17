@@ -21,18 +21,21 @@ const TYPE_ORDER: Record<CleanupItem['type'], number> = {
   worktree: 0,
   signal_file: 1,
   stale_branch: 2,
+  team_record: 3,
 };
 
 const TYPE_LABELS: Record<CleanupItem['type'], string> = {
   worktree: 'Worktrees',
   signal_file: 'Signal Files',
   stale_branch: 'Branches',
+  team_record: 'Database Records',
 };
 
 const TYPE_ICONS: Record<CleanupItem['type'], string> = {
   worktree: '\uD83D\uDCC1',   // folder icon
   signal_file: '\uD83D\uDCC4', // page icon
   stale_branch: '\uD83C\uDF3F', // leaf icon
+  team_record: '\uD83D\uDDD1\uFE0F',  // database/wastebasket icon
 };
 
 function groupByType(items: CleanupItem[]): Map<CleanupItem['type'], CleanupItem[]> {
@@ -61,6 +64,7 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<CleanupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resetTeams, setResetTeams] = useState(false);
 
   // -------------------------------------------------------------------
   // Close handler (after result, also trigger parent refresh)
@@ -69,11 +73,12 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
     if (phase === 'result') {
       onDone();
     }
+    setResetTeams(false);
     onClose();
   }, [phase, onClose, onDone]);
 
   // -------------------------------------------------------------------
-  // Fetch preview when modal opens
+  // Fetch preview when modal opens or resetTeams changes
   // -------------------------------------------------------------------
   useEffect(() => {
     if (!open) return;
@@ -86,8 +91,9 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
     let cancelled = false;
     (async () => {
       try {
+        const qs = resetTeams ? '?resetTeams=true' : '';
         const data = await api.get<CleanupPreview>(
-          `projects/${projectId}/cleanup-preview`,
+          `projects/${projectId}/cleanup-preview${qs}`,
         );
         if (cancelled) return;
         setPreview(data);
@@ -101,7 +107,7 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
       }
     })();
     return () => { cancelled = true; };
-  }, [open, projectId, api]);
+  }, [open, projectId, api, resetTeams]);
 
   // -------------------------------------------------------------------
   // Keyboard: Escape to close
@@ -147,6 +153,7 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
     try {
       const data = await api.post<CleanupResult>(`projects/${projectId}/cleanup`, {
         items: Array.from(selected),
+        resetTeams,
       });
       setResult(data);
       setPhase('result');
@@ -154,7 +161,7 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
       setError(err instanceof Error ? err.message : String(err));
       setPhase('preview'); // go back to preview so user can retry
     }
-  }, [api, projectId, selected]);
+  }, [api, projectId, selected, resetTeams]);
 
   // Backdrop click
   const handleBackdropClick = useCallback(
@@ -218,6 +225,28 @@ export function CleanupModal({ projectId, open, onClose, onDone }: CleanupModalP
           {error && (
             <div className="mb-4 px-3 py-2 rounded border border-[#F85149]/30 bg-[#F85149]/10 text-[#F85149] text-sm">
               {error}
+            </div>
+          )}
+
+          {/* Reset team history checkbox — shown in preview phase */}
+          {phase === 'preview' && preview && (
+            <div className="mb-4">
+              <label className="flex items-start gap-2.5 px-3 py-2.5 rounded border border-dark-border/50 hover:border-dark-border bg-dark-base/50 cursor-pointer transition-colors">
+                <input
+                  type="checkbox"
+                  checked={resetTeams}
+                  onChange={(e) => setResetTeams(e.target.checked)}
+                  className="mt-0.5 accent-[#F85149] shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-dark-text font-medium">Reset team history</div>
+                  {resetTeams && (
+                    <div className="text-xs text-[#F85149]/80 mt-1">
+                      This will delete all team records, events, and commands for this project from the database. The project will be like freshly added.
+                    </div>
+                  )}
+                </div>
+              </label>
             </div>
           )}
 

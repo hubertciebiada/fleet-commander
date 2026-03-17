@@ -19,8 +19,10 @@ import type { CleanupItem, CleanupPreview, CleanupResult } from '../../shared/ty
 
 /**
  * Scan a project and return what WOULD be cleaned, without touching anything.
+ * @param projectId   The project to scan
+ * @param resetTeams  If true, also include all team records in the preview for DB purge
  */
-export function getCleanupPreview(projectId: number): CleanupPreview {
+export function getCleanupPreview(projectId: number, resetTeams: boolean = false): CleanupPreview {
   const db = getDatabase();
   const project = db.getProject(projectId);
   if (!project) throw new Error('Project not found');
@@ -146,6 +148,21 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
     // git command failed — skip branch check for project branches
   }
 
+  // -------------------------------------------------------------------
+  // 4. If resetTeams, include all team DB records for this project
+  // -------------------------------------------------------------------
+  if (resetTeams) {
+    const teams = db.getTeams({ projectId });
+    for (const team of teams) {
+      items.push({
+        type: 'team_record',
+        name: `Team #${team.issueNumber} (${team.worktreeName}) \u2014 ${team.status}`,
+        path: `db:teams:${team.id}`,
+        reason: `Database record (status: ${team.status})`,
+      });
+    }
+  }
+
   return { projectId, projectName: project.name, items };
 }
 
@@ -157,10 +174,12 @@ export function getCleanupPreview(projectId: number): CleanupPreview {
  * Remove only the items the user selected from the preview.
  * @param projectId   The project to clean
  * @param itemPaths   Array of `item.path` values the user checked in the modal
+ * @param resetTeams  If true, re-scan includes team records (must match what preview showed)
  */
 export function executeCleanup(
   projectId: number,
   itemPaths: string[],
+  resetTeams: boolean = false,
 ): CleanupResult {
   const db = getDatabase();
   const project = db.getProject(projectId);
@@ -168,7 +187,7 @@ export function executeCleanup(
 
   // Re-scan to get the current preview (ensures we only remove items that
   // still exist AND were in the original preview — prevents stale requests)
-  const preview = getCleanupPreview(projectId);
+  const preview = getCleanupPreview(projectId, resetTeams);
   const allowedPaths = new Set(itemPaths);
 
   const removed: string[] = [];
@@ -207,6 +226,10 @@ export function executeCleanup(
           `git -C "${project.repoPath}" branch -D "${item.name}"`,
           { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 },
         );
+        removed.push(item.name);
+      } else if (item.type === 'team_record') {
+        const teamId = parseInt(item.path.split(':')[2]);
+        db.deleteTeamAndRelated(teamId);
         removed.push(item.name);
       }
     } catch (err) {

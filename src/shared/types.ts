@@ -151,7 +151,7 @@ export interface UsageSnapshot {
 
 /** A single item that could be cleaned up */
 export interface CleanupItem {
-  type: 'worktree' | 'signal_file' | 'stale_branch';
+  type: 'worktree' | 'signal_file' | 'stale_branch' | 'team_record';
   name: string;
   path: string;
   reason: string;
