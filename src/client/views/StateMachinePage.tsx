@@ -18,6 +18,7 @@ interface MessageTemplate {
   template: string;
   enabled: boolean;
   placeholders: string[];
+  isDefault?: boolean;
 }
 
 interface Transition {

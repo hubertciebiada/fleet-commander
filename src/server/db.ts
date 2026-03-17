@@ -964,12 +964,31 @@ export class FleetDatabase {
   }
 
   /**
-   * Initialize default message templates. Uses INSERT OR REPLACE so defaults
-   * are refreshed on every restart (keeps templates up-to-date).
+   * Insert a single message template. Used by the PUT upsert endpoint
+   * when a template doesn't yet exist in the DB.
+   */
+  insertMessageTemplate(fields: {
+    id: string;
+    template: string;
+    enabled?: boolean;
+  }): void {
+    this.db.prepare(
+      `INSERT INTO message_templates (id, template, enabled)
+       VALUES (@id, @template, @enabled)`
+    ).run({
+      id: fields.id,
+      template: fields.template,
+      enabled: (fields.enabled ?? true) ? 1 : 0,
+    });
+  }
+
+  /**
+   * Initialize default message templates. Uses INSERT OR IGNORE so that
+   * user-edited templates are preserved across restarts.
    */
   initDefaultTemplates(defaults: { id: string; template: string }[]): void {
     const stmt = this.db.prepare(
-      'INSERT OR REPLACE INTO message_templates (id, template) VALUES (@id, @template)'
+      'INSERT OR IGNORE INTO message_templates (id, template) VALUES (@id, @template)'
     );
 
     const insertMany = this.db.transaction((items: { id: string; template: string }[]) => {
