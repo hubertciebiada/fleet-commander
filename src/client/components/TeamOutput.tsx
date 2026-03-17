@@ -42,28 +42,19 @@ function formatLocalTime(iso: string): string {
   }
 }
 
+/** Only show text messages (TL, you, FC) in Session Log. Tools/system stay in Recent Events. */
+const TEXT_TYPES = new Set(['assistant', 'user', 'fc']);
+
 function getEventText(event: StreamEvent): string {
+  if (!TEXT_TYPES.has(event.type)) return '';
   const content = event.message?.content;
   if (Array.isArray(content)) {
-    const text = content
+    return content
       .filter((c) => c.type === 'text' && c.text)
       .map((c) => c.text!)
       .join('\n');
-    if (text) return text;
   }
-
-  switch (event.type) {
-    case 'tool_use':
-      return event.tool?.name ?? 'unknown tool';
-    case 'tool_result':
-      return 'completed';
-    case 'result':
-      return 'session complete';
-    case 'rate_limit_event':
-      return 'waiting for rate limit...';
-    default:
-      return '';
-  }
+  return '';
 }
 
 // ---------------------------------------------------------------------------
