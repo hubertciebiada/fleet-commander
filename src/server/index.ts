@@ -12,15 +12,17 @@ import systemRoutes from './routes/system.js';
 import usageRoutes from './routes/usage.js';
 import prsRoutes from './routes/prs.js';
 import projectsRoutes from './routes/projects.js';
+import stateMachineRoutes from './routes/state-machine.js';
 import { sseBroker } from './services/sse-broker.js';
 import { getIssueFetcher } from './services/issue-fetcher.js';
 import { stuckDetector } from './services/stuck-detector.js';
 import { githubPoller } from './services/github-poller.js';
 import { errorHandler } from './middleware/error-handler.js';
-import { closeDatabase } from './db.js';
+import { getDatabase, closeDatabase } from './db.js';
 import { recoverOnStartup } from './services/startup-recovery.js';
 import { usagePoller } from './services/usage-tracker.js';
 import config from './config.js';
+import { STATE_MACHINE_TRANSITIONS } from '../shared/state-machine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,6 +51,7 @@ async function main() {
   await server.register(usageRoutes);
   await server.register(prsRoutes);
   await server.register(projectsRoutes);
+  await server.register(stateMachineRoutes);
 
   // Static file serving for production builds
   const clientDistPath = path.resolve(__dirname, '..', 'client');
@@ -67,6 +70,14 @@ async function main() {
       }
     });
   }
+
+  // Initialize default message templates from state machine transitions
+  const db = getDatabase();
+  db.initDefaultTemplates(
+    STATE_MACHINE_TRANSITIONS
+      .filter((t) => t.message)
+      .map((t) => ({ id: t.id, template: t.message! }))
+  );
 
   // Recover state from before restart (reconcile PIDs, detect orphan worktrees)
   await recoverOnStartup();

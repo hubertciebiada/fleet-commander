@@ -20,6 +20,7 @@ import type {
   Project,
   ProjectSummary,
   ProjectStatus,
+  MessageTemplate,
 } from '../shared/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -197,6 +198,9 @@ export class FleetDatabase {
     // Add prompt_file column if missing (for existing databases)
     this.addPromptFileColumn();
 
+    // Add message_templates table if missing (for existing databases)
+    this.addMessageTemplatesTable();
+
     // Resolve schema.sql relative to this file.
     // In dev (tsx): __dirname is src/server
     // In compiled (node): __dirname is dist/server/server
@@ -309,6 +313,27 @@ export class FleetDatabase {
       }
     } catch {
       // Table may not exist yet (fresh database) — schema.sql will create it
+    }
+  }
+
+  /**
+   * Add message_templates table if it doesn't exist.
+   * Handles upgrade of existing databases that lack this table.
+   */
+  private addMessageTemplatesTable(): void {
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS message_templates (
+          id          TEXT PRIMARY KEY,
+          template    TEXT NOT NULL,
+          enabled     INTEGER NOT NULL DEFAULT 1,
+          description TEXT,
+          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+    } catch {
+      // Table creation failed — schema.sql will handle it
     }
   }
 
@@ -883,6 +908,77 @@ export class FleetDatabase {
     `);
     const rows = stmt.all() as Record<string, unknown>[];
     return rows.map((r) => this.mapUsageRow(r));
+  }
+
+  // -------------------------------------------------------------------------
+  // Message Templates
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get a single message template by ID.
+   */
+  getMessageTemplate(id: string): { id: string; template: string; enabled: boolean } | undefined {
+    const stmt = this.db.prepare('SELECT id, template, enabled FROM message_templates WHERE id = ?');
+    const row = stmt.get(id) as { id: string; template: string; enabled: number } | undefined;
+    if (!row) return undefined;
+    return { id: row.id, template: row.template, enabled: row.enabled === 1 };
+  }
+
+  /**
+   * Get all message templates.
+   */
+  getMessageTemplates(): MessageTemplate[] {
+    const stmt = this.db.prepare('SELECT * FROM message_templates ORDER BY id');
+    const rows = stmt.all() as Array<{ id: string; template: string; enabled: number; updated_at: string }>;
+    return rows.map((r) => ({
+      id: r.id,
+      template: r.template,
+      enabled: r.enabled === 1,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  /**
+   * Update a message template's text and/or enabled flag.
+   */
+  updateMessageTemplate(id: string, fields: { template?: string; enabled?: boolean }): void {
+    const setClauses: string[] = [];
+    const params: Record<string, unknown> = { id };
+
+    if (fields.template !== undefined) {
+      setClauses.push('template = @template');
+      params.template = fields.template;
+    }
+    if (fields.enabled !== undefined) {
+      setClauses.push('enabled = @enabled');
+      params.enabled = fields.enabled ? 1 : 0;
+    }
+
+    if (setClauses.length === 0) return;
+
+    // Always update updated_at
+    setClauses.push("updated_at = datetime('now')");
+
+    const sql = `UPDATE message_templates SET ${setClauses.join(', ')} WHERE id = @id`;
+    this.db.prepare(sql).run(params);
+  }
+
+  /**
+   * Initialize default message templates. Uses INSERT OR IGNORE so existing
+   * (potentially user-edited) templates are never overwritten.
+   */
+  initDefaultTemplates(defaults: { id: string; template: string }[]): void {
+    const stmt = this.db.prepare(
+      'INSERT OR IGNORE INTO message_templates (id, template) VALUES (@id, @template)'
+    );
+
+    const insertMany = this.db.transaction((items: { id: string; template: string }[]) => {
+      for (const item of items) {
+        stmt.run({ id: item.id, template: item.template });
+      }
+    });
+
+    insertMany(defaults);
   }
 
   /**

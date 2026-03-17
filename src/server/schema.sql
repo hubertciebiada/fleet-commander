@@ -151,5 +151,43 @@ CREATE TABLE IF NOT EXISTS usage_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_usage_recorded ON usage_snapshots(recorded_at);
 
+-- ---------------------------------------------------------------------------
+-- MESSAGE TEMPLATES — editable notification templates for state transitions
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS message_templates (
+  id          TEXT PRIMARY KEY,              -- transition ID e.g. 'ci_green', 'pr_merged'
+  template    TEXT NOT NULL,                 -- message template with {{PLACEHOLDERS}}
+  enabled     INTEGER NOT NULL DEFAULT 1,   -- 0=don't send, 1=send
+  description TEXT,                          -- human-readable purpose
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Seed default templates (INSERT OR IGNORE so user overrides are preserved)
+INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
+  ('ci_green',
+   '[Fleet Commander] CI GREEN — All checks passed on PR #{{PR_NUMBER}}. Auto-merge is {{AUTO_MERGE_STATUS}}.',
+   'Sent when all CI checks pass on a PR');
+INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
+  ('ci_red',
+   '[Fleet Commander] CI RED — Failed checks on PR #{{PR_NUMBER}}: {{FAILED_CHECKS}}. Fix count: {{FAIL_COUNT}}/{{MAX_FAILURES}} unique failures before blocked.',
+   'Sent when CI checks fail on a PR');
+INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
+  ('ci_pending',
+   '[Fleet Commander] CI running on PR #{{PR_NUMBER}}...',
+   'Sent when CI checks start running');
+INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
+  ('pr_merged',
+   '[Fleet Commander] PR #{{PR_NUMBER}} MERGED — Your work is complete. You may finish up and exit.',
+   'Sent when a PR is merged (initial notification)');
+INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
+  ('pr_merged_final',
+   '[Fleet Commander] PR #{{PR_NUMBER}} merged successfully. Issue work is complete. Please finish up — this session will close shortly.',
+   'Sent as final message before closing stdin after PR merge');
+INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
+  ('ci_blocked',
+   '[Fleet Commander] BLOCKED — {{FAIL_COUNT}} unique CI failure types on PR #{{PR_NUMBER}}. Human intervention needed.',
+   'Sent when CI failures exceed the threshold and team is blocked');
+
 -- Insert schema version 2 (or upgrade from 1)
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);

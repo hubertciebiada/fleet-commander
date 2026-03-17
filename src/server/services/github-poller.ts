@@ -17,6 +17,7 @@ import { execSync } from 'child_process';
 import { getDatabase } from '../db.js';
 import config from '../config.js';
 import { sseBroker } from './sse-broker.js';
+import { resolveMessage } from '../utils/resolve-message.js';
 
 // ---------------------------------------------------------------------------
 // Types for gh CLI JSON output
@@ -230,23 +231,29 @@ class GitHubPoller {
             const { getTeamManager } = await import('./team-manager.js');
             const manager = getTeamManager();
 
+            let msg: string | null = null;
             if (ciStatus === 'passing') {
-              manager.sendMessage(teamId,
-                `[Fleet Commander] CI GREEN — All checks passed on PR #${prNumber}. Auto-merge is ${autoMerge ? 'enabled' : 'not enabled'}.`
-              );
+              msg = resolveMessage('ci_green', {
+                PR_NUMBER: String(prNumber),
+                AUTO_MERGE_STATUS: autoMerge ? 'enabled' : 'not enabled',
+              });
             } else if (ciStatus === 'failing') {
               const failedCheckNames = checks
                 .filter((c) => c.conclusion === 'FAILURE')
                 .map((c) => c.name || c.context || 'unknown')
                 .join(', ');
-              manager.sendMessage(teamId,
-                `[Fleet Commander] CI RED — Failed checks on PR #${prNumber}: ${failedCheckNames}. Fix count: ${ciFailCount}/${config.maxUniqueCiFailures} unique failures before blocked.`
-              );
+              msg = resolveMessage('ci_red', {
+                PR_NUMBER: String(prNumber),
+                FAILED_CHECKS: failedCheckNames,
+                FAIL_COUNT: String(ciFailCount),
+                MAX_FAILURES: String(config.maxUniqueCiFailures),
+              });
             } else if (ciStatus === 'pending') {
-              manager.sendMessage(teamId,
-                `[Fleet Commander] CI running on PR #${prNumber}...`
-              );
+              msg = resolveMessage('ci_pending', {
+                PR_NUMBER: String(prNumber),
+              });
             }
+            if (msg) manager.sendMessage(teamId, msg);
           } catch (err) {
             console.error(`[GitHubPoller] Failed to send CI notification to team ${teamId}:`, err);
           }
@@ -257,9 +264,10 @@ class GitHubPoller {
           try {
             const { getTeamManager } = await import('./team-manager.js');
             const manager = getTeamManager();
-            manager.sendMessage(teamId,
-              `[Fleet Commander] PR #${prNumber} MERGED — Your work is complete. You may finish up and exit.`
-            );
+            const msg = resolveMessage('pr_merged', {
+              PR_NUMBER: String(prNumber),
+            });
+            if (msg) manager.sendMessage(teamId, msg);
           } catch (err) {
             console.error(`[GitHubPoller] Failed to send merge notification to team ${teamId}:`, err);
           }
@@ -320,9 +328,10 @@ class GitHubPoller {
       try {
         const { getTeamManager } = await import('./team-manager.js');
         const manager = getTeamManager();
-        manager.sendMessage(teamId,
-          `[Fleet Commander] PR #${prNumber} merged successfully. Issue work is complete. Please finish up — this session will close shortly.`
-        );
+        const msg = resolveMessage('pr_merged_final', {
+          PR_NUMBER: String(prNumber),
+        });
+        if (msg) manager.sendMessage(teamId, msg);
 
         // Give CC 30 seconds to finish its current turn, then close stdin
         setTimeout(() => {
@@ -367,9 +376,11 @@ class GitHubPoller {
         try {
           const { getTeamManager } = await import('./team-manager.js');
           const manager = getTeamManager();
-          manager.sendMessage(teamId,
-            `[Fleet Commander] BLOCKED — ${ciFailCount} unique CI failure types on PR #${prNumber}. Human intervention needed.`
-          );
+          const msg = resolveMessage('ci_blocked', {
+            PR_NUMBER: String(prNumber),
+            FAIL_COUNT: String(ciFailCount),
+          });
+          if (msg) manager.sendMessage(teamId, msg);
         } catch (err) {
           console.error(`[GitHubPoller] Failed to send blocked notification to team ${teamId}:`, err);
         }

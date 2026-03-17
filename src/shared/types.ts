@@ -171,6 +171,18 @@ export interface CleanupResult {
 }
 
 // ---------------------------------------------------------------------------
+// Message Templates (editable notification templates)
+// ---------------------------------------------------------------------------
+
+/** An editable message template stored in the database */
+export interface MessageTemplate {
+  id: string;
+  template: string;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard View (v_team_dashboard)
 // ---------------------------------------------------------------------------
 

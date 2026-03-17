@@ -224,3 +224,14 @@ The SSE broker emits 14 event types:
 10. **SSE, not WebSockets** -- real-time updates use Server-Sent Events exclusively.
 11. **Stream JSON for CC** -- Claude Code is invoked with `--input-format stream-json --output-format stream-json` for stdin/stdout piping.
 12. **No Octokit, no REST wrappers** -- shell out to `gh` for GitHub API calls.
+13. **State machine transitions must ALWAYS be kept in sync with code.** The file `src/shared/state-machine.ts` defines all team status transitions, their triggers, conditions, and message templates. When modifying any code that changes team status (`db.updateTeam({ status: ... })`), you MUST also update `state-machine.ts` to reflect the change. The State Machine view in the UI (`/lifecycle`) reads from this file — if it's out of date, users will see incorrect transition information. The `message_templates` database table stores editable versions of messages sent to teams; defaults come from `state-machine.ts` and are seeded on startup.
+
+## State Machine
+
+The team lifecycle state machine is defined in `src/shared/state-machine.ts`. This is the single source of truth for:
+- All valid status transitions (from → to)
+- What triggers each transition (hook, timer, poller, PM action, system)
+- What message (if any) is sent to the team via stdin
+- Available {{PLACEHOLDER}} variables for each message
+
+Message templates are stored in the `message_templates` DB table and can be edited from the `/lifecycle` UI view. The `resolveMessage()` utility in `src/server/utils/resolve-message.ts` reads templates from DB and replaces placeholders at runtime.

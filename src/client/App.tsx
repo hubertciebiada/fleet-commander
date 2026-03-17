@@ -9,6 +9,7 @@ import { IssueTreeView } from './views/IssueTreeView';
 import { UsageViewPage } from './views/UsageViewPage';
 import { ProjectsPage } from './views/ProjectsPage';
 import { SettingsPage } from './views/SettingsPage';
+import { StateMachinePage } from './views/StateMachinePage';
 
 export function App() {
   return (
@@ -30,6 +31,7 @@ export function App() {
                 <Route path="/issues" element={<IssueTreeView />} />
                 <Route path="/usage" element={<UsageViewPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/lifecycle" element={<StateMachinePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </main>
