@@ -172,6 +172,9 @@ interface LayoutResult {
   height: number;
 }
 
+const ALL_NODE_WIDTH = 70;
+const ALL_NODE_HEIGHT = 30;
+
 function computeLayout(states: StateNode[], transitions: Transition[]): LayoutResult {
   const g = new dagre.graphlib.Graph();
   g.setGraph({
@@ -189,25 +192,21 @@ function computeLayout(states: StateNode[], transitions: Transition[]): LayoutRe
     g.setNode(s.id, { label: s.id, width: NODE_WIDTH, height: NODE_HEIGHT });
   }
 
-  // Expand wildcard transitions: "*" means "from every state"
-  const expandedTransitions: Transition[] = [];
-  for (const t of transitions) {
-    if (t.from === '*') {
-      for (const s of states) {
-        if (s.id !== t.to) {
-          expandedTransitions.push({ ...t, from: s.id });
-        }
-      }
-    } else {
-      expandedTransitions.push(t);
-    }
+  // Check if any transitions use wildcard; if so, add an "All" pseudo-node
+  const hasWildcard = transitions.some((t) => t.from === '*');
+  if (hasWildcard) {
+    g.setNode('*', { label: 'All', width: ALL_NODE_WIDTH, height: ALL_NODE_HEIGHT });
   }
 
+  // For wildcard transitions, route through the "All" pseudo-node instead of
+  // expanding into one edge per real state (which creates spaghetti arrows).
   const edgeMap = new Map<string, Transition[]>();
-  for (const t of expandedTransitions) {
-    // Skip edges referencing unknown states
-    if (!stateIds.has(t.from) || !stateIds.has(t.to)) continue;
-    const key = `${t.from}->${t.to}`;
+  for (const t of transitions) {
+    const from = t.from === '*' ? '*' : t.from;
+    // Skip edges referencing unknown states (but allow the "*" pseudo-node)
+    if (from !== '*' && !stateIds.has(from)) continue;
+    if (!stateIds.has(t.to)) continue;
+    const key = `${from}->${t.to}`;
     if (!edgeMap.has(key)) edgeMap.set(key, []);
     edgeMap.get(key)!.push(t);
   }
@@ -301,7 +300,7 @@ function EdgeTooltip({
                 border: `1px solid ${stateColorMap[t.from] || '#8B949E'}40`,
               }}
             >
-              {t.from}
+              {t.from === '*' ? 'All' : t.from}
             </span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14" />
@@ -511,10 +510,10 @@ export function StateMachinePage() {
     return computeLayout(smData.states, smData.transitions);
   }, [smData]);
 
-  // Build state color map
+  // Build state color map (includes the "All" pseudo-node)
   const stateColorMap = useMemo<Record<string, string>>(() => {
     if (!smData) return {};
-    const map: Record<string, string> = {};
+    const map: Record<string, string> = { '*': '#8B949E' };
     for (const s of smData.states) {
       map[s.id] = s.color;
     }
@@ -739,10 +738,33 @@ export function StateMachinePage() {
 
                 {/* State boxes */}
                 {layout.nodes.map((node) => {
-                  const color = stateColorMap[node.id] || '#8B949E';
-                  const tintBg = `${color}18`;
                   const x = node.x - node.width / 2;
                   const y = node.y - node.height / 2;
+
+                  // Render the "All" pseudo-node as a small dashed pill
+                  if (node.id === '*') {
+                    return (
+                      <g key="all-node">
+                        <rect
+                          x={x} y={y}
+                          width={node.width} height={node.height}
+                          rx={15} ry={15}
+                          fill="none" stroke="#8B949E" strokeWidth={1.5} strokeDasharray="4 2"
+                        />
+                        <text
+                          x={node.x} y={node.y}
+                          textAnchor="middle" dominantBaseline="central"
+                          fill="#8B949E" fontSize={11} fontWeight={600}
+                          className="select-none"
+                        >
+                          All
+                        </text>
+                      </g>
+                    );
+                  }
+
+                  const color = stateColorMap[node.id] || '#8B949E';
+                  const tintBg = `${color}18`;
 
                   return (
                     <g key={node.id}>
