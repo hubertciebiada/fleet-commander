@@ -330,8 +330,9 @@ const systemRoutes: FastifyPluginCallback = (
           try {
             const scriptPath = path.join(config.fleetCommanderRoot, 'scripts', 'uninstall.sh');
             if (fs.existsSync(scriptPath)) {
+              const toBash = (p: string) => p.replace(/\\/g, '/');
               const cmd = process.platform === 'win32'
-                ? `bash "${scriptPath}" "${project.repoPath}"`
+                ? `bash "${toBash(scriptPath)}" "${toBash(project.repoPath)}"`
                 : `"${scriptPath}" "${project.repoPath}"`;
               execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });
             }

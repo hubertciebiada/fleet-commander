@@ -92,6 +92,33 @@ export function ProjectsPage() {
     fetchProjects();
   }, [fetchProjects]);
 
+  const [reinstalling, setReinstalling] = useState<number | null>(null);
+  const [reinstallResult, setReinstallResult] = useState<{ id: number; ok: boolean; error?: string } | null>(null);
+
+  const handleReinstall = useCallback(
+    async (project: ProjectSummary) => {
+      setReinstalling(project.id);
+      setReinstallResult(null);
+      try {
+        const data = await api.post<{ ok: boolean; output?: string; error?: string }>(
+          `projects/${project.id}/install`,
+          {},
+        );
+        setReinstallResult({ id: project.id, ok: data.ok, error: data.error });
+        await fetchProjects();
+      } catch (err: unknown) {
+        setReinstallResult({
+          id: project.id,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        setReinstalling(null);
+      }
+    },
+    [api, fetchProjects],
+  );
+
   const handleCleanup = useCallback((project: ProjectSummary) => {
     setCleanupProjectId(project.id);
   }, []);
@@ -439,8 +466,39 @@ export function ProjectsPage() {
                     )}
                   </div>
 
+                  {/* Reinstall result banner */}
+                  {reinstallResult?.id === project.id && (
+                    <div
+                      className={`mt-1 px-3 py-1.5 rounded text-xs ${
+                        reinstallResult.ok
+                          ? 'border border-[#3FB950]/30 bg-[#3FB950]/10 text-[#3FB950]'
+                          : 'border border-[#F85149]/30 bg-[#F85149]/10 text-[#F85149]'
+                      }`}
+                    >
+                      {reinstallResult.ok
+                        ? 'Installation completed successfully'
+                        : `Installation failed: ${reinstallResult.error}`}
+                    </div>
+                  )}
+
                   {/* Right: actions */}
                   <div className="flex items-center gap-2 shrink-0">
+                    {/* Show Install button when any component is missing */}
+                    {project.installStatus && (
+                      !project.installStatus.hooks?.installed ||
+                      !project.installStatus.prompt?.installed ||
+                      !project.installStatus.settings?.exists ||
+                      !project.installStatus.mcpConfig?.exists
+                    ) && (
+                      <button
+                        onClick={() => handleReinstall(project)}
+                        disabled={reinstalling === project.id}
+                        className="px-3 py-1 text-xs rounded border border-dark-accent/40 text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="(Re)install hooks, settings, MCP, and workflow prompt"
+                      >
+                        {reinstalling === project.id ? 'Installing...' : 'Install'}
+                      </button>
+                    )}
                     <button
                       onClick={() => handleCleanup(project)}
                       className="px-3 py-1 text-xs rounded border border-dark-border text-dark-muted hover:text-dark-text hover:border-dark-muted transition-colors"

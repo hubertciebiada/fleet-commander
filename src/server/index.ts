@@ -104,9 +104,32 @@ async function main() {
   server.log.info(`Fleet Commander server listening on port ${config.port}`);
 
   // Signal handlers for graceful shutdown
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) {
+      // Second signal — force exit immediately
+      server.log.info(`Received ${signal} again, forcing exit`);
+      process.exit(1);
+    }
+    shuttingDown = true;
     server.log.info(`Received ${signal}, shutting down...`);
-    await server.close();
+
+    // Force exit after 5 seconds if graceful shutdown hangs
+    const forceTimer = setTimeout(() => {
+      console.error('Graceful shutdown timed out after 5s, forcing exit');
+      process.exit(1);
+    }, 5000);
+    forceTimer.unref();
+
+    // Close SSE connections BEFORE server.close() so the HTTP server
+    // doesn't hang waiting for long-lived connections to end.
+    sseBroker.stop();
+
+    try {
+      await server.close();
+    } catch {
+      // ignore close errors
+    }
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

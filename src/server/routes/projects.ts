@@ -62,6 +62,13 @@ function normalizePath(p: string): string {
 }
 
 /**
+ * Convert a Windows path to a bash-safe format with forward slashes.
+ */
+function toBashPath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+/**
  * Check if a directory is a git repository.
  */
 function isGitRepo(dirPath: string): boolean {
@@ -95,24 +102,35 @@ function detectGithubRepo(dirPath: string): string | null {
 
 /**
  * Install Fleet Commander hooks into a project repo.
- * Returns true on success, false on failure (non-fatal).
+ * Returns { ok, stdout, stderr } so callers can log / surface errors.
  */
-function installHooks(repoPath: string): boolean {
+function installHooks(repoPath: string): { ok: boolean; stdout: string; stderr: string } {
+  const fail = (msg: string) => ({ ok: false, stdout: '', stderr: msg });
+
+  const scriptPath = path.join(config.fleetCommanderRoot, 'scripts', 'install.sh');
+  if (!fs.existsSync(scriptPath)) {
+    return fail(`install.sh not found at ${scriptPath}`);
+  }
+
+  // On Windows, convert paths to MSYS2 format: C:/foo → /c/foo
+  const cmd = process.platform === 'win32'
+    ? `bash "${toBashPath(scriptPath)}" "${toBashPath(repoPath)}"`
+    : `"${scriptPath}" "${repoPath}"`;
+
   try {
-    const scriptPath = path.join(config.fleetCommanderRoot, 'scripts', 'install.sh');
-    if (!fs.existsSync(scriptPath)) {
-      return false;
-    }
-
-    // On Windows, run via bash
-    const cmd = process.platform === 'win32'
-      ? `bash "${scriptPath}" "${repoPath}"`
-      : `"${scriptPath}" "${repoPath}"`;
-
-    execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });
-    return true;
-  } catch {
-    return false;
+    const stdout = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });
+    return { ok: true, stdout, stderr: '' };
+  } catch (err: unknown) {
+    const e = err as { stdout?: string; stderr?: string; message?: string; status?: number };
+    const stdout = e.stdout ?? '';
+    const stderr = e.stderr ?? '';
+    console.error(
+      `[installHooks] Failed for ${repoPath} (exit ${e.status ?? '?'}):\n` +
+      `  cmd: ${cmd}\n` +
+      `  stderr: ${stderr.trim()}\n` +
+      `  stdout: ${stdout.trim()}`,
+    );
+    return { ok: false, stdout, stderr: stderr || e.message || 'unknown error' };
   }
 }
 
@@ -127,7 +145,7 @@ function uninstallHooks(repoPath: string): void {
     }
 
     const cmd = process.platform === 'win32'
-      ? `bash "${scriptPath}" "${repoPath}"`
+      ? `bash "${toBashPath(scriptPath)}" "${toBashPath(repoPath)}"`
       : `"${scriptPath}" "${repoPath}"`;
 
     execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });
@@ -376,7 +394,12 @@ const projectsRoutes: FastifyPluginCallback = (
         });
 
         // Install hooks (non-fatal)
-        installHooks(normalizedPath);
+        const installResult = installHooks(normalizedPath);
+        if (!installResult.ok) {
+          request.log.warn(
+            `Hook installation failed for ${normalizedPath}: ${installResult.stderr}`,
+          );
+        }
 
         // Verify artifacts were actually installed
         const status = checkInstallStatus(normalizedPath);
@@ -622,6 +645,63 @@ const projectsRoutes: FastifyPluginCallback = (
         return reply.code(200).send({ success: true });
       } catch (err: unknown) {
         request.log.error(err, 'Failed to delete project');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /api/projects/:id/install — (re)install hooks, settings, MCP, prompt
+  // -------------------------------------------------------------------------
+  fastify.post(
+    '/api/projects/:id/install',
+    async (
+      request: FastifyRequest<{ Params: ProjectIdParams }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const projectId = parseInt(request.params.id, 10);
+        if (isNaN(projectId) || projectId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid project ID',
+          });
+        }
+
+        const db = getDatabase();
+        const project = db.getProject(projectId);
+        if (!project) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Project ${projectId} not found`,
+          });
+        }
+
+        const result = installHooks(project.repoPath);
+
+        // Check what actually landed on disk
+        const status = checkInstallStatus(project.repoPath);
+        const allInstalled = status.hooks.installed && status.prompt.installed;
+        db.updateProject(project.id, { hooksInstalled: allInstalled });
+
+        // Broadcast so UI refreshes badges
+        sseBroker.broadcast('project_updated', {
+          project_id: projectId,
+          name: project.name,
+          status: project.status,
+        });
+
+        return reply.code(200).send({
+          ok: result.ok,
+          output: result.stdout.trim(),
+          error: result.stderr.trim() || undefined,
+          installStatus: status,
+        });
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to install hooks');
         return reply.code(500).send({
           error: 'Internal Server Error',
           message: err instanceof Error ? err.message : String(err),

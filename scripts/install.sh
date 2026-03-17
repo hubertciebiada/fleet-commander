@@ -56,6 +56,8 @@ mkdir -p "$HOOK_DIR"
 
 # Copy all .sh files from the hooks directory
 cp "$FC_ROOT/hooks/"*.sh "$HOOK_DIR/"
+# Ensure LF line endings — bash on Windows chokes on CRLF shebangs
+sed -i 's/\r$//' "$HOOK_DIR/"*.sh
 chmod +x "$HOOK_DIR/"*.sh
 
 echo "  Copied hook scripts to $HOOK_DIR"

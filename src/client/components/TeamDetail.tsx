@@ -344,10 +344,10 @@ export function TeamDetail() {
                 <EventTimeline teamId={detail.id} refreshKey={refreshKey} />
               </section>
 
-              {/* ---- Claude Code Output Stream ---- */}
+              {/* ---- Session Log (CC output + sent messages) ---- */}
               <section>
                 <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1">
-                  Claude Code Output
+                  Session Log
                 </h4>
                 <TeamOutput teamId={detail.id} teamStatus={detail.status} />
               </section>

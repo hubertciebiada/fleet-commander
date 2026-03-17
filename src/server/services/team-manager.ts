@@ -1198,6 +1198,20 @@ export class TeamManager {
     try {
       this.writeStdinMessage(stdin, message);
       console.log(`[TeamManager] Message sent to team ${teamId}: ${message.substring(0, 100)}`);
+
+      // Inject a synthetic "user" event into parsedEvents so it appears in the
+      // Session Log alongside assistant responses (issue #5).
+      const userEvent: StreamEvent = {
+        type: 'user',
+        timestamp: new Date().toISOString(),
+        message: { content: [{ type: 'text', text: message }] },
+      };
+      const events = this.parsedEvents.get(teamId);
+      if (events) {
+        events.push(userEvent);
+      }
+      sseBroker.broadcast('team_output', { team_id: teamId, event: userEvent }, teamId);
+
       return true;
     } catch (err) {
       console.error(`[TeamManager] Failed to send message to team ${teamId}:`, err);

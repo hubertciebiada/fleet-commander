@@ -53,20 +53,20 @@ interface GHPRListItem {
 class GitHubPoller {
   private interval: NodeJS.Timeout | null = null;
 
+  /** Whether any team needs fast polling (pending CI or awaiting PR detection) */
+  private needsFastPoll = false;
+
   /**
-   * Start the polling loop. Polls immediately after a short delay,
-   * then every `config.githubPollIntervalMs` (default 30 000 ms).
+   * Start the polling loop. Uses adaptive intervals:
+   * - Normal: config.githubPollIntervalMs (default 30s)
+   * - Fast: 10s when teams are awaiting PR detection or have pending CI
    */
   start(): void {
     if (this.interval) {
       return; // already running
     }
 
-    this.interval = setInterval(() => this.poll(), config.githubPollIntervalMs);
-    // Allow Node.js to exit even if the interval is still active
-    if (this.interval.unref) {
-      this.interval.unref();
-    }
+    this.scheduleNextPoll();
 
     // Initial poll after a short delay so the server has time to finish setup
     const initialTimer = setTimeout(() => this.poll(), 5000);
@@ -75,8 +75,30 @@ class GitHubPoller {
     }
 
     console.log(
-      `[GitHubPoller] Started — polling every ${config.githubPollIntervalMs}ms across all active projects`
+      `[GitHubPoller] Started — base interval ${config.githubPollIntervalMs}ms, fast 10s when PRs pending`
     );
+  }
+
+  /** Schedule the next poll with adaptive interval */
+  private scheduleNextPoll(): void {
+    if (this.interval) {
+      clearTimeout(this.interval);
+    }
+    const delay = this.needsFastPoll
+      ? Math.min(10_000, config.githubPollIntervalMs)
+      : config.githubPollIntervalMs;
+    this.interval = setTimeout(() => {
+      this.poll().finally(() => this.scheduleNextPoll());
+    }, delay);
+    if (this.interval.unref) {
+      this.interval.unref();
+    }
+  }
+
+  /** Trigger an immediate extra poll (e.g. after a PR is detected) */
+  triggerPoll(): void {
+    // Run poll in background, don't wait
+    this.poll().catch(() => {});
   }
 
   /**
@@ -84,7 +106,7 @@ class GitHubPoller {
    */
   stop(): void {
     if (this.interval) {
-      clearInterval(this.interval);
+      clearTimeout(this.interval);
       this.interval = null;
       console.log('[GitHubPoller] Stopped');
     }
@@ -114,6 +136,7 @@ class GitHubPoller {
     }
 
     const teams = db.getActiveTeams();
+    let wantFast = false;
 
     for (const team of teams) {
       try {
@@ -126,7 +149,14 @@ class GitHubPoller {
 
         if (team.prNumber) {
           await this.pollPR(team.prNumber, team.id, githubRepo);
+          // Fast-poll when CI is pending
+          const pr = db.getPullRequest(team.prNumber);
+          if (pr && (pr.ciStatus === 'pending' || pr.state === 'open')) {
+            wantFast = true;
+          }
         } else if (team.branchName) {
+          // Fast-poll when awaiting PR detection
+          wantFast = true;
           this.detectPR(team.branchName, team.id, githubRepo);
         }
       } catch (err) {
@@ -137,6 +167,8 @@ class GitHubPoller {
         );
       }
     }
+
+    this.needsFastPoll = wantFast;
   }
 
   // -------------------------------------------------------------------------
