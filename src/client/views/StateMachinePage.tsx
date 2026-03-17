@@ -461,12 +461,15 @@ function MessageCard({
 export function StateMachinePage() {
   const api = useApi();
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'diagram' | 'messages'>('diagram');
+
   // State machine data (diagram)
   const [smData, setSmData] = useState<StateMachineResponse | null>(null);
   const [smLoading, setSmLoading] = useState(true);
   const [smError, setSmError] = useState<string | null>(null);
 
-  // Message templates data (bottom panel)
+  // Message templates data
   const [templates, setTemplates] = useState<MessageTemplateData[]>([]);
 
   // Diagram interaction state
@@ -579,198 +582,222 @@ export function StateMachinePage() {
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="px-6 py-4 border-b border-dark-border shrink-0">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-dark-text">State Machine</h1>
-            <p className="text-dark-muted text-sm mt-1">
-              Team lifecycle transitions and PM message templates
-            </p>
-          </div>
-          {/* Legend */}
-          <div className="flex items-center gap-4 text-xs text-dark-muted">
-            {Object.entries(TRIGGER_LABELS).map(([key, label]) => (
-              <div key={key} className="flex items-center gap-1.5">
-                <TriggerIcon trigger={key} size={14} className="text-[#8B949E]" />
-                <span>{label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <h1 className="text-xl font-semibold text-dark-text">Lifecycle</h1>
+        <p className="text-dark-muted text-sm mt-1">
+          Team lifecycle transitions and PM message templates
+        </p>
       </div>
 
-      {/* Main content — top/bottom split */}
-      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-
-        {/* TOP section (60%): State Machine Diagram */}
-        <div
-          ref={svgContainerRef}
-          className="relative h-[60%] min-h-0 p-4 overflow-auto border-b border-dark-border"
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-4 py-2 border-b border-[#30363D] shrink-0">
+        <button
+          onClick={() => setActiveTab('diagram')}
+          className={`px-3 py-1.5 text-xs font-medium rounded ${
+            activeTab === 'diagram'
+              ? 'bg-[#58A6FF20] text-[#58A6FF] border border-[#58A6FF40]'
+              : 'text-[#8B949E] hover:text-[#E6EDF3]'
+          }`}
         >
-          <svg
-            viewBox={`0 0 ${layout.width} ${layout.height}`}
-            className="w-full h-auto"
-            style={{ minHeight: 300 }}
-          >
-            <defs>
-              <marker
-                id="arrowhead"
-                markerWidth="10"
-                markerHeight="7"
-                refX="10"
-                refY="3.5"
-                orient="auto"
+          State Machine
+        </button>
+        <button
+          onClick={() => setActiveTab('messages')}
+          className={`px-3 py-1.5 text-xs font-medium rounded ${
+            activeTab === 'messages'
+              ? 'bg-[#58A6FF20] text-[#58A6FF] border border-[#58A6FF40]'
+              : 'text-[#8B949E] hover:text-[#E6EDF3]'
+          }`}
+        >
+          PM Messages
+        </button>
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        {activeTab === 'diagram' ? (
+          /* State Machine tab — full height diagram */
+          <div className="flex flex-col h-full">
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-xs text-dark-muted px-6 py-3 border-b border-dark-border shrink-0">
+              {Object.entries(TRIGGER_LABELS).map(([key, label]) => (
+                <div key={key} className="flex items-center gap-1.5">
+                  <TriggerIcon trigger={key} size={14} className="text-[#8B949E]" />
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Diagram */}
+            <div
+              ref={svgContainerRef}
+              className="relative flex-1 min-h-0 p-4 overflow-auto"
+            >
+              <svg
+                viewBox={`0 0 ${layout.width} ${layout.height}`}
+                className="w-full h-auto"
+                style={{ minHeight: 300 }}
               >
-                <polygon points="0 0, 10 3.5, 0 7" fill="#8B949E" />
-              </marker>
-              <marker
-                id="arrowhead-hover"
-                markerWidth="10"
-                markerHeight="7"
-                refX="10"
-                refY="3.5"
-                orient="auto"
-              >
-                <polygon points="0 0, 10 3.5, 0 7" fill="#C9D1D9" />
-              </marker>
-            </defs>
+                <defs>
+                  <marker
+                    id="arrowhead"
+                    markerWidth="10"
+                    markerHeight="7"
+                    refX="10"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#8B949E" />
+                  </marker>
+                  <marker
+                    id="arrowhead-hover"
+                    markerWidth="10"
+                    markerHeight="7"
+                    refX="10"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#C9D1D9" />
+                  </marker>
+                </defs>
 
-            {/* Transition edges */}
-            {layout.edges.map((edge) => {
-              const edgeKey = `${edge.from}->${edge.to}`;
-              const isHovered = edgeKey === hoveredEdge;
-              const points = edge.points;
-              if (points.length === 0) return null;
+                {/* Transition edges */}
+                {layout.edges.map((edge) => {
+                  const edgeKey = `${edge.from}->${edge.to}`;
+                  const isHovered = edgeKey === hoveredEdge;
+                  const points = edge.points;
+                  if (points.length === 0) return null;
 
-              const d = points.map((p, j) => `${j === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-              const midIdx = Math.floor(points.length / 2);
-              const midPt = points[midIdx];
+                  const d = points.map((p, j) => `${j === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+                  const midIdx = Math.floor(points.length / 2);
+                  const midPt = points[midIdx];
 
-              let strokeColor = '#30363D';
-              let strokeWidth = 1.5;
-              let markerEnd = 'url(#arrowhead)';
+                  let strokeColor = '#30363D';
+                  let strokeWidth = 1.5;
+                  let markerEnd = 'url(#arrowhead)';
 
-              if (isHovered) {
-                strokeColor = '#C9D1D9';
-                strokeWidth = 2;
-                markerEnd = 'url(#arrowhead-hover)';
-              }
+                  if (isHovered) {
+                    strokeColor = '#C9D1D9';
+                    strokeWidth = 2;
+                    markerEnd = 'url(#arrowhead-hover)';
+                  }
 
-              const transCount = edge.transitions.length;
+                  const transCount = edge.transitions.length;
 
-              return (
-                <g
-                  key={edgeKey}
-                  className="cursor-pointer"
-                  onClick={(e) => handleEdgeClick(e, edge.transitions)}
-                  onMouseEnter={() => setHoveredEdge(edgeKey)}
-                  onMouseLeave={() => setHoveredEdge(null)}
-                >
-                  <path d={d} fill="none" stroke="transparent" strokeWidth="16" />
-                  <path
-                    d={d}
-                    fill="none"
-                    stroke={strokeColor}
-                    strokeWidth={strokeWidth}
-                    markerEnd={markerEnd}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                  />
-                  {midPt && edge.transitions.length > 0 && (
-                    triggerIconSvgPaths(
-                      edge.transitions[0].trigger,
-                      midPt.x,
-                      midPt.y - 12,
-                      14,
-                      isHovered ? '#C9D1D9' : '#8B949E',
-                      1,
-                    )
-                  )}
-                  {transCount > 1 && midPt && (
-                    <g>
-                      <rect
-                        x={midPt.x + 6}
-                        y={midPt.y - 22}
-                        width={transCount >= 10 ? 30 : 18}
-                        height={16}
-                        rx={8}
-                        fill="#30363D"
+                  return (
+                    <g
+                      key={edgeKey}
+                      className="cursor-pointer"
+                      onClick={(e) => handleEdgeClick(e, edge.transitions)}
+                      onMouseEnter={() => setHoveredEdge(edgeKey)}
+                      onMouseLeave={() => setHoveredEdge(null)}
+                    >
+                      <path d={d} fill="none" stroke="transparent" strokeWidth="16" />
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke={strokeColor}
+                        strokeWidth={strokeWidth}
+                        markerEnd={markerEnd}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
                       />
+                      {midPt && edge.transitions.length > 0 && (
+                        triggerIconSvgPaths(
+                          edge.transitions[0].trigger,
+                          midPt.x,
+                          midPt.y - 12,
+                          14,
+                          isHovered ? '#C9D1D9' : '#8B949E',
+                          1,
+                        )
+                      )}
+                      {transCount > 1 && midPt && (
+                        <g>
+                          <rect
+                            x={midPt.x + 6}
+                            y={midPt.y - 22}
+                            width={transCount >= 10 ? 30 : 18}
+                            height={16}
+                            rx={8}
+                            fill="#30363D"
+                          />
+                          <text
+                            x={midPt.x + 6 + (transCount >= 10 ? 15 : 9)}
+                            y={midPt.y - 22 + 12}
+                            textAnchor="middle"
+                            fontSize={10}
+                            fontWeight={600}
+                            fill="#8B949E"
+                          >
+                            {transCount}
+                          </text>
+                        </g>
+                      )}
+                    </g>
+                  );
+                })}
+
+                {/* State boxes */}
+                {layout.nodes.map((node) => {
+                  const color = stateColorMap[node.id] || '#8B949E';
+                  const tintBg = `${color}18`;
+                  const x = node.x - node.width / 2;
+                  const y = node.y - node.height / 2;
+
+                  return (
+                    <g key={node.id}>
+                      <rect x={x} y={y} width={node.width} height={node.height} rx={8} ry={8} fill="#0D1117" />
+                      <rect x={x} y={y} width={node.width} height={node.height} rx={8} ry={8} fill={tintBg} />
+                      <rect x={x} y={y} width={node.width} height={node.height} rx={8} ry={8} fill="none" stroke={color} strokeWidth={2} />
                       <text
-                        x={midPt.x + 6 + (transCount >= 10 ? 15 : 9)}
-                        y={midPt.y - 22 + 12}
+                        x={node.x}
+                        y={node.y}
                         textAnchor="middle"
-                        fontSize={10}
-                        fontWeight={600}
-                        fill="#8B949E"
+                        dominantBaseline="central"
+                        fontSize={14}
+                        fontWeight={700}
+                        fill={color}
+                        className="select-none"
                       >
-                        {transCount}
+                        {node.id}
                       </text>
                     </g>
-                  )}
-                </g>
-              );
-            })}
+                  );
+                })}
+              </svg>
 
-            {/* State boxes */}
-            {layout.nodes.map((node) => {
-              const color = stateColorMap[node.id] || '#8B949E';
-              const tintBg = `${color}18`;
-              const x = node.x - node.width / 2;
-              const y = node.y - node.height / 2;
-
-              return (
-                <g key={node.id}>
-                  <rect x={x} y={y} width={node.width} height={node.height} rx={8} ry={8} fill="#0D1117" />
-                  <rect x={x} y={y} width={node.width} height={node.height} rx={8} ry={8} fill={tintBg} />
-                  <rect x={x} y={y} width={node.width} height={node.height} rx={8} ry={8} fill="none" stroke={color} strokeWidth={2} />
-                  <text
-                    x={node.x}
-                    y={node.y}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={14}
-                    fontWeight={700}
-                    fill={color}
-                    className="select-none"
-                  >
-                    {node.id}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
-
-          {/* Tooltip popover */}
-          {tooltip && (
-            <EdgeTooltip
-              info={tooltip}
-              stateColorMap={stateColorMap}
-              onClose={closeTooltip}
-            />
-          )}
-        </div>
-
-        {/* BOTTOM section (40%): PM Messages */}
-        <div className="h-[40%] min-h-0 overflow-auto px-6 py-4">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-dark-text">PM &rarr; Team Leader Messages</h2>
-            <p className="text-dark-muted text-sm mt-0.5">
-              Messages automatically sent to your team leads when events occur
-            </p>
+              {/* Tooltip popover */}
+              {tooltip && (
+                <EdgeTooltip
+                  info={tooltip}
+                  stateColorMap={stateColorMap}
+                  onClose={closeTooltip}
+                />
+              )}
+            </div>
           </div>
+        ) : (
+          /* PM Messages tab — full height message cards */
+          <div className="px-6 py-4">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold text-dark-text">PM &rarr; Team Leader Messages</h2>
+              <p className="text-dark-muted text-sm mt-0.5">
+                Messages automatically sent to your team leads when events occur
+              </p>
+            </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-            {PM_MESSAGE_CARDS.map((cardDef) => (
-              <MessageCard
-                key={cardDef.id}
-                cardDef={cardDef}
-                templateData={templateMap.get(cardDef.id)}
-                onSave={handleSaveTemplate}
-              />
-            ))}
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              {PM_MESSAGE_CARDS.map((cardDef) => (
+                <MessageCard
+                  key={cardDef.id}
+                  cardDef={cardDef}
+                  templateData={templateMap.get(cardDef.id)}
+                  onSave={handleSaveTemplate}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-
+        )}
       </div>
     </div>
   );
