@@ -62,6 +62,30 @@ function normalizePath(p: string): string {
 }
 
 /**
+ * Find Git Bash executable on Windows.
+ * Avoids WSL's bash which can't handle Windows paths.
+ */
+let _gitBash: string | null = null;
+function getGitBash(): string {
+  if (_gitBash) return _gitBash;
+  try {
+    // git --exec-path returns e.g. "C:/Git/scm/libexec/git-core"
+    // Git bash is at {git_root}/usr/bin/bash.exe
+    const execPath = execSync('git --exec-path', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const gitRoot = path.resolve(execPath, '..', '..');
+    const bashPath = path.join(gitRoot, 'usr', 'bin', 'bash.exe');
+    if (fs.existsSync(bashPath)) {
+      _gitBash = bashPath;
+      return _gitBash;
+    }
+  } catch {
+    // fallback
+  }
+  _gitBash = 'bash'; // hope for the best
+  return _gitBash;
+}
+
+/**
  * Convert a Windows path to a bash-safe format with forward slashes.
  */
 function toBashPath(p: string): string {
@@ -114,7 +138,7 @@ function installHooks(repoPath: string): { ok: boolean; stdout: string; stderr: 
 
   // On Windows, convert paths to MSYS2 format: C:/foo → /c/foo
   const cmd = process.platform === 'win32'
-    ? `bash "${toBashPath(scriptPath)}" "${toBashPath(repoPath)}"`
+    ? `"${getGitBash()}" "${toBashPath(scriptPath)}" "${toBashPath(repoPath)}"`
     : `"${scriptPath}" "${repoPath}"`;
 
   try {
@@ -145,7 +169,7 @@ function uninstallHooks(repoPath: string): void {
     }
 
     const cmd = process.platform === 'win32'
-      ? `bash "${toBashPath(scriptPath)}" "${toBashPath(repoPath)}"`
+      ? `"${getGitBash()}" "${toBashPath(scriptPath)}" "${toBashPath(repoPath)}"`
       : `"${scriptPath}" "${repoPath}"`;
 
     execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });

@@ -494,23 +494,15 @@ export function ProjectsPage() {
 
                   {/* Right: actions */}
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* Show Install button when any component is missing or has CRLF */}
-                    {project.installStatus && (
-                      !project.installStatus.hooks?.installed ||
-                      !project.installStatus.prompt?.installed ||
-                      !project.installStatus.settings?.exists ||
-                      !project.installStatus.mcpConfig?.exists ||
-                      project.installStatus.hooks?.files?.some((f: any) => f.hasCrlf)
-                    ) && (
-                      <button
-                        onClick={() => handleReinstall(project)}
-                        disabled={reinstalling === project.id}
-                        className="px-3 py-1 text-xs rounded border border-dark-accent/40 text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        title="(Re)install hooks, settings, MCP, and workflow prompt"
-                      >
-                        {reinstalling === project.id ? 'Installing...' : 'Install'}
-                      </button>
-                    )}
+                    {/* Reinstall button — always visible */}
+                    <button
+                      onClick={() => handleReinstall(project)}
+                      disabled={reinstalling === project.id}
+                      className="px-3 py-1 text-xs rounded border border-dark-accent/40 text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="(Re)install hooks, settings, MCP, and workflow prompt"
+                    >
+                      {reinstalling === project.id ? 'Installing...' : 'Reinstall'}
+                    </button>
                     <button
                       onClick={() => handleCleanup(project)}
                       className="px-3 py-1 text-xs rounded border border-dark-border text-dark-muted hover:text-dark-text hover:border-dark-muted transition-colors"

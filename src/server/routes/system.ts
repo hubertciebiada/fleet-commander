@@ -331,8 +331,15 @@ const systemRoutes: FastifyPluginCallback = (
             const scriptPath = path.join(config.fleetCommanderRoot, 'scripts', 'uninstall.sh');
             if (fs.existsSync(scriptPath)) {
               const toBash = (p: string) => p.replace(/\\/g, '/');
+              // Find Git Bash to avoid WSL bash on Windows
+              let gitBash = 'bash';
+              try {
+                const ep = execSync('git --exec-path', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+                const bp = path.join(path.resolve(ep, '..', '..'), 'usr', 'bin', 'bash.exe');
+                if (fs.existsSync(bp)) gitBash = bp;
+              } catch { /* fallback */ }
               const cmd = process.platform === 'win32'
-                ? `bash "${toBash(scriptPath)}" "${toBash(project.repoPath)}"`
+                ? `"${gitBash}" "${toBash(scriptPath)}" "${toBash(project.repoPath)}"`
                 : `"${scriptPath}" "${project.repoPath}"`;
               execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });
             }
