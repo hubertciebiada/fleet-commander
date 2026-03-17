@@ -123,8 +123,8 @@ SELECT
   t.last_event_at,
   ROUND((julianday('now') - julianday(t.launched_at)) * 24 * 60, 0) AS duration_min,
   ROUND((julianday('now') - julianday(t.last_event_at)) * 24 * 60, 1) AS idle_min,
-  0 AS total_cost,
-  0 AS session_count,
+  COALESCE(u.total_cost, 0) AS total_cost,
+  COALESCE(u.session_count, 0) AS session_count,
   pr.state AS pr_state,
   pr.ci_status,
   pr.merge_state AS merge_status,
@@ -132,7 +132,16 @@ SELECT
   t.updated_at
 FROM teams t
 LEFT JOIN projects p ON p.id = t.project_id
-LEFT JOIN pull_requests pr ON pr.team_id = t.id;
+LEFT JOIN pull_requests pr ON pr.team_id = t.id
+LEFT JOIN (
+  SELECT
+    team_id,
+    ROUND(SUM(COALESCE(json_extract(raw_output, '$.total_cost_usd'), 0)), 4) AS total_cost,
+    COUNT(*) AS session_count
+  FROM usage_snapshots
+  WHERE raw_output IS NOT NULL AND json_extract(raw_output, '$.total_cost_usd') IS NOT NULL
+  GROUP BY team_id
+) u ON u.team_id = t.id;
 
 -- ---------------------------------------------------------------------------
 -- USAGE SNAPSHOTS — usage percentage tracking (replaces cost tracking)
@@ -185,6 +194,21 @@ INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
   ('stuck_nudge',
    'Hey, you have been idle for a while on issue #{{ISSUE_NUMBER}}. What is the status? Do you need help?',
    'Nudge sent to TL when team transitions to stuck');
+
+-- ---------------------------------------------------------------------------
+-- TEAM TRANSITIONS — state machine transition history per team
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS team_transitions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id         INTEGER NOT NULL REFERENCES teams(id),
+  from_status     TEXT NOT NULL,
+  to_status       TEXT NOT NULL,
+  trigger         TEXT,                             -- 'hook' | 'timer' | 'poller' | 'pm_action' | 'system'
+  reason          TEXT,                             -- human-readable reason
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_transitions_team ON team_transitions(team_id);
 
 -- Insert schema version 2 (or upgrade from 1)
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);

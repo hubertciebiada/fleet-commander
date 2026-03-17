@@ -31,21 +31,33 @@ export function CIChecks({ checks }: CIChecksProps) {
   }
 
   return (
-    <ul className="space-y-1.5">
+    <div className="flex flex-wrap gap-1.5">
       {checks.map((check, i) => {
         const { icon, color } = getCheckIcon(check.conclusion, check.status);
+        const bgColor =
+          check.conclusion === 'success'
+            ? 'rgba(63, 185, 80, 0.15)'
+            : check.conclusion === 'failure'
+              ? 'rgba(248, 81, 73, 0.15)'
+              : check.conclusion === 'cancelled'
+                ? 'rgba(139, 148, 158, 0.15)'
+                : 'rgba(210, 153, 34, 0.15)';
         return (
-          <li key={`${check.name}-${i}`} className="flex items-center gap-2 text-sm">
-            <span
-              className="font-bold text-base leading-none w-4 text-center shrink-0"
-              style={{ color }}
-            >
+          <span
+            key={`${check.name}-${i}`}
+            className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full max-w-[10rem]"
+            style={{ backgroundColor: bgColor }}
+            title={check.name}
+          >
+            <span className="font-bold leading-none shrink-0" style={{ color }}>
               {icon}
             </span>
-            <span className="text-dark-text truncate">{check.name}</span>
-          </li>
+            <span className="truncate" style={{ color }}>
+              {check.name}
+            </span>
+          </span>
         );
       })}
-    </ul>
+    </div>
   );
 }

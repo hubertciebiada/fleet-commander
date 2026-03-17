@@ -244,22 +244,6 @@ function checkInstallStatus(repoPath: string): InstallStatus {
     exists: fs.existsSync(path.join(repoPath, '.claude', 'settings.json')),
   };
 
-  // Check .mcp.json for fleet-commander entry
-  let mcpHasFleetCommander = false;
-  const mcpPath = path.join(repoPath, '.mcp.json');
-  if (fs.existsSync(mcpPath)) {
-    try {
-      const mcpContent = fs.readFileSync(mcpPath, 'utf-8');
-      mcpHasFleetCommander = mcpContent.includes('fleet-commander');
-    } catch {
-      // Non-fatal: treat as not found
-    }
-  }
-  const mcpConfigFile: InstallFileStatus = {
-    name: '.mcp.json (fleet-commander entry)',
-    exists: mcpHasFleetCommander,
-  };
-
   return {
     hooks: {
       installed: hookFoundCount === hookNames.length && !hookHasCrlf,
@@ -272,7 +256,6 @@ function checkInstallStatus(repoPath: string): InstallStatus {
       files: promptFiles,
     },
     settings: settingsFile,
-    mcpConfig: mcpConfigFile,
   };
 }
 
@@ -707,7 +690,7 @@ const projectsRoutes: FastifyPluginCallback = (
   );
 
   // -------------------------------------------------------------------------
-  // POST /api/projects/:id/install — (re)install hooks, settings, MCP, prompt
+  // POST /api/projects/:id/install — (re)install hooks, settings, prompt
   // -------------------------------------------------------------------------
   fastify.post(
     '/api/projects/:id/install',

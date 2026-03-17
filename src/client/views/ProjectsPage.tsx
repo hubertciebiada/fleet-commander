@@ -293,7 +293,7 @@ export function ProjectsPage() {
                           },
                         ];
 
-                        // Simple boolean categories (settings, mcp)
+                        // Simple boolean categories (settings)
                         const booleanCategories: {
                           key: string;
                           label: string;
@@ -305,14 +305,6 @@ export function ProjectsPage() {
                             label: 'settings',
                             exists: s.settings?.exists ?? false,
                             tooltip: s.settings?.exists ? 'settings.json found' : 'settings.json missing',
-                          },
-                          {
-                            key: 'mcp',
-                            label: 'mcp',
-                            exists: s.mcpConfig?.exists ?? false,
-                            tooltip: s.mcpConfig?.exists
-                              ? '.mcp.json has fleet-commander entry'
-                              : '.mcp.json missing fleet-commander entry',
                           },
                         ];
 
@@ -499,7 +491,7 @@ export function ProjectsPage() {
                       onClick={() => handleReinstall(project)}
                       disabled={reinstalling === project.id}
                       className="px-3 py-1 text-xs rounded border border-dark-accent/40 text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      title="(Re)install hooks, settings, MCP, and workflow prompt"
+                      title="(Re)install hooks, settings, and workflow prompt"
                     >
                       {reinstalling === project.id ? 'Installing...' : 'Reinstall'}
                     </button>

@@ -21,6 +21,7 @@ import type {
   ProjectSummary,
   ProjectStatus,
   MessageTemplate,
+  TeamTransition,
 } from '../shared/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -201,6 +202,9 @@ export class FleetDatabase {
     // Add message_templates table if missing (for existing databases)
     this.addMessageTemplatesTable();
 
+    // Add team_transitions table if missing (for existing databases)
+    this.addTeamTransitionsTable();
+
     // Resolve schema.sql relative to this file.
     // In dev (tsx): __dirname is src/server
     // In compiled (node): __dirname is dist/server/server
@@ -331,6 +335,29 @@ export class FleetDatabase {
           created_at  TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         )
+      `);
+    } catch {
+      // Table creation failed — schema.sql will handle it
+    }
+  }
+
+  /**
+   * Add team_transitions table if it doesn't exist.
+   * Handles upgrade of existing databases that lack this table.
+   */
+  private addTeamTransitionsTable(): void {
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS team_transitions (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          team_id         INTEGER NOT NULL REFERENCES teams(id),
+          from_status     TEXT NOT NULL,
+          to_status       TEXT NOT NULL,
+          trigger         TEXT,
+          reason          TEXT,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_team_transitions_team ON team_transitions(team_id);
       `);
     } catch {
       // Table creation failed — schema.sql will handle it
@@ -1067,6 +1094,51 @@ export class FleetDatabase {
   }
 
   // -------------------------------------------------------------------------
+  // Team Transitions (state machine history)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Record a team state transition for history/audit purposes.
+   */
+  insertTransition(data: {
+    teamId: number;
+    fromStatus: string;
+    toStatus: string;
+    trigger: string;
+    reason: string;
+  }): void {
+    this.db.prepare(
+      'INSERT INTO team_transitions (team_id, from_status, to_status, trigger, reason) VALUES (?, ?, ?, ?, ?)'
+    ).run(data.teamId, data.fromStatus, data.toStatus, data.trigger, data.reason);
+  }
+
+  /**
+   * Get all transitions for a team, ordered by creation time ascending.
+   */
+  getTransitions(teamId: number): TeamTransition[] {
+    const rows = this.db.prepare(
+      'SELECT id, team_id, from_status, to_status, trigger, reason, created_at FROM team_transitions WHERE team_id = ? ORDER BY created_at ASC'
+    ).all(teamId) as Array<{
+      id: number;
+      team_id: number;
+      from_status: string;
+      to_status: string;
+      trigger: string;
+      reason: string;
+      created_at: string;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      teamId: r.team_id,
+      fromStatus: r.from_status,
+      toStatus: r.to_status,
+      trigger: r.trigger,
+      reason: r.reason,
+      createdAt: r.created_at,
+    }));
+  }
+
+  // -------------------------------------------------------------------------
   // Individual record deletion helpers (used by project delete)
   // -------------------------------------------------------------------------
 
@@ -1079,6 +1151,7 @@ export class FleetDatabase {
   }
 
   deleteTeamsByProject(projectId: number): void {
+    this.db.prepare('DELETE FROM team_transitions WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(projectId);
     this.db.prepare('DELETE FROM pull_requests WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(projectId);
     this.db.prepare('DELETE FROM teams WHERE project_id = ?').run(projectId);
   }
@@ -1093,6 +1166,7 @@ export class FleetDatabase {
    */
   deleteTeamAndRelated(teamId: number): void {
     this.db.transaction((id: number) => {
+      this.db.prepare('DELETE FROM team_transitions WHERE team_id = ?').run(id);
       this.db.prepare('DELETE FROM events WHERE team_id = ?').run(id);
       this.db.prepare('DELETE FROM commands WHERE team_id = ?').run(id);
       this.db.prepare('DELETE FROM usage_snapshots WHERE team_id = ?').run(id);
@@ -1112,6 +1186,7 @@ export class FleetDatabase {
    */
   factoryReset(defaultTemplates: { id: string; template: string }[]): number {
     this.db.transaction(() => {
+      this.db.prepare('DELETE FROM team_transitions').run();
       this.db.prepare('DELETE FROM events').run();
       this.db.prepare('DELETE FROM commands').run();
       this.db.prepare('DELETE FROM usage_snapshots').run();

@@ -63,7 +63,6 @@ export interface InstallStatus {
   hooks: InstallHooksStatus;
   prompt: InstallCategoryStatus;
   settings: InstallFileStatus;
-  mcpConfig: InstallFileStatus;
 }
 
 /** Project with team count for list view */
@@ -118,6 +117,17 @@ export interface Event {
   toolName: string | null;
   agentName: string | null;
   payload: string | null;
+  createdAt: string;
+}
+
+/** A team state transition record */
+export interface TeamTransition {
+  id: number;
+  teamId: number;
+  fromStatus: string;
+  toStatus: string;
+  trigger: string;
+  reason: string;
   createdAt: string;
 }
 

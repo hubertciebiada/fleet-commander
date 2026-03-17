@@ -262,6 +262,11 @@ class GitHubPoller {
 
       if (changed) {
         db.updatePullRequest(prNumber, prData);
+
+        // PR status changes count as team activity — update lastEventAt
+        // so the stuck-detector knows the team is not truly idle.
+        db.updateTeam(teamId, { lastEventAt: new Date().toISOString() });
+
         sseBroker.broadcast(
           'pr_updated',
           {
@@ -354,6 +359,13 @@ class GitHubPoller {
       const team = db.getTeam(teamId);
       if (team && team.status !== 'done') {
         const previousStatus = team.status;
+        db.insertTransition({
+          teamId,
+          fromStatus: previousStatus,
+          toStatus: 'done',
+          trigger: 'poller',
+          reason: `PR #${prNumber} merged`,
+        });
         db.updateTeam(teamId, { status: 'done', phase: 'done' });
         sseBroker.broadcast(
           'team_status_changed',
@@ -385,6 +397,13 @@ class GitHubPoller {
       const team = db.getTeam(teamId);
       if (team && team.phase !== 'blocked') {
         const previousStatus = team.status;
+        db.insertTransition({
+          teamId,
+          fromStatus: previousStatus,
+          toStatus: 'stuck',
+          trigger: 'poller',
+          reason: `CI blocked: ${ciFailCount} unique CI failure types on PR #${prNumber}`,
+        });
         db.updateTeam(teamId, { phase: 'blocked', status: 'stuck' });
 
         sseBroker.broadcast(

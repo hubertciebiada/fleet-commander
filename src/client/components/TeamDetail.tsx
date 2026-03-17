@@ -6,7 +6,20 @@ import { CIChecks } from './CIChecks';
 import { EventTimeline } from './EventTimeline';
 import { TeamOutput } from './TeamOutput';
 import { CommandInput } from './CommandInput';
-import type { TeamDetail as TeamDetailType } from '../../shared/types';
+import type { TeamDetail as TeamDetailType, TeamTransition } from '../../shared/types';
+
+// ---------------------------------------------------------------------------
+// Status color map (duplicated from StatusBadge for inline use)
+// ---------------------------------------------------------------------------
+const STATUS_COLORS: Record<string, string> = {
+  queued: '#8B949E',
+  running: '#3FB950',
+  stuck: '#F85149',
+  idle: '#D29922',
+  done: '#56D4DD',
+  failed: '#F85149',
+  launching: '#58A6FF',
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,9 +47,37 @@ export function TeamDetail() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [transitions, setTransitions] = useState<TeamTransition[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const isOpen = selectedTeamId !== null;
+
+  // Fetch transitions when selectedTeamId changes or detail refreshes
+  useEffect(() => {
+    if (selectedTeamId == null) {
+      setTransitions([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function fetchTransitions() {
+      try {
+        const data = await api.get<TeamTransition[]>(`teams/${selectedTeamId}/transitions`);
+        if (!cancelled) {
+          setTransitions(data);
+        }
+      } catch {
+        // Non-critical — transitions are informational
+      }
+    }
+
+    fetchTransitions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTeamId, refreshKey, api]);
 
   // Fetch team detail when selectedTeamId changes
   useEffect(() => {
@@ -186,8 +227,12 @@ export function TeamDetail() {
     detail?.status === 'done' ||
     detail?.status === 'failed';
 
-  // PR merge status label
-  const mergeStatusLabel = detail?.pr?.mergeStatus ?? null;
+  // PR merge status label — hide when PR is merged or closed (GitHub returns
+  // "unknown" for mergeStateStatus once a PR is no longer open, which is confusing)
+  const mergeStatusLabel =
+    detail?.pr && detail.pr.state !== 'merged' && detail.pr.state !== 'closed'
+      ? (detail.pr.mergeStatus ?? null)
+      : null;
 
   return (
     <>
@@ -283,6 +328,79 @@ export function TeamDetail() {
                       )}
                     </div>
                   </section>
+
+                  {/* ---- Transition History ---- */}
+                  {transitions.length > 0 && (
+                    <section>
+                      <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1">
+                        State Transitions
+                      </h4>
+                      <div className="flex items-center gap-0 overflow-x-auto pb-1 custom-scrollbar">
+                        {transitions.map((t, i) => {
+                          const isFirst = i === 0;
+                          const toColor = STATUS_COLORS[t.toStatus] ?? '#8B949E';
+                          const timeStr = (() => {
+                            try {
+                              const d = new Date(t.createdAt);
+                              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            } catch {
+                              return '';
+                            }
+                          })();
+                          return (
+                            <div key={t.id} className="flex items-center shrink-0">
+                              {/* Show from_status pill only for the first transition */}
+                              {isFirst && (
+                                <>
+                                  <div className="flex flex-col items-center">
+                                    <span
+                                      className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                      style={{
+                                        color: STATUS_COLORS[t.fromStatus] ?? '#8B949E',
+                                        backgroundColor: (STATUS_COLORS[t.fromStatus] ?? '#8B949E') + '18',
+                                      }}
+                                    >
+                                      {t.fromStatus}
+                                    </span>
+                                  </div>
+                                  <svg className="w-3 h-3 text-dark-muted shrink-0 mx-0.5" viewBox="0 0 12 12" fill="currentColor">
+                                    <path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                                  </svg>
+                                </>
+                              )}
+                              <div
+                                className="flex flex-col items-center group relative"
+                              >
+                                <span
+                                  className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                  style={{
+                                    color: toColor,
+                                    backgroundColor: toColor + '18',
+                                  }}
+                                >
+                                  {t.toStatus}
+                                </span>
+                                <span className="text-[9px] text-dark-muted mt-0.5 leading-none">
+                                  {timeStr}
+                                </span>
+                                {/* Tooltip with reason */}
+                                {t.reason && (
+                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-dark-surface border border-dark-border rounded text-[10px] text-dark-text whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg max-w-[240px] truncate">
+                                    {t.reason}
+                                  </div>
+                                )}
+                              </div>
+                              {i < transitions.length - 1 && (
+                                <svg className="w-3 h-3 text-dark-muted shrink-0 mx-0.5" viewBox="0 0 12 12" fill="currentColor">
+                                  <path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                                </svg>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
 
                   {/* ---- PR Section ---- */}
                   {detail.pr && (

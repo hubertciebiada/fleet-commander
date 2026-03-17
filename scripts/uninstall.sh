@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fleet Commander Uninstaller
-# Removes hook scripts, cleans settings.json, and removes MCP server entry
+# Removes hook scripts, cleans settings.json, and removes workflow prompt
 # from a target repo's .claude directory.
 #
 # Usage: ./scripts/uninstall.sh [/path/to/target/repo]
@@ -86,31 +86,7 @@ else
   echo "  settings.json not found (nothing to clean)"
 fi
 
-# ── 3. Remove MCP entry ──────────────────────────────────────────
-MCP_JSON="$TARGET/.mcp.json"
-if [ -f "$MCP_JSON" ]; then
-  node -e "
-    const fs = require('fs');
-    const mcp = JSON.parse(fs.readFileSync(process.argv[1], 'utf-8'));
-
-    if (mcp.mcpServers && mcp.mcpServers['fleet-commander']) {
-      delete mcp.mcpServers['fleet-commander'];
-    }
-
-    // If no MCP servers remain, remove the file
-    if (!mcp.mcpServers || Object.keys(mcp.mcpServers).length === 0) {
-      fs.unlinkSync(process.argv[1]);
-      console.log('  Removed empty .mcp.json');
-    } else {
-      fs.writeFileSync(process.argv[1], JSON.stringify(mcp, null, 2) + '\n');
-      console.log('  Removed fleet-commander MCP entry from .mcp.json');
-    }
-  " "$MCP_JSON"
-else
-  echo "  .mcp.json not found (nothing to clean)"
-fi
-
-# ── 4. Remove workflow template and command ──────────────────────
+# ── 3. Remove workflow template and command ──────────────────────
 WORKFLOW_FILE="$TARGET/.claude/prompts/fleet-workflow.md"
 if [ -f "$WORKFLOW_FILE" ]; then
   rm "$WORKFLOW_FILE"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fleet Commander Installer
-# Installs hook scripts, merges settings.json, and adds MCP server entry
+# Installs hook scripts, merges settings.json, and deploys workflow prompt
 # into a target repo's .claude directory.
 #
 # Usage: ./scripts/install.sh [/path/to/target/repo]
@@ -106,42 +106,7 @@ else
   echo "  Created settings.json from template"
 fi
 
-# ── 3. Add MCP server entry to .mcp.json ─────────────────────────
-MCP_JSON="$TARGET/.mcp.json"
-
-# Convert FC_ROOT to a form usable in JSON (forward slashes)
-FC_ROOT_JSON=$(printf '%s' "$FC_ROOT" | sed 's|\\|/|g')
-
-if [ -f "$MCP_JSON" ]; then
-  node -e "
-    const fs = require('fs');
-    const mcp = JSON.parse(fs.readFileSync(process.argv[1], 'utf-8'));
-    if (!mcp.mcpServers) mcp.mcpServers = {};
-    mcp.mcpServers['fleet-commander'] = {
-      command: 'node',
-      args: [process.argv[2] + '/mcp/dist/server.js'],
-      env: { FLEET_SERVER_URL: 'http://localhost:4680' }
-    };
-    fs.writeFileSync(process.argv[1], JSON.stringify(mcp, null, 2) + '\n');
-  " "$MCP_JSON" "$FC_ROOT_JSON"
-else
-  node -e "
-    const fs = require('fs');
-    const mcp = {
-      mcpServers: {
-        'fleet-commander': {
-          command: 'node',
-          args: [process.argv[1] + '/mcp/dist/server.js'],
-          env: { FLEET_SERVER_URL: 'http://localhost:4680' }
-        }
-      }
-    };
-    fs.writeFileSync(process.argv[2], JSON.stringify(mcp, null, 2) + '\n');
-  " "$FC_ROOT_JSON" "$MCP_JSON"
-fi
-echo "  Added MCP server entry to .mcp.json"
-
-# ── 4. Install workflow template and command ─────────────────────
+# ── 3. Install workflow template and command ─────────────────────
 PROMPTS_DIR="$TARGET/.claude/prompts"
 mkdir -p "$PROMPTS_DIR"
 
@@ -185,5 +150,4 @@ echo ""
 echo "Fleet Commander installed successfully!"
 echo "  Hooks:    $HOOK_DIR"
 echo "  Settings: $SETTINGS"
-echo "  MCP:      $MCP_JSON"
 echo "  Workflow: $PROMPTS_DIR/fleet-workflow.md"

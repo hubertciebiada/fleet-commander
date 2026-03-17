@@ -39,6 +39,13 @@ export async function recoverOnStartup(): Promise<void> {
     if (!team.pid) {
       // No PID was ever recorded — mark as idle so the PM can re-launch.
       console.log(`[recovery] Team ${team.worktreeName} has no PID — marking idle`);
+      db.insertTransition({
+        teamId: team.id,
+        fromStatus: team.status,
+        toStatus: 'idle',
+        trigger: 'system',
+        reason: 'Server restart recovery: no PID recorded',
+      });
       db.updateTeam(team.id, { status: 'idle' });
       continue;
     }
@@ -59,6 +66,13 @@ export async function recoverOnStartup(): Promise<void> {
       console.log(
         `[recovery] Team ${team.worktreeName} (PID ${team.pid}) dead -> ${newStatus}`
       );
+      db.insertTransition({
+        teamId: team.id,
+        fromStatus: team.status,
+        toStatus: newStatus,
+        trigger: 'system',
+        reason: `Server restart recovery: process (PID ${team.pid}) no longer alive`,
+      });
       db.updateTeam(team.id, { status: newStatus, pid: null });
     }
   }

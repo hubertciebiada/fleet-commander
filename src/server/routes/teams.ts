@@ -858,6 +858,45 @@ const teamsRoutes: FastifyPluginCallback = (
   );
 
   // -------------------------------------------------------------------------
+  // GET /api/teams/:id/transitions — state transition history
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/teams/:id/transitions',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseInt(request.params.id, 10);
+        if (isNaN(teamId) || teamId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid team ID',
+          });
+        }
+
+        const db = getDatabase();
+        const team = db.getTeam(teamId);
+        if (!team) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Team ${teamId} not found`,
+          });
+        }
+
+        const transitions = db.getTransitions(teamId);
+        return reply.code(200).send(transitions);
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to get team transitions');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // POST /api/teams/:id/acknowledge — clear stuck/failed alert
   // -------------------------------------------------------------------------
   fastify.post(
@@ -896,6 +935,13 @@ const teamsRoutes: FastifyPluginCallback = (
 
         // Transition stuck -> idle (so it can be re-evaluated), failed -> done
         const newStatus = team.status === 'stuck' ? 'idle' : 'done';
+        db.insertTransition({
+          teamId,
+          fromStatus: previousStatus,
+          toStatus: newStatus,
+          trigger: 'pm_action',
+          reason: previousStatus === 'stuck' ? 'PM acknowledged stuck alert' : 'PM acknowledged failed alert',
+        });
         const updated = db.updateTeam(teamId, {
           status: newStatus,
           lastEventAt: new Date().toISOString(),

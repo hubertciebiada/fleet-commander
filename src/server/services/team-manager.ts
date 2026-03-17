@@ -290,6 +290,7 @@ export class TeamManager {
     if (relaunchTeamId !== null) {
       // Relaunch: reset the existing terminal team record
       console.log(`[TeamManager] Relaunching existing team record: id=${relaunchTeamId}, worktree=${worktreeName}`);
+      const prevTeam = db.getTeam(relaunchTeamId);
       db.updateTeam(relaunchTeamId, {
         status: 'queued',
         phase: 'init',
@@ -299,6 +300,13 @@ export class TeamManager {
         launchedAt: now,
         stoppedAt: null,
         lastEventAt: null,
+      });
+      db.insertTransition({
+        teamId: relaunchTeamId,
+        fromStatus: prevTeam?.status ?? 'unknown',
+        toStatus: 'queued',
+        trigger: 'pm_action',
+        reason: 'Relaunched by PM',
       });
       team = db.getTeam(relaunchTeamId)!;
     } else {
@@ -341,6 +349,13 @@ export class TeamManager {
         } catch (err2: unknown) {
           const msg = err2 instanceof Error ? err2.message : String(err2);
           console.error(`[TeamManager] ERROR: Worktree creation failed for team ${team.id}: ${msg}`);
+          db.insertTransition({
+            teamId: team.id,
+            fromStatus: 'queued',
+            toStatus: 'failed',
+            trigger: 'system',
+            reason: `Worktree creation failed: ${msg.slice(0, 200)}`,
+          });
           db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
           this.broadcastSnapshot();
           throw new Error(`Failed to create worktree: ${msg}`);
@@ -351,6 +366,13 @@ export class TeamManager {
     console.log(`[TeamManager] Worktree created: ${worktreeName} at ${worktreeAbsPath}`);
 
     // Update team status to launching now that worktree exists
+    db.insertTransition({
+      teamId: team.id,
+      fromStatus: 'queued',
+      toStatus: 'launching',
+      trigger: 'system',
+      reason: 'Worktree created, spawning Claude Code process',
+    });
     db.updateTeam(team.id, { status: 'launching' });
     this.broadcastSnapshot();
 
@@ -498,6 +520,13 @@ export class TeamManager {
       // We can't capture output or PID in interactive mode (the `start` command
       // creates a separate process tree), but hooks still POST to the server
       // independently so phase transitions and events will still work.
+      db.insertTransition({
+        teamId: team.id,
+        fromStatus: 'launching',
+        toStatus: 'running',
+        trigger: 'system',
+        reason: 'Interactive terminal window opened',
+      });
       db.updateTeam(team.id, { status: 'running' });
       this.broadcastSnapshot();
 
@@ -530,6 +559,13 @@ export class TeamManager {
     const pid = child.pid;
     if (pid === undefined) {
       console.error(`[TeamManager] ERROR: spawn failed for team ${team.id}: no PID returned`);
+      db.insertTransition({
+        teamId: team.id,
+        fromStatus: 'launching',
+        toStatus: 'failed',
+        trigger: 'system',
+        reason: 'Spawn failed: no PID returned',
+      });
       db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
       this.broadcastSnapshot();
       throw new Error('Failed to spawn Claude Code process — no PID returned');
@@ -584,6 +620,15 @@ export class TeamManager {
       // Only update status if team is still in an active state
       if (['launching', 'running', 'idle', 'stuck'].includes(currentTeam.status)) {
         const exitStatus = (code === 0) ? 'done' : 'failed';
+        db.insertTransition({
+          teamId: team.id,
+          fromStatus: currentTeam.status,
+          toStatus: exitStatus,
+          trigger: 'system',
+          reason: code === 0
+            ? 'Process exited normally (code 0)'
+            : `Process exited with code ${code}${signal ? `, signal ${signal}` : ''}`,
+        });
         db.updateTeam(team.id, {
           status: exitStatus,
           pid: null,
@@ -618,6 +663,13 @@ export class TeamManager {
       if (!currentTeam) return;
 
       if (['launching', 'running', 'idle', 'stuck'].includes(currentTeam.status)) {
+        db.insertTransition({
+          teamId: team.id,
+          fromStatus: currentTeam.status,
+          toStatus: 'failed',
+          trigger: 'system',
+          reason: `Process error: ${err.message.slice(0, 200)}`,
+        });
         db.updateTeam(team.id, {
           status: 'failed',
           pid: null,
@@ -665,6 +717,13 @@ export class TeamManager {
 
     // Queued teams have no process — just cancel them directly
     if (team.status === 'queued') {
+      db.insertTransition({
+        teamId,
+        fromStatus: 'queued',
+        toStatus: 'failed',
+        trigger: 'pm_action',
+        reason: 'PM stopped queued team',
+      });
       db.updateTeam(teamId, { status: 'failed', stoppedAt: new Date().toISOString() });
       this.broadcastSnapshot();
       return db.getTeam(teamId)!;
@@ -696,6 +755,18 @@ export class TeamManager {
     this.childProcesses.delete(teamId);
     this.outputBuffers.delete(teamId);
     this.parsedEvents.delete(teamId);
+
+    // Re-read to get the latest status (process exit handler may have already updated it)
+    const stopTeam = db.getTeam(teamId);
+    if (stopTeam && !['done', 'failed'].includes(stopTeam.status)) {
+      db.insertTransition({
+        teamId,
+        fromStatus: stopTeam.status,
+        toStatus: 'failed',
+        trigger: 'pm_action',
+        reason: 'PM stopped team',
+      });
+    }
 
     const updated = db.updateTeam(teamId, {
       status: 'failed',
@@ -744,6 +815,13 @@ export class TeamManager {
     // Check queue limit — if too many teams are active, queue the resume instead
     const activeCount = db.getActiveTeamCountByProject(team.projectId);
     if (activeCount >= project.maxActiveTeams) {
+      db.insertTransition({
+        teamId,
+        fromStatus: team.status,
+        toStatus: 'queued',
+        trigger: 'pm_action',
+        reason: `Resume queued (${activeCount}/${project.maxActiveTeams} active)`,
+      });
       db.updateTeam(teamId, { status: 'queued' });
       console.log(`[TeamManager] Resume queued for team ${teamId} (${activeCount}/${project.maxActiveTeams} active)`);
       this.broadcastSnapshot();
@@ -770,6 +848,13 @@ export class TeamManager {
     }
 
     // Update status to launching
+    db.insertTransition({
+      teamId,
+      fromStatus: team.status,
+      toStatus: 'launching',
+      trigger: 'pm_action',
+      reason: 'PM resumed team',
+    });
     db.updateTeam(teamId, {
       status: 'launching',
       launchedAt: new Date().toISOString(),
@@ -803,6 +888,13 @@ export class TeamManager {
 
     const pid = child.pid;
     if (pid === undefined) {
+      db.insertTransition({
+        teamId,
+        fromStatus: 'launching',
+        toStatus: 'failed',
+        trigger: 'system',
+        reason: 'Resume spawn failed: no PID returned',
+      });
       db.updateTeam(teamId, { status: 'failed', stoppedAt: new Date().toISOString() });
       throw new Error('Failed to spawn Claude Code process — no PID returned');
     }
@@ -835,6 +927,15 @@ export class TeamManager {
 
       if (['launching', 'running', 'idle', 'stuck'].includes(currentTeam.status)) {
         const exitStatus = (code === 0) ? 'done' : 'failed';
+        db.insertTransition({
+          teamId,
+          fromStatus: currentTeam.status,
+          toStatus: exitStatus,
+          trigger: 'system',
+          reason: code === 0
+            ? 'Resumed process exited normally (code 0)'
+            : `Resumed process exited with code ${code}`,
+        });
         db.updateTeam(teamId, {
           status: exitStatus,
           pid: null,
@@ -864,6 +965,13 @@ export class TeamManager {
       if (!currentTeam) return;
 
       if (['launching', 'running', 'idle', 'stuck'].includes(currentTeam.status)) {
+        db.insertTransition({
+          teamId,
+          fromStatus: currentTeam.status,
+          toStatus: 'failed',
+          trigger: 'system',
+          reason: `Resume process error: ${err.message.slice(0, 200)}`,
+        });
         db.updateTeam(teamId, {
           status: 'failed',
           pid: null,
@@ -1042,6 +1150,13 @@ export class TeamManager {
         console.log(`[TeamManager] Dequeuing team ${team.id} (${team.worktreeName})`);
         // Mark as launching BEFORE releasing the guard, so concurrent calls
         // see this team as active (counted towards the active limit).
+        db.insertTransition({
+          teamId: team.id,
+          fromStatus: 'queued',
+          toStatus: 'launching',
+          trigger: 'system',
+          reason: 'Slot available, dequeuing team',
+        });
         db.updateTeam(team.id, { status: 'launching' });
         try {
           await this.launchQueued(team);
@@ -1103,6 +1218,13 @@ export class TeamManager {
         } catch (err2: unknown) {
           const msg = err2 instanceof Error ? err2.message : String(err2);
           console.error(`[TeamManager] ERROR: Worktree creation failed for queued team ${team.id}: ${msg}`);
+          db.insertTransition({
+            teamId: team.id,
+            fromStatus: 'launching',
+            toStatus: 'failed',
+            trigger: 'system',
+            reason: `Worktree creation failed: ${msg.slice(0, 200)}`,
+          });
           db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
           this.broadcastSnapshot();
           return;
@@ -1180,6 +1302,13 @@ export class TeamManager {
     const pid = child.pid;
     if (pid === undefined) {
       console.error(`[TeamManager] ERROR: spawn failed for dequeued team ${team.id}: no PID returned`);
+      db.insertTransition({
+        teamId: team.id,
+        fromStatus: 'launching',
+        toStatus: 'failed',
+        trigger: 'system',
+        reason: 'Dequeued spawn failed: no PID returned',
+      });
       db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
       this.broadcastSnapshot();
       return;
@@ -1226,6 +1355,15 @@ export class TeamManager {
 
       if (['launching', 'running', 'idle', 'stuck'].includes(currentTeam.status)) {
         const exitStatus = (code === 0) ? 'done' : 'failed';
+        db.insertTransition({
+          teamId: team.id,
+          fromStatus: currentTeam.status,
+          toStatus: exitStatus,
+          trigger: 'system',
+          reason: code === 0
+            ? 'Dequeued process exited normally (code 0)'
+            : `Dequeued process exited with code ${code}${signal ? `, signal ${signal}` : ''}`,
+        });
         db.updateTeam(team.id, {
           status: exitStatus,
           pid: null,
@@ -1255,6 +1393,13 @@ export class TeamManager {
       if (!currentTeam) return;
 
       if (['launching', 'running', 'idle', 'stuck'].includes(currentTeam.status)) {
+        db.insertTransition({
+          teamId: team.id,
+          fromStatus: currentTeam.status,
+          toStatus: 'failed',
+          trigger: 'system',
+          reason: `Dequeued process error: ${err.message.slice(0, 200)}`,
+        });
         db.updateTeam(team.id, {
           status: 'failed',
           pid: null,
@@ -1571,6 +1716,33 @@ export class TeamManager {
             events.push(timestampedEvent);
             if (events.length > MAX_PARSED_EVENTS) {
               events.shift();
+            }
+
+            // Extract cost from result events (the result event is often the
+            // last line CC emits, so it may arrive as the final partial chunk)
+            if (event.type === 'result' && (event as any).total_cost_usd != null) {
+              const costUsd = (event as any).total_cost_usd as number;
+              const usage = (event as any).usage as Record<string, unknown> | undefined;
+              const sessionId = (event as any).session_id as string | undefined;
+
+              console.log(`[TeamManager] Team ${teamId} cost: $${costUsd.toFixed(4)}`);
+
+              db.insertUsageSnapshot({
+                teamId,
+                sessionId: sessionId || undefined,
+                dailyPercent: 0,
+                weeklyPercent: 0,
+                sonnetPercent: 0,
+                extraPercent: 0,
+                rawOutput: JSON.stringify({ total_cost_usd: costUsd, usage }),
+              });
+
+              sseBroker.broadcast('usage_updated', {
+                daily_percent: 0,
+                weekly_percent: 0,
+                sonnet_percent: 0,
+                extra_percent: 0,
+              }, teamId);
             }
           } catch {
             console.log(`[CC:${logPrefix}:raw] ${trimmed.substring(0, 200)}`);

@@ -54,6 +54,7 @@ export interface EventCollectorDb {
     payload: string;
   }): { id: number };
   updateTeam(teamId: number, fields: Record<string, unknown>): void;
+  insertTransition(data: { teamId: number; fromStatus: string; toStatus: string; trigger: string; reason: string }): void;
 }
 
 /** SSE broker interface for broadcasting events */
@@ -143,6 +144,13 @@ export function processEvent(
   // This MUST happen before the throttle check so that even
   // deduplicated tool_use events trigger the recovery transition.
   if (team.status === 'idle' || team.status === 'stuck') {
+    db.insertTransition({
+      teamId,
+      fromStatus: team.status,
+      toStatus: 'running',
+      trigger: 'hook',
+      reason: `Activity resumed (${payload.event} event received)`,
+    });
     db.updateTeam(teamId, {
       status: 'running',
     });
@@ -158,6 +166,13 @@ export function processEvent(
   if (team.status === 'launching') {
     const evt = payload.event.toLowerCase();
     if (evt === 'session_start' || evt === 'subagent_start') {
+      db.insertTransition({
+        teamId,
+        fromStatus: 'launching',
+        toStatus: 'running',
+        trigger: 'hook',
+        reason: `First ${evt} event received`,
+      });
       db.updateTeam(teamId, {
         status: 'running',
       });

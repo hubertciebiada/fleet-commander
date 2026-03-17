@@ -73,7 +73,28 @@ class StuckDetector {
         }
 
         if (newStatus) {
+          // Skip idle/stuck transition if the team has a PR with pending CI.
+          // A team waiting for CI is not idle — it's working.
+          if (team.prNumber) {
+            const pr = db.getPullRequest(team.prNumber);
+            if (pr && pr.ciStatus === 'pending') {
+              console.log(
+                `[StuckDetector] Team ${team.id} skipped — CI pending on PR #${team.prNumber}`
+              );
+              continue;
+            }
+          }
+
           const previousStatus = team.status;
+          db.insertTransition({
+            teamId: team.id,
+            fromStatus: previousStatus,
+            toStatus: newStatus,
+            trigger: 'timer',
+            reason: newStatus === 'idle'
+              ? `No events for ${Math.round(idleMinutes)} minutes`
+              : `Idle for ${Math.round(idleMinutes)} minutes (stuck threshold exceeded)`,
+          });
           db.updateTeam(team.id, { status: newStatus as 'idle' | 'stuck' });
 
           sseBroker.broadcast(

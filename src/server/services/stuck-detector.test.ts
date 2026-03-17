@@ -257,6 +257,159 @@ describe('StuckDetector', () => {
       expect(sseBroker.broadcast).toHaveBeenCalledTimes(2);
     });
 
+    it('skips running -> idle when PR has pending CI', () => {
+      const db = getDatabase();
+      // Create a project first (needed for foreign key)
+      const project = db.insertProject({
+        name: 'test-project',
+        repoPath: '/tmp/test-project',
+      });
+      const team = db.insertTeam({
+        issueNumber: 700,
+        worktreeName: 'kea-700',
+        status: 'running',
+        phase: 'pr',
+        projectId: project.id,
+        prNumber: 700,
+      });
+      // Set lastEventAt to 10 minutes ago — would normally trigger idle
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(10) });
+
+      // Insert a PR with pending CI
+      db.insertPullRequest({
+        prNumber: 700,
+        teamId: team.id,
+        title: 'PR #700',
+        state: 'open',
+        ciStatus: 'pending',
+        mergeStatus: 'unknown',
+        autoMerge: false,
+        ciFailCount: 0,
+        checksJson: '[]',
+      });
+
+      stuckDetector.check();
+
+      // Team should still be running — CI pending skips the transition
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('running');
+      expect(sseBroker.broadcast).not.toHaveBeenCalled();
+    });
+
+    it('skips idle -> stuck when PR has pending CI', () => {
+      const db = getDatabase();
+      const project = db.insertProject({
+        name: 'test-project-2',
+        repoPath: '/tmp/test-project-2',
+      });
+      const team = db.insertTeam({
+        issueNumber: 701,
+        worktreeName: 'kea-701',
+        status: 'idle',
+        phase: 'pr',
+        projectId: project.id,
+        prNumber: 701,
+      });
+      // Set lastEventAt to 20 minutes ago — would normally trigger stuck
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(20) });
+
+      // Insert a PR with pending CI
+      db.insertPullRequest({
+        prNumber: 701,
+        teamId: team.id,
+        title: 'PR #701',
+        state: 'open',
+        ciStatus: 'pending',
+        mergeStatus: 'unknown',
+        autoMerge: false,
+        ciFailCount: 0,
+        checksJson: '[]',
+      });
+
+      stuckDetector.check();
+
+      // Team should still be idle — CI pending skips the transition
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('idle');
+      expect(sseBroker.broadcast).not.toHaveBeenCalled();
+    });
+
+    it('still transitions to idle when PR CI is failing', () => {
+      const db = getDatabase();
+      const project = db.insertProject({
+        name: 'test-project-3',
+        repoPath: '/tmp/test-project-3',
+      });
+      const team = db.insertTeam({
+        issueNumber: 702,
+        worktreeName: 'kea-702',
+        status: 'running',
+        phase: 'pr',
+        projectId: project.id,
+        prNumber: 702,
+      });
+      // Set lastEventAt to 10 minutes ago — should trigger idle
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(10) });
+
+      // Insert a PR with failing CI — should NOT skip the transition
+      db.insertPullRequest({
+        prNumber: 702,
+        teamId: team.id,
+        title: 'PR #702',
+        state: 'open',
+        ciStatus: 'failing',
+        mergeStatus: 'unknown',
+        autoMerge: false,
+        ciFailCount: 1,
+        checksJson: '[]',
+      });
+
+      stuckDetector.check();
+
+      // Team should be idle — failing CI does not skip transition
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('idle');
+      expect(sseBroker.broadcast).toHaveBeenCalled();
+    });
+
+    it('still transitions to idle when PR CI is passing', () => {
+      const db = getDatabase();
+      const project = db.insertProject({
+        name: 'test-project-4',
+        repoPath: '/tmp/test-project-4',
+      });
+      const team = db.insertTeam({
+        issueNumber: 703,
+        worktreeName: 'kea-703',
+        status: 'running',
+        phase: 'pr',
+        projectId: project.id,
+        prNumber: 703,
+      });
+      // Set lastEventAt to 10 minutes ago
+      db.updateTeam(team.id, { lastEventAt: minutesAgo(10) });
+
+      // Insert a PR with passing CI — normal idle rules apply
+      db.insertPullRequest({
+        prNumber: 703,
+        teamId: team.id,
+        title: 'PR #703',
+        state: 'open',
+        ciStatus: 'passing',
+        mergeStatus: 'clean',
+        autoMerge: false,
+        ciFailCount: 0,
+        checksJson: '[]',
+      });
+
+      stuckDetector.check();
+
+      // Team should be idle — passing CI does not skip transition
+      const result = db.getTeam(team.id)!;
+      expect(result.status).toBe('idle');
+      expect(sseBroker.broadcast).toHaveBeenCalled();
+    });
+
     it('skips teams with no prNumber for CI check', () => {
       const db = getDatabase();
       const team = db.insertTeam({

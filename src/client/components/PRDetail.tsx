@@ -196,8 +196,8 @@ export function PRDetail({ prNumber, teamId, onClose }: PRDetailProps) {
               {stateInfo.label}
             </span>
 
-            {/* Merge status */}
-            {pr.mergeStatus && (
+            {/* Merge status — hide for merged/closed PRs where GitHub returns "unknown" */}
+            {pr.mergeStatus && pr.state !== 'merged' && pr.state !== 'closed' && (
               <span
                 className="text-xs px-2 py-0.5 rounded border"
                 style={{

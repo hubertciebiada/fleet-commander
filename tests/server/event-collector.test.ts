@@ -22,6 +22,7 @@ function createMockDb(overrides?: Partial<EventCollectorDb>): EventCollectorDb {
     getTeamByWorktree: vi.fn().mockReturnValue({ id: 1, status: 'running', phase: 'implementing' }),
     insertEvent: vi.fn().mockImplementation(() => ({ id: nextEventId++ })),
     updateTeam: vi.fn(),
+    insertTransition: vi.fn(),
     ...overrides,
   };
 }
