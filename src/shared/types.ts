@@ -62,6 +62,7 @@ export interface InstallHooksStatus extends InstallCategoryStatus {
 export interface InstallStatus {
   hooks: InstallHooksStatus;
   prompt: InstallCategoryStatus;
+  agents: InstallCategoryStatus;
   settings: InstallFileStatus;
 }
 

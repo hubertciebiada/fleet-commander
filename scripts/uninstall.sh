@@ -1,7 +1,7 @@
 #!/bin/bash
 # Fleet Commander Uninstaller
-# Removes hook scripts, cleans settings.json, and removes workflow prompt
-# from a target repo's .claude directory.
+# Removes hook scripts, cleans settings.json, removes workflow prompt,
+# and removes Fleet Commander agent templates from a target repo's .claude directory.
 #
 # Usage: ./scripts/uninstall.sh [/path/to/target/repo]
 #   If no path given, auto-detects the git repo root from current directory.
@@ -95,6 +95,26 @@ if [ -f "$WORKFLOW_FILE" ]; then
   rmdir "$TARGET/.claude/prompts" 2>/dev/null && echo "  Removed empty .claude/prompts/" || true
 else
   echo "  fleet-workflow.md not found (already removed?)"
+fi
+
+# ── 4. Remove agent templates ────────────────────────────────
+AGENTS_DIR="$TARGET/.claude/agents"
+if [ -d "$AGENTS_DIR" ]; then
+  REMOVED_AGENTS=0
+  for AGENT_FILE in "$AGENTS_DIR"/fleet-*.md; do
+    [ -f "$AGENT_FILE" ] || continue
+    rm "$AGENT_FILE"
+    REMOVED_AGENTS=$((REMOVED_AGENTS + 1))
+  done
+  if [ "$REMOVED_AGENTS" -gt 0 ]; then
+    echo "  Removed $REMOVED_AGENTS Fleet Commander agent templates from $AGENTS_DIR"
+  else
+    echo "  No fleet-*.md agent templates found (already removed?)"
+  fi
+  # Clean up empty agents directory
+  rmdir "$AGENTS_DIR" 2>/dev/null && echo "  Removed empty .claude/agents/" || true
+else
+  echo "  Agents directory not found (already removed?)"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────

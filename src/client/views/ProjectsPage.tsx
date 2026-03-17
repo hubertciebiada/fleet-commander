@@ -291,6 +291,15 @@ export function ProjectsPage() {
                             files: s.prompt?.files ?? [],
                             summary: 'Prompt Files',
                           },
+                          {
+                            key: 'agents',
+                            label: 'agents',
+                            installed: s.agents?.installed ?? false,
+                            hasCrlf: false,
+                            somePresent: s.agents?.files?.some((f) => f.exists) ?? false,
+                            files: s.agents?.files ?? [],
+                            summary: 'Agent Templates',
+                          },
                         ];
 
                         // Simple boolean categories (settings)

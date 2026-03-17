@@ -1,7 +1,7 @@
 #!/bin/bash
 # Fleet Commander Installer
-# Installs hook scripts, merges settings.json, and deploys workflow prompt
-# into a target repo's .claude directory.
+# Installs hook scripts, merges settings.json, deploys workflow prompt,
+# and copies agent templates into a target repo's .claude directory.
 #
 # Usage: ./scripts/install.sh [/path/to/target/repo]
 #   If no path given, auto-detects the git repo root from current directory.
@@ -145,9 +145,31 @@ else
 fi
 echo "    PROJECT_NAME=$PROJECT_NAME  project_slug=$project_slug  BASE_BRANCH=$BASE_BRANCH"
 
+# ── 4. Install agent templates ───────────────────────────────
+AGENTS_SRC="$FC_ROOT/templates/agents"
+AGENTS_DIR="$TARGET/.claude/agents"
+
+if [ -d "$AGENTS_SRC" ]; then
+  mkdir -p "$AGENTS_DIR"
+  AGENT_COUNT=0
+  for AGENT_FILE in "$AGENTS_SRC"/*.md; do
+    [ -f "$AGENT_FILE" ] || continue
+    AGENT_NAME="$(basename "$AGENT_FILE")"
+    sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+        -e "s|{{project_slug}}|$project_slug|g" \
+        -e "s|{{BASE_BRANCH}}|$BASE_BRANCH|g" \
+        "$AGENT_FILE" > "$AGENTS_DIR/$AGENT_NAME"
+    AGENT_COUNT=$((AGENT_COUNT + 1))
+  done
+  echo "  Installed $AGENT_COUNT agent templates to $AGENTS_DIR"
+else
+  echo "  No agent templates found in $AGENTS_SRC (skipped)"
+fi
+
 # ── Done ──────────────────────────────────────────────────────────
 echo ""
 echo "Fleet Commander installed successfully!"
 echo "  Hooks:    $HOOK_DIR"
 echo "  Settings: $SETTINGS"
 echo "  Workflow: $PROMPTS_DIR/fleet-workflow.md"
+echo "  Agents:   $AGENTS_DIR"

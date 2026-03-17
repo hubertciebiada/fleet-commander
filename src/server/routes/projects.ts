@@ -238,6 +238,18 @@ function checkInstallStatus(repoPath: string): InstallStatus {
     },
   ];
 
+  // Agent templates expected in .claude/agents/
+  const agentNames = [
+    'fleet-coordinator.md',
+    'fleet-analyst.md',
+    'fleet-reviewer.md',
+  ];
+  const agentsDir = path.join(repoPath, '.claude', 'agents');
+  const agentFiles: InstallFileStatus[] = agentNames.map((name) => ({
+    name,
+    exists: fs.existsSync(path.join(agentsDir, name)),
+  }));
+
   // Additional config files
   const settingsFile: InstallFileStatus = {
     name: 'settings.json',
@@ -254,6 +266,10 @@ function checkInstallStatus(repoPath: string): InstallStatus {
     prompt: {
       installed: promptFiles.every((f) => f.exists),
       files: promptFiles,
+    },
+    agents: {
+      installed: agentFiles.every((f) => f.exists),
+      files: agentFiles,
     },
     settings: settingsFile,
   };
