@@ -14,6 +14,7 @@
 // =============================================================================
 
 import { execSync } from 'child_process';
+import path from 'path';
 import { getDatabase } from '../db.js';
 import config from '../config.js';
 import { sseBroker } from './sse-broker.js';
@@ -127,11 +128,15 @@ class GitHubPoller {
       return;
     }
 
-    // Build a map of projectId -> githubRepo for quick lookup
+    // Build maps of projectId -> githubRepo and projectId -> repoPath
     const projectRepoMap = new Map<number, string>();
+    const projectPathMap = new Map<number, string>();
     for (const project of projects) {
       if (project.githubRepo) {
         projectRepoMap.set(project.id, project.githubRepo);
+      }
+      if (project.repoPath) {
+        projectPathMap.set(project.id, project.repoPath);
       }
     }
 
@@ -145,6 +150,22 @@ class GitHubPoller {
         if (!githubRepo) {
           // Team has no project or project is not active — skip
           continue;
+        }
+
+        // Sync branch name: the agent may have renamed the branch after launch.
+        // Check the actual worktree branch and update DB if it differs.
+        if (team.projectId && !team.prNumber) {
+          const repoPath = projectPathMap.get(team.projectId);
+          if (repoPath && team.worktreeName) {
+            const actualBranch = this.detectWorktreeBranch(repoPath, team.worktreeName);
+            if (actualBranch && actualBranch !== team.branchName) {
+              console.log(
+                `[GitHubPoller] Branch name updated for team ${team.id}: "${team.branchName}" -> "${actualBranch}"`
+              );
+              db.updateTeam(team.id, { branchName: actualBranch });
+              team.branchName = actualBranch;
+            }
+          }
         }
 
         if (team.prNumber) {
@@ -395,6 +416,32 @@ class GitHubPoller {
           console.error(`[GitHubPoller] Failed to send blocked notification to team ${teamId}:`, err);
         }
       }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Private: detect the actual branch name from a worktree on disk
+  // -------------------------------------------------------------------------
+
+  /**
+   * Read the current branch from a worktree. Returns null if the worktree
+   * doesn't exist or the branch can't be determined.
+   *
+   * The agent may rename the branch after launch (e.g. from "worktree-kea-767"
+   * to "refactor/fix/767-unit-user-role-logic"), so we must check the actual
+   * git state rather than relying on the initially stored branch name.
+   */
+  private detectWorktreeBranch(repoPath: string, worktreeName: string): string | null {
+    const worktreeAbsPath = path.join(repoPath, config.worktreeDir, worktreeName);
+    try {
+      const branch = execSync(
+        `git -C "${worktreeAbsPath}" rev-parse --abbrev-ref HEAD`,
+        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+      ).trim();
+      return branch && branch !== 'HEAD' ? branch : null;
+    } catch {
+      // Worktree may not exist yet or git command failed — not an error
+      return null;
     }
   }
 

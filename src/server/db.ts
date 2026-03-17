@@ -1251,6 +1251,7 @@ export class FleetDatabase {
       status: row.status as TeamStatus,
       phase: row.phase as TeamPhase,
       worktreeName: row.worktree_name as string,
+      branchName: (row.branch_name as string | null) ?? null,
       prNumber: row.pr_number as number | null,
       launchedAt: (row.launched_at as string | null) ?? null,
       lastEventAt: row.last_event_at as string | null,

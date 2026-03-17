@@ -197,6 +197,7 @@ export interface TeamDashboardRow {
   status: TeamStatus;
   phase: TeamPhase;
   worktreeName: string;
+  branchName: string | null;
   prNumber: number | null;
   launchedAt: string | null;
   lastEventAt: string | null;

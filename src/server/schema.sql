@@ -117,6 +117,7 @@ SELECT
   t.status,
   t.phase,
   t.worktree_name,
+  t.branch_name,
   t.pr_number,
   t.launched_at,
   t.last_event_at,
