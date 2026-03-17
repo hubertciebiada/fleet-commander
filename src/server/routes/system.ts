@@ -11,10 +11,13 @@ import type {
   FastifyRequest,
   FastifyReply,
 } from 'fastify';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { getDatabase } from '../db.js';
+import { getTeamManager } from '../services/team-manager.js';
 import { sseBroker } from '../services/sse-broker.js';
+import { DEFAULT_MESSAGE_TEMPLATES } from '../../shared/message-templates.js';
 import config from '../config.js';
 
 // ---------------------------------------------------------------------------
@@ -292,6 +295,70 @@ const systemRoutes: FastifyPluginCallback = (
         });
       } catch (err: unknown) {
         _request.log.error(err, 'Failed to get settings');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /api/system/factory-reset — wipe all data and re-seed defaults
+  // -------------------------------------------------------------------------
+  fastify.post(
+    '/api/system/factory-reset',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const db = getDatabase();
+        const manager = getTeamManager();
+
+        // 1. Stop all running teams
+        const activeTeams = db.getActiveTeams();
+        for (const team of activeTeams) {
+          try {
+            await manager.stop(team.id);
+          } catch {
+            // Best-effort — continue stopping remaining teams
+          }
+        }
+
+        // 2. Uninstall hooks from all projects before deleting them
+        const projects = db.getProjects();
+        for (const project of projects) {
+          try {
+            const scriptPath = path.join(config.fleetCommanderRoot, 'scripts', 'uninstall.sh');
+            if (fs.existsSync(scriptPath)) {
+              const cmd = process.platform === 'win32'
+                ? `bash "${scriptPath}" "${project.repoPath}"`
+                : `"${scriptPath}" "${project.repoPath}"`;
+              execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 });
+            }
+          } catch (err) {
+            console.error(
+              `[System] Failed to uninstall hooks for ${project.name}:`,
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+        }
+
+        // 3. Delete all data and re-seed default templates
+        const templatesSeeded = db.factoryReset(
+          DEFAULT_MESSAGE_TEMPLATES.map((t) => ({ id: t.id, template: t.template })),
+        );
+
+        // 4. Broadcast empty state to all SSE clients
+        sseBroker.broadcast('snapshot', { teams: [] });
+
+        console.log('[System] Factory reset completed — all data cleared');
+
+        return reply.code(200).send({
+          status: 'ok',
+          message: 'Factory reset complete. All projects, teams, and data have been cleared.',
+          templatesSeeded,
+        });
+      } catch (err: unknown) {
+        request.log.error(err, 'Factory reset failed');
         return reply.code(500).send({
           error: 'Internal Server Error',
           message: err instanceof Error ? err.message : String(err),

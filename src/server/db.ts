@@ -1085,6 +1085,32 @@ export class FleetDatabase {
   }
 
   // -------------------------------------------------------------------------
+  // Factory reset (delete all data, re-seed defaults)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Delete all data from every table (except schema_version) in a single
+   * transaction, then re-seed the default message templates.
+   * Returns the number of default templates that were seeded.
+   */
+  factoryReset(defaultTemplates: { id: string; template: string }[]): number {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM events').run();
+      this.db.prepare('DELETE FROM commands').run();
+      this.db.prepare('DELETE FROM usage_snapshots').run();
+      this.db.prepare('DELETE FROM pull_requests').run();
+      this.db.prepare('DELETE FROM teams').run();
+      this.db.prepare('DELETE FROM message_templates').run();
+      this.db.prepare('DELETE FROM projects').run();
+    })();
+
+    // Re-seed default templates outside the transaction (uses its own)
+    this.initDefaultTemplates(defaultTemplates);
+
+    return defaultTemplates.length;
+  }
+
+  // -------------------------------------------------------------------------
   // Connection management
   // -------------------------------------------------------------------------
 

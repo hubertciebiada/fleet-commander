@@ -162,6 +162,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -178,6 +179,28 @@ export function SettingsPage() {
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
+
+  const handleFactoryReset = async () => {
+    const confirmed = window.confirm(
+      'FACTORY RESET\n\nThis will:\n- Stop all running teams\n- Uninstall hooks from all projects\n- Delete ALL data (projects, teams, events)\n\nThis cannot be undone. Continue?',
+    );
+    if (!confirmed) return;
+
+    const doubleConfirm = window.confirm(
+      'Are you absolutely sure? All data will be permanently deleted.',
+    );
+    if (!doubleConfirm) return;
+
+    setResetting(true);
+    try {
+      await api.post('system/factory-reset');
+      window.location.href = '/';
+    } catch (err) {
+      alert('Factory reset failed: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   // --- Render ---
 
@@ -291,6 +314,22 @@ export function SettingsPage() {
             {'prompts/{slug}-prompt.md'}
           </code>
         </p>
+      </div>
+
+      {/* Danger Zone */}
+      <div className="mt-8 border border-[#F85149]/30 rounded p-4">
+        <h3 className="text-[#F85149] font-semibold mb-2">Danger Zone</h3>
+        <p className="text-[#8B949E] text-sm mb-3">
+          Factory reset will stop all running teams, uninstall hooks from all projects,
+          and delete all data. The database will be recreated fresh with default settings.
+        </p>
+        <button
+          onClick={handleFactoryReset}
+          disabled={resetting}
+          className="px-4 py-2 text-sm bg-[#F85149]/10 text-[#F85149] border border-[#F85149]/40 rounded hover:bg-[#F85149]/20 disabled:opacity-50"
+        >
+          {resetting ? 'Resetting...' : 'Factory Reset'}
+        </button>
       </div>
     </div>
   );
