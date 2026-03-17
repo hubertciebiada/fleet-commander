@@ -347,7 +347,13 @@ const systemRoutes: FastifyPluginCallback = (
           DEFAULT_MESSAGE_TEMPLATES.map((t) => ({ id: t.id, template: t.template })),
         );
 
-        // 4. Broadcast empty state to all SSE clients
+        // 4. Clear in-memory caches (issue fetcher, team manager)
+        const { getIssueFetcher } = await import('../services/issue-fetcher.js');
+        const issueFetcher = getIssueFetcher();
+        issueFetcher.clearAll?.() ?? issueFetcher.stop?.();
+        issueFetcher.start?.();
+
+        // 5. Broadcast empty state to all SSE clients
         sseBroker.broadcast('snapshot', { teams: [] });
 
         console.log('[System] Factory reset completed — all data cleared');

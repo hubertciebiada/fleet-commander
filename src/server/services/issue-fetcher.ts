@@ -294,6 +294,13 @@ export class IssueFetcher {
   }
 
   /**
+   * Clear ALL cached issues (used by factory reset).
+   */
+  clearAll(): void {
+    this.cacheByProject.clear();
+  }
+
+  /**
    * Force a re-fetch from GitHub for a specific project.
    */
   refresh(projectId?: number): IssueNode[] {
