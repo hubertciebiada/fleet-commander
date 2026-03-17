@@ -964,12 +964,12 @@ export class FleetDatabase {
   }
 
   /**
-   * Initialize default message templates. Uses INSERT OR IGNORE so existing
-   * (potentially user-edited) templates are never overwritten.
+   * Initialize default message templates. Uses INSERT OR REPLACE so defaults
+   * are refreshed on every restart (keeps templates up-to-date).
    */
   initDefaultTemplates(defaults: { id: string; template: string }[]): void {
     const stmt = this.db.prepare(
-      'INSERT OR IGNORE INTO message_templates (id, template) VALUES (@id, @template)'
+      'INSERT OR REPLACE INTO message_templates (id, template) VALUES (@id, @template)'
     );
 
     const insertMany = this.db.transaction((items: { id: string; template: string }[]) => {

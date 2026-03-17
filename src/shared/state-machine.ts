@@ -25,7 +25,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'ci_passed',
     trigger: 'ci_status_change',
     message:
-      'Hej, CI przeszlo na PR #{{PR_NUMBER}} — wszystkie checki zielone. Auto-merge jest {{AUTO_MERGE_STATUS}}. Dobra robota, czekamy na merge.',
+      "Hey team, CI passed on PR #{{PR_NUMBER}} — all checks green. Auto-merge is {{AUTO_MERGE_STATUS}}. Nice work, let's get this merged.",
   },
   {
     id: 'ci_red',
@@ -33,7 +33,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'ci_failed',
     trigger: 'ci_status_change',
     message:
-      'CI padlo na PR #{{PR_NUMBER}}. Failujace checki: {{FAILED_CHECKS}}. To {{FAIL_COUNT}}/{{MAX_FAILURES}} unikalnych bledow — poprawcie to. Co poszlo nie tak?',
+      "Heads up — CI failed on PR #{{PR_NUMBER}}. Failing checks: {{FAILED_CHECKS}}. That's {{FAIL_COUNT}}/{{MAX_FAILURES}} unique failures before I block you. Look into it and push a fix. What went wrong?",
   },
   {
     id: 'ci_pending',
@@ -41,7 +41,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'ci_pending',
     trigger: 'ci_status_change',
     message:
-      'CI sie odpala na PR #{{PR_NUMBER}}. Czekajcie na wyniki zanim pushniecie kolejne zmiany.',
+      'CI is running on PR #{{PR_NUMBER}}. Hold off on pushing more changes until we get results back.',
   },
   {
     id: 'pr_merged',
@@ -49,7 +49,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'done',
     trigger: 'pr_merge',
     message:
-      'PR #{{PR_NUMBER}} zmergowany. Dobra robota! Zamknijcie issue, posprzatajcie po sobie i konczczcie prace.',
+      "PR #{{PR_NUMBER}} just merged — great work! Close the issue, clean up after yourselves, and wrap things up.",
   },
   {
     id: 'pr_merged_final',
@@ -57,7 +57,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'done',
     trigger: 'pr_merge_final',
     message:
-      'PR #{{PR_NUMBER}} jest zmergowany. Konczymy sesje. Dzieki za prace, zespole.',
+      'PR #{{PR_NUMBER}} is merged. Wrapping up this session. Thanks for the solid work, team.',
   },
   {
     id: 'ci_blocked',
@@ -65,6 +65,6 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'blocked',
     trigger: 'ci_fail_threshold',
     message:
-      'STOP. Macie {{FAIL_COUNT}} unikalnych typow bledow CI na PR #{{PR_NUMBER}}. Blokuje was do mojej decyzji. Nie pushujcie wiecej fixow — czekajcie na moje instrukcje.',
+      "STOP. You've hit {{FAIL_COUNT}} unique CI failure types on PR #{{PR_NUMBER}}. I'm blocking you until I review this. Do NOT push more fixes — wait for my instructions.",
   },
 ];
