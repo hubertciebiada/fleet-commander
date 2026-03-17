@@ -141,8 +141,8 @@ function uninstallHooks(repoPath: string): void {
 }
 
 /**
- * Check the install status of all three artifacts deployed by install.sh:
- * hooks directory, workflow prompt, and next-issue command.
+ * Check the install status of artifacts deployed by install.sh:
+ * hooks directory and workflow prompt.
  * Returns detailed file-level breakdown for tooltip display.
  */
 function checkInstallStatus(repoPath: string): InstallStatus {
@@ -172,14 +172,6 @@ function checkInstallStatus(repoPath: string): InstallStatus {
     {
       name: 'fleet-workflow.md',
       exists: fs.existsSync(path.join(repoPath, '.claude', 'prompts', 'fleet-workflow.md')),
-    },
-  ];
-
-  // Command files expected in .claude/commands/
-  const commandFiles: InstallFileStatus[] = [
-    {
-      name: 'next-issue.md',
-      exists: fs.existsSync(path.join(repoPath, '.claude', 'commands', 'next-issue.md')),
     },
   ];
 
@@ -215,10 +207,6 @@ function checkInstallStatus(repoPath: string): InstallStatus {
     prompt: {
       installed: promptFiles.every((f) => f.exists),
       files: promptFiles,
-    },
-    command: {
-      installed: commandFiles.every((f) => f.exists),
-      files: commandFiles,
     },
     settings: settingsFile,
     mcpConfig: mcpConfigFile,
@@ -390,9 +378,9 @@ const projectsRoutes: FastifyPluginCallback = (
         // Install hooks (non-fatal)
         installHooks(normalizedPath);
 
-        // Verify all three artifacts were actually installed
+        // Verify artifacts were actually installed
         const status = checkInstallStatus(normalizedPath);
-        const allInstalled = status.hooks.installed && status.prompt.installed && status.command.installed;
+        const allInstalled = status.hooks.installed && status.prompt.installed;
         if (allInstalled) {
           db.updateProject(project.id, { hooksInstalled: true });
         }

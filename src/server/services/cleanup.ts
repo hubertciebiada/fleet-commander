@@ -130,7 +130,7 @@ export function getCleanupPreview(projectId: number, resetTeams: boolean = false
     );
 
     for (const rawLine of branchOutput.split('\n')) {
-      const branch = rawLine.replace(/^[\s*]+/, '').trim();
+      const branch = rawLine.trim().replace(/^[*+]\s*/, '');
       if (!branch) continue;
 
       const worktreeName = branch.slice('worktree-'.length);
@@ -219,7 +219,10 @@ export function executeCleanup(
         }
         removed.push(item.name);
       } else if (item.type === 'signal_file') {
-        fs.unlinkSync(item.path);
+        if (fs.existsSync(item.path)) {
+          fs.unlinkSync(item.path);
+        }
+        // If file is gone (e.g. already removed as part of worktree deletion), still count as success
         removed.push(item.name);
       } else if (item.type === 'stale_branch') {
         execSync(

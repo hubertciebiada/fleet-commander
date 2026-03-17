@@ -401,11 +401,6 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
     [onClose],
   );
 
-  // Build default prompt with the issue number(s)
-  function getDefaultPrompt(num: string): string {
-    return `/next-issue ${num}`;
-  }
-
   // --- Single launch ---
   const handleLaunch = useCallback(async () => {
     setError(null);
@@ -421,7 +416,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
       return;
     }
 
-    const effectivePrompt = prompt.trim() || getDefaultPrompt(String(num));
+    const effectivePrompt = prompt.trim() || undefined;
     const projectId = selectedProjectId ? parseInt(selectedProjectId, 10) : undefined;
 
     setLoading(true);
@@ -691,16 +686,14 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                     onKeyDown={handleKeyDown}
                     placeholder={
                       batchMode
-                        ? 'Custom prompt (default: /next-issue {N})'
-                        : issueNumber.trim()
-                          ? getDefaultPrompt(issueNumber.trim())
-                          : 'Custom prompt (default: /next-issue {N})'
+                        ? 'Custom prompt (default: project prompt file)'
+                        : 'Custom prompt (default: project prompt file)'
                     }
                     className="w-full px-3 py-2 text-sm rounded border border-dark-border bg-dark-base text-dark-text placeholder:text-dark-muted/50 focus:outline-none focus:border-dark-accent focus:ring-1 focus:ring-dark-accent/30"
                     disabled={loading}
                   />
                   <p className="text-xs text-dark-muted mt-1">
-                    Leave empty to use default: <code className="text-dark-accent/70">/next-issue {'{'}<span className="text-dark-text/70">N</span>{'}'}</code>
+                    Leave empty to use the project's prompt file (with <code className="text-dark-accent/70">{'{{ISSUE_NUMBER}}'}</code> replaced automatically).
                   </p>
                 </div>
 

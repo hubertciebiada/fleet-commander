@@ -166,28 +166,28 @@ CREATE TABLE IF NOT EXISTS message_templates (
 -- Seed default templates (INSERT OR IGNORE so user overrides are preserved)
 INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
   ('ci_green',
-   '[Fleet Commander] CI GREEN — All checks passed on PR #{{PR_NUMBER}}. Auto-merge is {{AUTO_MERGE_STATUS}}.',
-   'Sent when all CI checks pass on a PR');
+   'PM here. CI is green on PR #{{PR_NUMBER}} — all checks passed. Auto-merge is {{AUTO_MERGE_STATUS}}. If auto-merge is enabled, the PR should merge automatically. If not, you may want to enable it or merge manually. Good work.',
+   'PM tells TL that CI passed and advises on merge next steps');
 INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
   ('ci_red',
-   '[Fleet Commander] CI RED — Failed checks on PR #{{PR_NUMBER}}: {{FAILED_CHECKS}}. Fix count: {{FAIL_COUNT}}/{{MAX_FAILURES}} unique failures before blocked.',
-   'Sent when CI checks fail on a PR');
+   'PM here. CI failed on PR #{{PR_NUMBER}}. Failed checks: {{FAILED_CHECKS}}. This is failure {{FAIL_COUNT}} of {{MAX_FAILURES}} unique types before I mark you as blocked. Please investigate and push a fix. Focus on the failing checks first.',
+   'PM tells TL that CI failed and how many failures remain before blocked');
 INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
   ('ci_pending',
-   '[Fleet Commander] CI running on PR #{{PR_NUMBER}}...',
-   'Sent when CI checks start running');
+   'PM here. CI is now running on PR #{{PR_NUMBER}}. I''ll let you know when results come in. Continue working on other tasks if you have any, or wait for the results.',
+   'PM tells TL that CI is running and to continue other work');
 INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
   ('pr_merged',
-   '[Fleet Commander] PR #{{PR_NUMBER}} MERGED — Your work is complete. You may finish up and exit.',
-   'Sent when a PR is merged (initial notification)');
+   'PM here. Great news — PR #{{PR_NUMBER}} has been merged successfully. Your work on this issue is complete. Please wrap up any remaining tasks, update the issue status, and prepare to shut down. I''ll close this session shortly.',
+   'PM tells TL the PR merged and to wrap up');
 INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
   ('pr_merged_final',
-   '[Fleet Commander] PR #{{PR_NUMBER}} merged successfully. Issue work is complete. Please finish up — this session will close shortly.',
-   'Sent as final message before closing stdin after PR merge');
+   'PM here. PR #{{PR_NUMBER}} is merged and your work is done. Finishing up this session now. Well done, team.',
+   'PM sends final message to TL before closing the session');
 INSERT OR IGNORE INTO message_templates (id, template, description) VALUES
   ('ci_blocked',
-   '[Fleet Commander] BLOCKED — {{FAIL_COUNT}} unique CI failure types on PR #{{PR_NUMBER}}. Human intervention needed.',
-   'Sent when CI failures exceed the threshold and team is blocked');
+   'PM here. I''m marking your team as BLOCKED. You''ve hit {{FAIL_COUNT}} unique CI failure types on PR #{{PR_NUMBER}}, which exceeds our threshold. I need to review this situation before you continue. Stop pushing fixes and wait for my instructions.',
+   'PM tells TL the team is blocked due to repeated CI failures');
 
 -- Insert schema version 2 (or upgrade from 1)
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);

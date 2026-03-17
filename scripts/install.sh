@@ -25,10 +25,6 @@ if [ ! -f "$FC_ROOT/templates/workflow.md" ]; then
   echo "ERROR: templates/workflow.md not found"
   exit 1
 fi
-if [ ! -f "$FC_ROOT/templates/next-issue.md" ]; then
-  echo "ERROR: templates/next-issue.md not found"
-  exit 1
-fi
 if [ ! -f "$FC_ROOT/hooks/settings.json.example" ]; then
   echo "ERROR: hooks/settings.json.example not found"
   exit 1
@@ -145,9 +141,7 @@ echo "  Added MCP server entry to .mcp.json"
 
 # ── 4. Install workflow template and command ─────────────────────
 PROMPTS_DIR="$TARGET/.claude/prompts"
-COMMANDS_DIR="$TARGET/.claude/commands"
 mkdir -p "$PROMPTS_DIR"
-mkdir -p "$COMMANDS_DIR"
 
 # Derive project name from the target directory basename
 PROJECT_NAME="$(basename "$TARGET")"
@@ -184,23 +178,6 @@ else
 fi
 echo "    PROJECT_NAME=$PROJECT_NAME  project_slug=$project_slug  BASE_BRANCH=$BASE_BRANCH"
 
-# Copy command template (no placeholders needed)
-COMMAND_TARGET="$COMMANDS_DIR/next-issue.md"
-if [ -f "$COMMAND_TARGET" ]; then
-  if diff -q "$FC_ROOT/templates/next-issue.md" "$COMMAND_TARGET" > /dev/null 2>&1; then
-    echo "  Command template already up to date"
-  else
-    BACKUP="$COMMAND_TARGET.backup.$(date +%Y%m%d_%H%M%S)"
-    cp "$COMMAND_TARGET" "$BACKUP"
-    echo "  ⚠ Backed up existing command to $(basename "$BACKUP")"
-    cp "$FC_ROOT/templates/next-issue.md" "$COMMAND_TARGET"
-    echo "  Installed command to $COMMAND_TARGET"
-  fi
-else
-  cp "$FC_ROOT/templates/next-issue.md" "$COMMAND_TARGET"
-  echo "  Installed command to $COMMAND_TARGET"
-fi
-
 # ── Done ──────────────────────────────────────────────────────────
 echo ""
 echo "Fleet Commander installed successfully!"
@@ -208,4 +185,3 @@ echo "  Hooks:    $HOOK_DIR"
 echo "  Settings: $SETTINGS"
 echo "  MCP:      $MCP_JSON"
 echo "  Workflow: $PROMPTS_DIR/fleet-workflow.md"
-echo "  Command:  $COMMANDS_DIR/next-issue.md"

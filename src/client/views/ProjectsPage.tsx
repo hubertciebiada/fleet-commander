@@ -231,16 +231,18 @@ export function ProjectsPage() {
                       >
                         {project.status}
                       </span>
-                      {/* Install status indicators with hover tooltips */}
+                      {/* Install status indicators — 4 separate badges */}
                       {project.installStatus ? (() => {
                         const s = project.installStatus;
-                        const categories: {
+
+                        // Categories with file-list tooltips (hooks, prompt)
+                        const detailedCategories: {
                           key: string;
                           label: string;
                           installed: boolean;
                           somePresent: boolean;
                           files: { name: string; exists: boolean }[];
-                          summary?: string;
+                          summary: string;
                         }[] = [
                           {
                             key: 'hooks',
@@ -258,70 +260,102 @@ export function ProjectsPage() {
                             files: s.prompt?.files ?? [],
                             summary: 'Prompt Files',
                           },
+                        ];
+
+                        // Simple boolean categories (settings, mcp)
+                        const booleanCategories: {
+                          key: string;
+                          label: string;
+                          exists: boolean;
+                          tooltip: string;
+                        }[] = [
                           {
-                            key: 'command',
-                            label: 'command',
-                            installed: s.command?.installed ?? false,
-                            somePresent: s.command?.files?.some((f) => f.exists) ?? false,
-                            files: s.command?.files ?? [],
-                            summary: 'Command Files',
+                            key: 'settings',
+                            label: 'settings',
+                            exists: s.settings?.exists ?? false,
+                            tooltip: s.settings?.exists ? 'settings.json found' : 'settings.json missing',
+                          },
+                          {
+                            key: 'mcp',
+                            label: 'mcp',
+                            exists: s.mcpConfig?.exists ?? false,
+                            tooltip: s.mcpConfig?.exists
+                              ? '.mcp.json has fleet-commander entry'
+                              : '.mcp.json missing fleet-commander entry',
                           },
                         ];
-                        // Append settings & mcp config as extra entries in command tooltip
-                        const extraFiles = [s.settings, s.mcpConfig].filter(
-                          (f): f is { name: string; exists: boolean } => f != null,
-                        );
 
-                        return categories.map((cat) => {
-                          const color = cat.installed
-                            ? '#3FB950'
-                            : cat.somePresent
-                              ? '#D29922'
-                              : '#F85149';
-                          const icon = cat.installed
-                            ? '\u2713'
-                            : cat.somePresent
-                              ? '\u26A0'
-                              : '\u2717';
-                          const allFiles = cat.key === 'command'
-                            ? [...cat.files, ...extraFiles]
-                            : cat.files;
+                        return (
+                          <div className="flex items-center gap-2 text-xs">
+                            {detailedCategories.map((cat) => {
+                              const color = cat.installed
+                                ? '#3FB950'
+                                : cat.somePresent
+                                  ? '#D29922'
+                                  : '#F85149';
+                              const icon = cat.installed
+                                ? '\u2713'
+                                : cat.somePresent
+                                  ? '\u26A0'
+                                  : '\u2717';
 
-                          return (
-                            <div key={cat.key} className="relative group shrink-0">
-                              <span
-                                className="text-xs cursor-default"
-                                style={{ color }}
-                              >
-                                {icon} {cat.label}
-                              </span>
-
-                              {/* Tooltip on hover */}
-                              <div className="hidden group-hover:block absolute z-10 bottom-full left-0 mb-1 p-2 rounded bg-[#1C2128] border border-[#30363D] shadow-lg text-xs min-w-48">
-                                <div className="font-medium mb-1 text-[#C9D1D9]">
-                                  {cat.summary}
-                                </div>
-                                {allFiles.map((f) => (
-                                  <div
-                                    key={f.name}
-                                    className="flex items-center gap-1.5 py-0.5"
+                              return (
+                                <div key={cat.key} className="relative group shrink-0">
+                                  <span
+                                    className="cursor-default"
+                                    style={{ color }}
                                   >
-                                    <span
-                                      style={{
-                                        color: f.exists ? '#3FB950' : '#F85149',
-                                      }}
-                                    >
-                                      {f.exists ? '\u2713' : '\u2717'}
-                                    </span>
-                                    <span className="text-[#8B949E] font-mono">
-                                      {f.name}
-                                    </span>
+                                    {icon} {cat.label}
+                                  </span>
+
+                                  {/* Tooltip on hover */}
+                                  <div className="hidden group-hover:block absolute z-10 bottom-full left-0 mb-1 p-2 rounded bg-[#1C2128] border border-[#30363D] shadow-lg text-xs min-w-48 max-h-64 overflow-auto">
+                                    <div className="font-medium mb-1 text-[#C9D1D9]">
+                                      {cat.summary}
+                                    </div>
+                                    {cat.files.map((f) => (
+                                      <div
+                                        key={f.name}
+                                        className="flex items-center gap-1.5 py-0.5"
+                                      >
+                                        <span
+                                          style={{
+                                            color: f.exists ? '#3FB950' : '#F85149',
+                                          }}
+                                        >
+                                          {f.exists ? '\u2713' : '\u2717'}
+                                        </span>
+                                        <span className="text-[#8B949E] font-mono">
+                                          {f.name}
+                                        </span>
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        });
+                                </div>
+                              );
+                            })}
+                            {booleanCategories.map((cat) => {
+                              const color = cat.exists ? '#3FB950' : '#F85149';
+                              const icon = cat.exists ? '\u2713' : '\u2717';
+
+                              return (
+                                <div key={cat.key} className="relative group shrink-0">
+                                  <span
+                                    className="cursor-default"
+                                    style={{ color }}
+                                  >
+                                    {icon} {cat.label}
+                                  </span>
+
+                                  {/* Tooltip on hover */}
+                                  <div className="hidden group-hover:block absolute z-10 bottom-full right-0 mb-1 p-2 rounded bg-[#1C2128] border border-[#30363D] shadow-lg text-xs whitespace-nowrap">
+                                    <span className="text-[#C9D1D9]">{cat.tooltip}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
                       })() : (
                         <span
                           className="text-xs cursor-default shrink-0"

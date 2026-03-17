@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useApi } from '../hooks/useApi';
+import { ZapIcon, SettingsIcon, RefreshCwIcon, UserIcon, ClockIcon } from '../components/Icons';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,28 +40,95 @@ interface StateMachineResponse {
 // Constants — layout positions for each state (x, y center of box)
 // ---------------------------------------------------------------------------
 
-const STATE_WIDTH = 120;
-const STATE_HEIGHT = 48;
+const STATE_WIDTH = 130;
+const STATE_HEIGHT = 50;
 
-// Positions within the SVG canvas (designed for ~780x460 viewport)
+// Main-line states on a single horizontal row; terminal states below
 const STATE_POSITIONS: Record<string, { x: number; y: number }> = {
-  queued:    { x: 100, y: 60 },
-  launching: { x: 320, y: 60 },
-  running:   { x: 540, y: 60 },
-  idle:      { x: 440, y: 200 },
-  done:      { x: 680, y: 200 },
-  stuck:     { x: 440, y: 340 },
-  failed:    { x: 580, y: 340 },
+  queued:    { x: 80,  y: 200 },
+  launching: { x: 240, y: 200 },
+  running:   { x: 400, y: 200 },
+  idle:      { x: 560, y: 200 },
+  stuck:     { x: 720, y: 200 },
+  done:      { x: 480, y: 350 },
+  failed:    { x: 720, y: 350 },
 };
 
-// Trigger icons
-const TRIGGER_ICONS: Record<string, string> = {
-  hook: '\uD83D\uDD0C',
-  timer: '\u23F1',
-  poller: '\uD83D\uDD04',
-  pm_action: '\uD83D\uDC64',
-  system: '\u2699\uFE0F',
-};
+// Trigger icon components — Lucide-style SVGs replacing emoji
+function TriggerIcon({ trigger, size = 14, className }: { trigger: string; size?: number; className?: string }) {
+  switch (trigger) {
+    case 'hook':
+      return <ZapIcon size={size} className={className} />;
+    case 'timer':
+      return <ClockIcon size={size} className={className} />;
+    case 'poller':
+      return <RefreshCwIcon size={size} className={className} />;
+    case 'pm_action':
+      return <UserIcon size={size} className={className} />;
+    case 'system':
+      return <SettingsIcon size={size} className={className} />;
+    default:
+      return null;
+  }
+}
+
+// Inline SVG paths for rendering trigger icons directly inside the diagram SVG context.
+// Each entry returns raw SVG elements (not React components) scaled to fit the given size.
+function triggerIconSvgPaths(trigger: string, x: number, y: number, size: number, color: string, opacity: number): ReactNode {
+  // Translate and scale: Lucide icons use a 24x24 viewBox — scale to target size
+  const scale = size / 24;
+  const tx = x - size / 2;
+  const ty = y - size / 2;
+  const commonProps = {
+    fill: 'none',
+    stroke: color,
+    strokeWidth: 2 / scale,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    opacity,
+  };
+
+  switch (trigger) {
+    case 'hook': // Zap
+      return (
+        <g transform={`translate(${tx},${ty}) scale(${scale})`} {...commonProps}>
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </g>
+      );
+    case 'timer': // Clock
+      return (
+        <g transform={`translate(${tx},${ty}) scale(${scale})`} {...commonProps}>
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </g>
+      );
+    case 'poller': // RefreshCw
+      return (
+        <g transform={`translate(${tx},${ty}) scale(${scale})`} {...commonProps}>
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+          <path d="M21 3v5h-5" />
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+          <path d="M8 16H3v5" />
+        </g>
+      );
+    case 'pm_action': // User
+      return (
+        <g transform={`translate(${tx},${ty}) scale(${scale})`} {...commonProps}>
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </g>
+      );
+    case 'system': // Settings/Gear
+      return (
+        <g transform={`translate(${tx},${ty}) scale(${scale})`} {...commonProps}>
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+          <circle cx="12" cy="12" r="3" />
+        </g>
+      );
+    default:
+      return null;
+  }
+}
 
 const TRIGGER_LABELS: Record<string, string> = {
   hook: 'Hook event',
@@ -71,10 +139,41 @@ const TRIGGER_LABELS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// SVG Arrow path helpers
+// Main-line state ordering (left to right) for arrow classification
+// ---------------------------------------------------------------------------
+const MAIN_LINE_STATES = ['queued', 'launching', 'running', 'idle', 'stuck'];
+const TERMINAL_STATES = ['done', 'failed'];
+
+// ---------------------------------------------------------------------------
+// SVG Arrow path helpers — clean polyline routing
 // ---------------------------------------------------------------------------
 
-/** Compute a path from one state box edge to another, with an offset for parallel arrows */
+type ArrowKind = 'forward' | 'down' | 'recovery' | 'self';
+
+function classifyArrow(fromId: string, toId: string): ArrowKind {
+  if (fromId === toId) return 'self';
+  if (TERMINAL_STATES.includes(toId)) return 'down';
+  const fi = MAIN_LINE_STATES.indexOf(fromId);
+  const ti = MAIN_LINE_STATES.indexOf(toId);
+  if (fi >= 0 && ti >= 0 && ti < fi) return 'recovery';
+  return 'forward';
+}
+
+/** Sibling index for transitions sharing the same (from, to) pair */
+function siblingOffset(
+  fromId: string,
+  toId: string,
+  allTransitions: Transition[],
+  transitionId: string,
+): number {
+  const siblings = allTransitions.filter(
+    (t) => t.from === fromId && t.to === toId,
+  );
+  const idx = siblings.findIndex((t) => t.id === transitionId);
+  return siblings.length > 1 ? (idx - (siblings.length - 1) / 2) * 14 : 0;
+}
+
+/** Compute a polyline / arc path from one state to another */
 function computeArrowPath(
   fromId: string,
   toId: string,
@@ -85,43 +184,59 @@ function computeArrowPath(
   const to = STATE_POSITIONS[toId];
   if (!from || !to) return '';
 
-  // Find how many transitions share the same from/to pair (in either direction) to offset
-  const siblings = allTransitions.filter(
-    (t) =>
-      (t.from === fromId && t.to === toId) ||
-      (t.from === toId && t.to === fromId),
-  );
-  const myIndex = siblings.findIndex((t) => t.id === transitionId);
-  const offset = siblings.length > 1 ? (myIndex - (siblings.length - 1) / 2) * 20 : 0;
+  const kind = classifyArrow(fromId, toId);
+  const sOff = siblingOffset(fromId, toId, allTransitions, transitionId);
 
-  // Direction vector
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist === 0) return '';
+  const halfW = STATE_WIDTH / 2 + 4;
+  const halfH = STATE_HEIGHT / 2 + 4;
 
-  // Unit direction
-  const ux = dx / dist;
-  const uy = dy / dist;
-
-  // Perpendicular for offset
-  const px = -uy;
-  const py = ux;
-
-  // Start/end points on box edges
-  const startX = from.x + ux * (STATE_WIDTH / 2 + 4) + px * offset;
-  const startY = from.y + uy * (STATE_HEIGHT / 2 + 4) + py * offset;
-  const endX = to.x - ux * (STATE_WIDTH / 2 + 4) + px * offset;
-  const endY = to.y - uy * (STATE_HEIGHT / 2 + 4) + py * offset;
-
-  // Curved path with control point
-  const midX = (startX + endX) / 2 + px * 20;
-  const midY = (startY + endY) / 2 + py * 20;
-
-  return `M ${startX} ${startY} Q ${midX} ${midY} ${endX} ${endY}`;
+  switch (kind) {
+    case 'forward': {
+      // Straight horizontal arrow from right edge to left edge
+      const y = from.y + sOff;
+      const x1 = from.x + halfW;
+      const x2 = to.x - halfW;
+      return `M ${x1} ${y} L ${x2} ${y}`;
+    }
+    case 'down': {
+      // Vertical drop then horizontal jog to terminal state
+      const x1 = from.x + sOff;
+      const y1 = from.y + halfH;
+      const x2 = to.x;
+      const y2 = to.y - halfH;
+      if (Math.abs(x1 - x2) < 2) {
+        // Straight down
+        return `M ${x1} ${y1} L ${x2} ${y2}`;
+      }
+      // 90-degree corner: go down then across
+      const midY = (y1 + y2) / 2;
+      return `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`;
+    }
+    case 'recovery': {
+      // Arc above the main line going left (from right state back to left state)
+      const x1 = from.x;
+      const y1 = from.y - halfH;
+      const x2 = to.x;
+      const y2 = to.y - halfH;
+      // Height of arc above main line — farther states get higher arcs
+      const span = Math.abs(x1 - x2);
+      const arcY = from.y - halfH - 30 - span * 0.15 + sOff;
+      return `M ${x1} ${y1} L ${x1} ${arcY} L ${x2} ${arcY} L ${x2} ${y2}`;
+    }
+    case 'self': {
+      // Small loop above the state
+      const cx = from.x + sOff;
+      const topY = from.y - halfH;
+      const loopH = 30;
+      const loopW = 20;
+      return `M ${cx - loopW} ${topY} C ${cx - loopW} ${topY - loopH}, ${cx + loopW} ${topY - loopH}, ${cx + loopW} ${topY}`;
+    }
+    default:
+      return '';
+  }
 }
 
-/** Get the midpoint of a quadratic bezier for label placement */
+/** Get the label position for an arrow */
 function getPathMidpoint(
   fromId: string,
   toId: string,
@@ -132,37 +247,38 @@ function getPathMidpoint(
   const to = STATE_POSITIONS[toId];
   if (!from || !to) return { x: 0, y: 0 };
 
-  const siblings = allTransitions.filter(
-    (t) =>
-      (t.from === fromId && t.to === toId) ||
-      (t.from === toId && t.to === fromId),
-  );
-  const myIndex = siblings.findIndex((t) => t.id === transitionId);
-  const offset = siblings.length > 1 ? (myIndex - (siblings.length - 1) / 2) * 20 : 0;
+  const kind = classifyArrow(fromId, toId);
+  const sOff = siblingOffset(fromId, toId, allTransitions, transitionId);
+  const halfW = STATE_WIDTH / 2 + 4;
+  const halfH = STATE_HEIGHT / 2 + 4;
 
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist === 0) return from;
-
-  const ux = dx / dist;
-  const uy = dy / dist;
-  const px = -uy;
-  const py = ux;
-
-  const startX = from.x + ux * (STATE_WIDTH / 2 + 4) + px * offset;
-  const startY = from.y + uy * (STATE_HEIGHT / 2 + 4) + py * offset;
-  const endX = to.x - ux * (STATE_WIDTH / 2 + 4) + px * offset;
-  const endY = to.y - uy * (STATE_HEIGHT / 2 + 4) + py * offset;
-
-  const midCtrlX = (startX + endX) / 2 + px * 20;
-  const midCtrlY = (startY + endY) / 2 + py * 20;
-
-  // Quadratic bezier midpoint at t=0.5
-  const mx = 0.25 * startX + 0.5 * midCtrlX + 0.25 * endX;
-  const my = 0.25 * startY + 0.5 * midCtrlY + 0.25 * endY;
-
-  return { x: mx, y: my };
+  switch (kind) {
+    case 'forward': {
+      const y = from.y + sOff - 10;
+      const x = (from.x + halfW + to.x - halfW) / 2;
+      return { x, y };
+    }
+    case 'down': {
+      const x1 = from.x + sOff;
+      const x2 = to.x;
+      const y1 = from.y + halfH;
+      const y2 = to.y - halfH;
+      return { x: (x1 + x2) / 2 + 10, y: (y1 + y2) / 2 };
+    }
+    case 'recovery': {
+      const x1 = from.x;
+      const x2 = to.x;
+      const span = Math.abs(x1 - x2);
+      const arcY = from.y - halfH - 30 - span * 0.15 + sOff;
+      return { x: (x1 + x2) / 2, y: arcY - 8 };
+    }
+    case 'self': {
+      const topY = from.y - halfH - 30;
+      return { x: from.x + sOff, y: topY - 4 };
+    }
+    default:
+      return { x: 0, y: 0 };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,10 +393,10 @@ export function StateMachinePage() {
           {/* Legend */}
           <div className="flex items-center gap-4 text-xs text-dark-muted">
             {Object.entries(TRIGGER_LABELS).map(([key, label]) => (
-              <span key={key} className="flex items-center gap-1">
-                <span className="text-sm">{TRIGGER_ICONS[key]}</span>
-                {label}
-              </span>
+              <div key={key} className="flex items-center gap-1.5">
+                <TriggerIcon trigger={key} size={14} className="text-[#8B949E]" />
+                <span>{label}</span>
+              </div>
             ))}
           </div>
         </div>
@@ -291,34 +407,34 @@ export function StateMachinePage() {
         {/* Left panel — State diagram (60%) */}
         <div className="w-[60%] min-w-0 p-4 overflow-auto border-r border-dark-border">
           <svg
-            viewBox="0 0 800 420"
+            viewBox="0 0 850 440"
             className="w-full h-auto"
-            style={{ minHeight: 380 }}
+            style={{ minHeight: 400 }}
           >
             <defs>
               <marker
                 id="arrowhead"
-                markerWidth="8"
-                markerHeight="6"
-                refX="8"
-                refY="3"
+                markerWidth="10"
+                markerHeight="7"
+                refX="10"
+                refY="3.5"
                 orient="auto"
               >
-                <polygon points="0 0, 8 3, 0 6" fill="#8B949E" />
+                <polygon points="0 0, 10 3.5, 0 7" fill="#8B949E" />
               </marker>
               <marker
                 id="arrowhead-selected"
-                markerWidth="8"
-                markerHeight="6"
-                refX="8"
-                refY="3"
+                markerWidth="10"
+                markerHeight="7"
+                refX="10"
+                refY="3.5"
                 orient="auto"
               >
-                <polygon points="0 0, 8 3, 0 6" fill="#58A6FF" />
+                <polygon points="0 0, 10 3.5, 0 7" fill="#58A6FF" />
               </marker>
             </defs>
 
-            {/* Transition arrows */}
+            {/* Transition arrows (rendered first so states draw on top) */}
             {data.transitions.map((t) => {
               const isSelected = t.id === selectedTransition;
               const pathD = computeArrowPath(t.from, t.to, data.transitions, t.id);
@@ -343,23 +459,20 @@ export function StateMachinePage() {
                     fill="none"
                     stroke={isSelected ? '#58A6FF' : '#8B949E'}
                     strokeWidth={isSelected ? 2.5 : 1.5}
-                    strokeDasharray={isSelected ? 'none' : 'none'}
                     markerEnd={isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)'}
                     opacity={selectedTransition && !isSelected ? 0.3 : 1}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
                   />
-                  {/* Trigger icon at midpoint */}
-                  <text
-                    x={mid.x}
-                    y={mid.y}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize="11"
-                    fill={isSelected ? '#58A6FF' : '#8B949E'}
-                    opacity={selectedTransition && !isSelected ? 0.3 : 1}
-                    className="pointer-events-none select-none"
-                  >
-                    {TRIGGER_ICONS[t.trigger]}
-                  </text>
+                  {/* Trigger icon near midpoint */}
+                  {triggerIconSvgPaths(
+                    t.trigger,
+                    mid.x,
+                    mid.y,
+                    14,
+                    isSelected ? '#58A6FF' : '#8B949E',
+                    selectedTransition && !isSelected ? 0.3 : 1,
+                  )}
                 </g>
               );
             })}
@@ -369,8 +482,12 @@ export function StateMachinePage() {
               const pos = STATE_POSITIONS[state.id];
               if (!pos) return null;
 
+              // Tinted background: base #0D1117 blended with ~10% of the status color
+              const tintBg = `${state.color}18`;
+
               return (
                 <g key={state.id}>
+                  {/* Box fill (tinted dark) */}
                   <rect
                     x={pos.x - STATE_WIDTH / 2}
                     y={pos.y - STATE_HEIGHT / 2}
@@ -378,7 +495,27 @@ export function StateMachinePage() {
                     height={STATE_HEIGHT}
                     rx="8"
                     ry="8"
-                    fill="#161B22"
+                    fill="#0D1117"
+                  />
+                  {/* Tint overlay */}
+                  <rect
+                    x={pos.x - STATE_WIDTH / 2}
+                    y={pos.y - STATE_HEIGHT / 2}
+                    width={STATE_WIDTH}
+                    height={STATE_HEIGHT}
+                    rx="8"
+                    ry="8"
+                    fill={tintBg}
+                  />
+                  {/* Border */}
+                  <rect
+                    x={pos.x - STATE_WIDTH / 2}
+                    y={pos.y - STATE_HEIGHT / 2}
+                    width={STATE_WIDTH}
+                    height={STATE_HEIGHT}
+                    rx="8"
+                    ry="8"
+                    fill="none"
                     stroke={state.color}
                     strokeWidth="2"
                   />
@@ -387,8 +524,8 @@ export function StateMachinePage() {
                     y={pos.y}
                     textAnchor="middle"
                     dominantBaseline="central"
-                    fontSize="13"
-                    fontWeight="600"
+                    fontSize="14"
+                    fontWeight="700"
                     fill={state.color}
                     className="select-none"
                   >
@@ -444,7 +581,7 @@ export function StateMachinePage() {
                   Trigger
                 </label>
                 <div className="mt-1 flex items-center gap-2 text-sm text-dark-text">
-                  <span>{TRIGGER_ICONS[selected.trigger]}</span>
+                  <TriggerIcon trigger={selected.trigger} size={16} className="text-[#8B949E]" />
                   <span>{selected.triggerLabel}</span>
                 </div>
               </div>

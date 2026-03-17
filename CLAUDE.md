@@ -102,8 +102,7 @@ fleet-commander/
     install.sh / install.ps1
     uninstall.sh / uninstall.ps1
   templates/
-    workflow.md             # GitHub Actions workflow template
-    next-issue.md           # Slash command template
+    workflow.md             # Workflow prompt template (deployed to target repos)
   prompts/
     default-prompt.md       # Default launch prompt ({{ISSUE_NUMBER}} placeholder)
   tests/

@@ -57,11 +57,10 @@ export interface InstallHooksStatus extends InstallCategoryStatus {
   found: number;
 }
 
-/** Detailed install status for the three artifacts deployed by install.sh */
+/** Detailed install status for the artifacts deployed by install.sh */
 export interface InstallStatus {
   hooks: InstallHooksStatus;
   prompt: InstallCategoryStatus;
-  command: InstallCategoryStatus;
   settings: InstallFileStatus;
   mcpConfig: InstallFileStatus;
 }

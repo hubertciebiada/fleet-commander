@@ -25,7 +25,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'ci_passed',
     trigger: 'ci_status_change',
     message:
-      '[Fleet Commander] CI GREEN — All checks passed on PR #{{PR_NUMBER}}. Auto-merge is {{AUTO_MERGE_STATUS}}.',
+      'PM here. CI is green on PR #{{PR_NUMBER}} — all checks passed. Auto-merge is {{AUTO_MERGE_STATUS}}. If auto-merge is enabled, the PR should merge automatically. If not, you may want to enable it or merge manually. Good work.',
   },
   {
     id: 'ci_red',
@@ -33,14 +33,15 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'ci_failed',
     trigger: 'ci_status_change',
     message:
-      '[Fleet Commander] CI RED — Failed checks on PR #{{PR_NUMBER}}: {{FAILED_CHECKS}}. Fix count: {{FAIL_COUNT}}/{{MAX_FAILURES}} unique failures before blocked.',
+      'PM here. CI failed on PR #{{PR_NUMBER}}. Failed checks: {{FAILED_CHECKS}}. This is failure {{FAIL_COUNT}} of {{MAX_FAILURES}} unique types before I mark you as blocked. Please investigate and push a fix. Focus on the failing checks first.',
   },
   {
     id: 'ci_pending',
     from: 'pr_open',
     to: 'ci_pending',
     trigger: 'ci_status_change',
-    message: '[Fleet Commander] CI running on PR #{{PR_NUMBER}}...',
+    message:
+      "PM here. CI is now running on PR #{{PR_NUMBER}}. I'll let you know when results come in. Continue working on other tasks if you have any, or wait for the results.",
   },
   {
     id: 'pr_merged',
@@ -48,7 +49,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'done',
     trigger: 'pr_merge',
     message:
-      '[Fleet Commander] PR #{{PR_NUMBER}} MERGED — Your work is complete. You may finish up and exit.',
+      "PM here. Great news — PR #{{PR_NUMBER}} has been merged successfully. Your work on this issue is complete. Please wrap up any remaining tasks, update the issue status, and prepare to shut down. I'll close this session shortly.",
   },
   {
     id: 'pr_merged_final',
@@ -56,7 +57,7 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'done',
     trigger: 'pr_merge_final',
     message:
-      '[Fleet Commander] PR #{{PR_NUMBER}} merged successfully. Issue work is complete. Please finish up — this session will close shortly.',
+      'PM here. PR #{{PR_NUMBER}} is merged and your work is done. Finishing up this session now. Well done, team.',
   },
   {
     id: 'ci_blocked',
@@ -64,6 +65,6 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     to: 'blocked',
     trigger: 'ci_fail_threshold',
     message:
-      '[Fleet Commander] BLOCKED — {{FAIL_COUNT}} unique CI failure types on PR #{{PR_NUMBER}}. Human intervention needed.',
+      "PM here. I'm marking your team as BLOCKED. You've hit {{FAIL_COUNT}} unique CI failure types on PR #{{PR_NUMBER}}, which exceeds our threshold. I need to review this situation before you continue. Stop pushing fixes and wait for my instructions.",
   },
 ];

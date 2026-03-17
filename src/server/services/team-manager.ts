@@ -1217,11 +1217,9 @@ export class TeamManager {
 
   /**
    * Read the project's prompt file and replace {{ISSUE_NUMBER}} placeholder.
-   * Falls back to default-prompt.md, then to config.defaultPrompt + issueNumber.
+   * Fallback chain: project prompt file > prompts/default-prompt.md > hardcoded default.
    */
   private resolvePromptFromFile(project: Project, issueNumber: number): string {
-    const fallback = `${config.defaultPrompt} ${issueNumber}`;
-
     if (project.promptFile) {
       const absPath = path.join(config.fleetCommanderRoot, project.promptFile);
       if (fs.existsSync(absPath)) {
@@ -1251,6 +1249,8 @@ export class TeamManager {
       }
     }
 
+    // Hardcoded fallback (should not normally be reached)
+    const fallback = `Read the ENTIRE file .claude/prompts/fleet-workflow.md before taking any actions.\nYou are the TL. Create a team and spawn the CORE team (Coordinator + analyst + dev + reviewer) as described in the workflow.\nIssue: #${issueNumber}`;
     console.log(`[TeamManager] Using hardcoded fallback prompt`);
     return fallback;
   }

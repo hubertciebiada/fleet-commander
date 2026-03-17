@@ -7,7 +7,7 @@
 
 ```
 User: claude --worktree {{project_slug}}-{N}
-User: /next-issue {N}
+(prompt is sent via stdin from Fleet Commander's prompt file)
 ```
 
 **Rola TL (glowny agent = Ty):**
