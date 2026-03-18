@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { TeamDashboardRow, TeamStatus } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -58,7 +58,12 @@ interface BarInfo {
 export function TeamTimeline({ teams }: TeamTimelineProps) {
   const [hoveredId, setHoveredId] = useState<number | null>(null);
 
-  const now = useMemo(() => Date.now(), []);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Build bar info for each team that has a launchedAt timestamp
   const bars = useMemo<BarInfo[]>(() => {
