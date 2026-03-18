@@ -32,6 +32,9 @@ export interface EventPayload {
   agent_type?: string;   // e.g. "coordinator", "csharp-dev"
   teammate_name?: string;
   message?: string;
+  error?: string;        // PostToolUseFailure error description (CC sends "error", not "message")
+  tool_use_id?: string;  // tool_use_id from PostToolUseFailure events
+  tool_input?: string;   // tool input JSON from PostToolUseFailure events (passed via route, not shell)
   stop_reason?: string;
   worktree_root?: string;
 }

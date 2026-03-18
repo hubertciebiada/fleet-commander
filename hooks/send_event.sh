@@ -72,6 +72,8 @@ TOOL_NAME=$(extract_json_string "tool_name")
 AGENT_TYPE=$(extract_json_string "agent_type")
 TEAMMATE_NAME=$(extract_json_string "teammate_name")
 MESSAGE=$(extract_json_string "message")
+ERROR=$(extract_json_string "error")
+TOOL_USE_ID=$(extract_json_string "tool_use_id")
 STOP_REASON=$(extract_json_string "stop_reason")
 
 # ── Build timestamp ───────────────────────────────────────────────
@@ -104,6 +106,8 @@ PAYLOAD="${PAYLOAD}$(json_field "tool_name" "$TOOL_NAME")"
 PAYLOAD="${PAYLOAD}$(json_field "agent_type" "$AGENT_TYPE")"
 PAYLOAD="${PAYLOAD}$(json_field "teammate_name" "$TEAMMATE_NAME")"
 PAYLOAD="${PAYLOAD}$(json_field "message" "$MESSAGE")"
+PAYLOAD="${PAYLOAD}$(json_field "error" "$ERROR")"
+PAYLOAD="${PAYLOAD}$(json_field "tool_use_id" "$TOOL_USE_ID")"
 PAYLOAD="${PAYLOAD}$(json_field "stop_reason" "$STOP_REASON")"
 PAYLOAD="${PAYLOAD}$(json_field "worktree_root" "$WORKTREE_ROOT")"
 # Remove trailing comma, close brace
