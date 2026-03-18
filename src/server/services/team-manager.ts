@@ -307,7 +307,7 @@ export class TeamManager {
       });
       db.insertTransition({
         teamId: relaunchTeamId,
-        fromStatus: prevTeam?.status ?? 'unknown',
+        fromStatus: prevTeam?.status ?? 'failed',
         toStatus: 'queued',
         trigger: 'pm_action',
         reason: 'Relaunched by PM',
@@ -1141,7 +1141,7 @@ export class TeamManager {
     });
     db.insertTransition({
       teamId: team.id,
-      fromStatus: 'none',
+      fromStatus: 'queued',
       toStatus: 'queued',
       trigger: 'pm_action',
       reason: 'Team created and queued',
