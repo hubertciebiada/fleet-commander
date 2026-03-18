@@ -218,8 +218,10 @@ class GitHubPoller {
 
     // Map GitHub state to our state — detect merged via mergedAt field
     const isMerged = !!data.mergedAt;
-    const state: PRState = isMerged ? 'merged' : (data.state?.toLowerCase() as PRState ?? 'open');
-    const mergeState: MergeStatus = (data.mergeStateStatus?.toLowerCase() as MergeStatus) ?? 'unknown';
+    const rawState = data.state?.toLowerCase() ?? 'open';
+    const state: PRState = isMerged ? 'merged' : (['draft', 'open', 'merged', 'closed'].includes(rawState) ? rawState as PRState : 'open');
+    const rawMerge = data.mergeStateStatus?.toLowerCase() ?? 'unknown';
+    const mergeState: MergeStatus = (['clean', 'behind', 'blocked', 'dirty', 'unknown'].includes(rawMerge) ? rawMerge as MergeStatus : 'unknown');
 
     // Derive CI status from statusCheckRollup
     const checks: GHCheckRun[] = data.statusCheckRollup ?? [];
