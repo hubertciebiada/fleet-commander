@@ -5,6 +5,7 @@ import { LaunchDialog } from './LaunchDialog';
 import { useApi } from '../hooks/useApi';
 import { RocketIcon } from './Icons';
 import { STATUS_COLORS, getUsageColor } from '../utils/constants';
+import { formatResetsAt } from '../utils/format-resets-at';
 import type { UsageZone } from '../../shared/types';
 
 interface RedThresholds {
@@ -23,6 +24,8 @@ interface UsageResponse {
   extraPercent: number;
   zone?: UsageZone;
   redThresholds?: RedThresholds;
+  dailyResetsAt?: string | null;
+  weeklyResetsAt?: string | null;
 }
 
 export function TopBar() {
@@ -57,10 +60,10 @@ export function TopBar() {
   // Build usage indicators with full names
   const usageIndicators = usage
     ? [
-        { key: 'daily', label: 'Daily', percent: usage.dailyPercent, redThreshold: thresholds.daily },
-        { key: 'weekly', label: 'Weekly', percent: usage.weeklyPercent, redThreshold: thresholds.weekly },
-        { key: 'sonnet', label: 'Sonnet', percent: usage.sonnetPercent, redThreshold: thresholds.sonnet },
-        { key: 'extra', label: 'Extra', percent: usage.extraPercent, redThreshold: thresholds.extra },
+        { key: 'daily', label: 'Daily', percent: usage.dailyPercent, redThreshold: thresholds.daily, resetLabel: formatResetsAt(usage.dailyResetsAt) },
+        { key: 'weekly', label: 'Weekly', percent: usage.weeklyPercent, redThreshold: thresholds.weekly, resetLabel: formatResetsAt(usage.weeklyResetsAt) },
+        { key: 'sonnet', label: 'Sonnet', percent: usage.sonnetPercent, redThreshold: thresholds.sonnet, resetLabel: null },
+        { key: 'extra', label: 'Extra', percent: usage.extraPercent, redThreshold: thresholds.extra, resetLabel: null },
       ]
     : [];
 
@@ -101,7 +104,7 @@ export function TopBar() {
             <span className="text-dark-muted mx-1">|</span>
           )}
           {usageIndicators.map(ind => (
-            <span key={ind.key} className="text-xs font-medium">
+            <span key={ind.key} className="text-xs font-medium" title={ind.resetLabel ?? undefined}>
               <span className="text-dark-muted">{ind.label}</span>{' '}
               <span style={{ color: getUsageColor(ind.percent, ind.redThreshold) }}>{ind.percent.toFixed(0)}%</span>
             </span>
