@@ -115,7 +115,7 @@ Ready → Analyzing → Implementing → Reviewing → PR → Done
 - Use `SendMessage` with `recipient: "{agent_name}"` and `summary: "5-10 words"`
 - Messages arrive automatically — don't poll
 - After spawn: agents check `TaskList` for their assignment
-- **Idle is normal** — don't ping agents before 5 minutes of inactivity
+- **Idle is normal** — don't ping agents before 3 minutes of inactivity
 - On `shutdown_request` → respond `shutdown_response` with `approve: true`
 
 ## Prohibitions
