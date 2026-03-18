@@ -6,7 +6,7 @@
 // and messaging concerns remain separate.
 // =============================================================================
 
-export interface DefaultMessageTemplate {
+interface DefaultMessageTemplate {
   id: string;
   template: string;
   description: string;
