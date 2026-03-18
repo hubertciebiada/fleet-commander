@@ -121,6 +121,28 @@ class UsagePoller {
   start(intervalMs?: number): void {
     const ms = intervalMs ?? config.usagePollIntervalMs;
 
+    // Seed zone state from the last DB snapshot so that zone transitions
+    // (especially red -> green) are correctly detected on the first poll
+    // after a server restart.  Without this, _lastZone defaults to 'green'
+    // and a red->green recovery would never trigger processQueue.
+    try {
+      const db = getDatabase();
+      const latest = db.getLatestUsage();
+      if (latest) {
+        _latestDaily = latest.dailyPercent;
+        _latestWeekly = latest.weeklyPercent;
+        _lastZone = getUsageZone();
+        console.log(
+          `[UsagePoller] Seeded from DB — daily=${_latestDaily}% weekly=${_latestWeekly}% zone=${_lastZone}`,
+        );
+      }
+    } catch (err: unknown) {
+      console.warn(
+        '[UsagePoller] Could not seed from DB, using defaults:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+
     // Poll immediately on start
     this.poll();
 
