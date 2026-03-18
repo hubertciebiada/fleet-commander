@@ -1722,6 +1722,7 @@ export class TeamManager {
                 weekly_percent: 0,
                 sonnet_percent: 0,
                 extra_percent: 0,
+                zone: getUsageZone(),
               }, teamId);
             }
 
@@ -1782,6 +1783,7 @@ export class TeamManager {
                 weekly_percent: 0,
                 sonnet_percent: 0,
                 extra_percent: 0,
+                zone: getUsageZone(),
               }, teamId);
             }
           } catch {

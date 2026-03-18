@@ -1,5 +1,6 @@
 import { FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
+import type { UsageZone } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Stream Event — JSON objects from Claude Code's --output-format stream-json
@@ -39,7 +40,7 @@ export interface SSEEventPayloads {
   pr_updated: { pr_number: number; team_id: number; state?: string; ci_status?: string; merge_status?: string; auto_merge?: boolean; ci_fail_count?: number; action?: string };
   team_launched: { team_id: number; issue_number: number; project_id?: number | null };
   team_stopped: { team_id: number };
-  usage_updated: { daily_percent: number; weekly_percent: number; sonnet_percent: number; extra_percent: number };
+  usage_updated: { daily_percent: number; weekly_percent: number; sonnet_percent: number; extra_percent: number; zone: UsageZone };
   project_added: { project_id: number; name: string; repo_path: string };
   project_updated: { project_id: number; name: string; status: string };
   project_removed: { project_id: number };
