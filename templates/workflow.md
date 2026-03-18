@@ -24,7 +24,7 @@ User: claude --worktree {{project_slug}}-{N}
 1. Read this workflow and understand the team structure
 2. Spawn `fleet-analyst` and send it the issue number
 3. Wait for the Analyst's brief
-4. Spawn `fleet-dev-*` (specialist chosen from brief TYPE) with the brief + guidebook list
+4. Spawn `fleet-dev` with the brief + guidebook list (the TYPE field tells the dev which guidebooks to read)
 5. Once dev reports "ready for review", spawn `fleet-reviewer`
 6. Let dev and reviewer communicate peer-to-peer — DO NOT relay messages between them
 7. Only intervene if: escalation after 3 review rounds, agent stuck (5min idle), or final PR creation
@@ -37,7 +37,7 @@ User: claude --worktree {{project_slug}}-{N}
 | Agent | subagent_type | name | Role | Spawn |
 |-------|---------------|------|------|-------|
 | **Analyst** | `fleet-analyst` | `analyst` | Analyzes issue + codebase, produces structured brief with guidebook paths | Phase 1 only |
-| **Dev** | `fleet-dev-*` | `dev-{lang}` | Implements code, writes tests, pushes commits. Communicates with reviewer directly during review. | Phase 2 onward |
+| **Dev** | `fleet-dev` | `dev` | Implements code, writes tests, pushes commits. Reads guidebooks for specialization. Communicates with reviewer directly during review. | Phase 2 onward |
 | **Reviewer** | `fleet-reviewer` | `reviewer` | Two-pass code review. Sends feedback directly to dev. Reports final verdict to TL. | Phase 3 onward |
 
 There is NO coordinator agent. The TL orchestrates all three agents directly.
@@ -51,17 +51,19 @@ All agents use `model: inherit` — they run on the same model as the TL.
 - **Reviewer** is spawned when dev reports "ready for review" and persists through all review rounds.
 - Dev and Reviewer communicate **peer-to-peer** — TL does not relay messages between them.
 
-### TYPE to Developer Mapping
+### TYPE to Guidebook Mapping
 
-| TYPE in brief | Developer Agent |
-|---------------|-----------------|
-| Generic / unknown | `fleet-dev-generic` |
-| C# / .NET | `fleet-dev-csharp` |
-| F# | `fleet-dev-fsharp` |
-| Python | `fleet-dev-python` |
-| TypeScript / JS | `fleet-dev-typescript` |
-| Infrastructure / CI | `fleet-dev-devops` |
-| Mixed (A + B) | Primary dev FIRST, then secondary dev with `blockedBy` |
+All implementation work is assigned to the single `fleet-dev` agent. The Analyst's TYPE and Guidebooks fields tell the dev which guidebooks to read for domain-specific conventions.
+
+| TYPE in brief | Guidebooks to read |
+|---------------|-------------------|
+| C# / .NET | `csharp-conventions.md` |
+| F# | `fsharp-conventions.md` |
+| TypeScript / JS | `typescript-conventions.md` |
+| Python | `python-conventions.md` |
+| Infrastructure / CI | `devops-conventions.md` |
+| Generic / unknown | CLAUDE.md only (no language-specific guidebook) |
+| Mixed (A + B) | Multiple guidebooks — dev reads all relevant ones |
 
 ## Workflow State Machine
 
@@ -139,7 +141,7 @@ If the Analyst is unresponsive for >5 minutes or produces an unusable brief:
 
 ## Phase 2 — Implementation
 
-1. **TL determines which dev specialist to spawn** based on the brief's TYPE field (see mapping table above)
+1. **TL spawns `fleet-dev`** with the brief and guidebook list (the TYPE field determines which guidebooks the dev should read)
 2. **TL spawns the dev agent** with this context in the task:
    - The full Analyst brief
    - The list of guidebook paths from the brief (dev reads these first)
@@ -422,7 +424,7 @@ Atomic commits — each commit should be a logical unit.
 
 ```
 Phase 1: TL → spawn Analyst → receive brief → validate
-Phase 2: TL → spawn Dev (specialist from brief TYPE) → dev implements → dev reports "ready for review"
+Phase 2: TL → spawn Dev (fleet-dev + guidebooks from brief) → dev implements → dev reports "ready for review"
 Phase 3: TL → spawn Reviewer → reviewer + dev iterate p2p → reviewer reports verdict to TL
 Phase 4: TL → rebase → create PR → set auto-merge → FC monitors CI
 Phase 5: TL → close issue → shutdown agents → finish
