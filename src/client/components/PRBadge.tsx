@@ -47,7 +47,10 @@ export function PRBadge({ prNumber, ciStatus, teamId, prState }: PRBadgeProps) {
     return <span className="text-dark-muted text-sm">{'\u2014'}</span>;
   }
 
-  const ci = CI_ICONS[ciStatus ?? 'none'] ?? CI_ICONS.none;
+  const ci =
+    prState === 'merged'
+      ? { icon: '\u2713', color: '#A371F7' }
+      : CI_ICONS[ciStatus ?? 'none'] ?? CI_ICONS.none;
   const canExpand = teamId != null;
   const stateColor = STATE_COLORS[prState ?? ''] ?? '#8B949E';
   const stateLabel = prState ? prState.toUpperCase() : null;
