@@ -172,7 +172,7 @@ const prsRoutes: FastifyPluginCallback = (
     '/api/prs/refresh',
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        githubPoller.poll();
+        githubPoller.poll().catch(err => request.log.error(err, 'Poll failed'));
         return reply.code(200).send({
           ok: true,
           message: 'GitHub poller poll triggered',
