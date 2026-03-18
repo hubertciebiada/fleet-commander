@@ -94,4 +94,42 @@ describe('PRBadge', () => {
       expect(ciIcon).toHaveStyle({ color: '#8B949E' });
     });
   });
+
+  describe('merged PR override', () => {
+    it('shows purple checkmark when PR is merged with ciStatus "none"', () => {
+      const { container } = render(
+        <PRBadge prNumber={99} ciStatus="none" prState="merged" />,
+      );
+      const ciIcon = container.querySelector('.font-bold');
+      expect(ciIcon?.textContent).toBe('\u2713');
+      expect(ciIcon).toHaveStyle({ color: '#A371F7' });
+    });
+
+    it('shows purple checkmark when PR is merged with ciStatus "passing"', () => {
+      const { container } = render(
+        <PRBadge prNumber={99} ciStatus="passing" prState="merged" />,
+      );
+      const ciIcon = container.querySelector('.font-bold');
+      expect(ciIcon?.textContent).toBe('\u2713');
+      expect(ciIcon).toHaveStyle({ color: '#A371F7' });
+    });
+
+    it('shows purple checkmark when PR is merged with ciStatus null', () => {
+      const { container } = render(
+        <PRBadge prNumber={99} ciStatus={null} prState="merged" />,
+      );
+      const ciIcon = container.querySelector('.font-bold');
+      expect(ciIcon?.textContent).toBe('\u2713');
+      expect(ciIcon).toHaveStyle({ color: '#A371F7' });
+    });
+
+    it('does not override icon for open PRs', () => {
+      const { container } = render(
+        <PRBadge prNumber={99} ciStatus="failing" prState="open" />,
+      );
+      const ciIcon = container.querySelector('.font-bold');
+      expect(ciIcon?.textContent).toBe('\u2715');
+      expect(ciIcon).toHaveStyle({ color: '#F85149' });
+    });
+  });
 });
