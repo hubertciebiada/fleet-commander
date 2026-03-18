@@ -2,8 +2,8 @@
 // Fleet Commander — TopBar Component Tests
 // =============================================================================
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import type { TeamDashboardRow } from '../../src/shared/types';
 import { makeTeam } from './test-utils';
@@ -34,6 +34,10 @@ import { TopBar } from '../../src/client/components/TopBar';
 describe('TopBar', () => {
   beforeEach(() => {
     mockTeams = [];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('renders the "Fleet Commander" title', () => {
@@ -91,6 +95,75 @@ describe('TopBar', () => {
     const dots = container.querySelectorAll('span');
     const dotTexts = Array.from(dots).filter(el => el.textContent === '\u00B7');
     expect(dotTexts.length).toBe(1);
+  });
+
+  it('shows reset tooltip on daily and weekly usage indicators', async () => {
+    // Fix Date.now to a known time, but let async code (fetch) resolve naturally
+    const now = new Date('2026-03-18T10:00:00Z').getTime();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    // dailyResetsAt = 2h 30m from now, weeklyResetsAt = 5h 15m from now
+    const usageResponse = {
+      dailyPercent: 42,
+      weeklyPercent: 60,
+      sonnetPercent: 10,
+      extraPercent: 5,
+      zone: 'green',
+      dailyResetsAt: '2026-03-18T12:30:00Z',
+      weeklyResetsAt: '2026-03-18T15:15:00Z',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => usageResponse,
+    } as Response);
+
+    render(<TopBar />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Daily')).toBeInTheDocument();
+    });
+
+    // Daily indicator should have tooltip "Resets in 2h 30m"
+    const dailySpan = screen.getByText('Daily').closest('span[title]');
+    expect(dailySpan).toHaveAttribute('title', 'Resets in 2h 30m');
+
+    // Weekly indicator should have tooltip "Resets in 5h 15m"
+    const weeklySpan = screen.getByText('Weekly').closest('span[title]');
+    expect(weeklySpan).toHaveAttribute('title', 'Resets in 5h 15m');
+
+    // Sonnet and Extra should NOT have a title attribute
+    const sonnetSpan = screen.getByText('Sonnet').closest('span');
+    expect(sonnetSpan).not.toHaveAttribute('title');
+
+    const extraSpan = screen.getByText('Extra').closest('span');
+    expect(extraSpan).not.toHaveAttribute('title');
+  });
+
+  it('does not show reset tooltip when reset timestamps are null', async () => {
+    const usageResponse = {
+      dailyPercent: 42,
+      weeklyPercent: 60,
+      sonnetPercent: 10,
+      extraPercent: 5,
+      zone: 'green',
+      dailyResetsAt: null,
+      weeklyResetsAt: null,
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => usageResponse,
+    } as Response);
+
+    render(<TopBar />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Daily')).toBeInTheDocument();
+    });
+
+    const dailySpan = screen.getByText('Daily').closest('span');
+    expect(dailySpan).not.toHaveAttribute('title');
   });
 
 });

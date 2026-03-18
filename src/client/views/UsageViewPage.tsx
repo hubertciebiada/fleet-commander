@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApi } from '../hooks/useApi';
 import { getUsageColor } from '../utils/constants';
+import { formatResetsAt } from '../utils/format-resets-at';
 import type { UsageSnapshot } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -22,13 +23,14 @@ interface UsageBar {
   label: string;
   key: 'dailyPercent' | 'weeklyPercent' | 'sonnetPercent' | 'extraPercent';
   thresholdKey: keyof RedThresholds;
+  resetKey: 'dailyResetsAt' | 'weeklyResetsAt' | null;
 }
 
 const USAGE_BARS: UsageBar[] = [
-  { label: 'Daily Usage', key: 'dailyPercent', thresholdKey: 'daily' },
-  { label: 'Weekly Usage', key: 'weeklyPercent', thresholdKey: 'weekly' },
-  { label: 'Sonnet Usage', key: 'sonnetPercent', thresholdKey: 'sonnet' },
-  { label: 'Extra Usage', key: 'extraPercent', thresholdKey: 'extra' },
+  { label: 'Daily Usage', key: 'dailyPercent', thresholdKey: 'daily', resetKey: 'dailyResetsAt' },
+  { label: 'Weekly Usage', key: 'weeklyPercent', thresholdKey: 'weekly', resetKey: 'weeklyResetsAt' },
+  { label: 'Sonnet Usage', key: 'sonnetPercent', thresholdKey: 'sonnet', resetKey: null },
+  { label: 'Extra Usage', key: 'extraPercent', thresholdKey: 'extra', resetKey: null },
 ];
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,12 @@ export function UsageViewPage() {
                       }}
                     />
                   </div>
+                  {bar.resetKey && (() => {
+                    const resetLabel = formatResetsAt(usage[bar.resetKey]);
+                    return resetLabel ? (
+                      <p className="text-xs text-gray-500 mt-0.5">{resetLabel}</p>
+                    ) : null;
+                  })()}
                 </div>
               );
             })}
