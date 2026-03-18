@@ -8,7 +8,8 @@
 // repo, and worktree naming from the project record in the database.
 // =============================================================================
 
-import { spawn, execSync, ChildProcess } from 'child_process';
+import { spawn, execSync, exec as execCallback, ChildProcess } from 'child_process';
+import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import type { Writable } from 'stream';
@@ -18,6 +19,8 @@ import { sseBroker } from './sse-broker.js';
 import type { StreamEvent } from './sse-broker.js';
 import { findGitBash } from '../utils/find-git-bash.js';
 import type { Team, Project } from '../../shared/types.js';
+
+const execAsync = promisify(execCallback);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -135,40 +138,34 @@ export class TeamManager {
    * Sync local repo with origin before creating a worktree.
    * Returns the number of commits the local default branch was behind origin.
    */
-  private syncWithOrigin(repoPath: string, teamId: number): number {
+  private async syncWithOrigin(repoPath: string, teamId: number): Promise<number> {
     let commitsBehind = 0;
     try {
       // Fetch latest from origin
-      execSync('git fetch origin', {
+      await execAsync('git fetch origin', {
         cwd: repoPath,
-        encoding: 'utf-8',
-        stdio: 'pipe',
         timeout: 30000,
       });
 
       // Detect default branch
       let defaultBranch = 'main';
       try {
-        const ref = execSync('git symbolic-ref refs/remotes/origin/HEAD', {
+        const { stdout } = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
           cwd: repoPath,
-          encoding: 'utf-8',
-          stdio: 'pipe',
           timeout: 5000,
-        }).trim();
-        defaultBranch = ref.replace(/^refs\/remotes\/origin\//, '');
+        });
+        defaultBranch = stdout.trim().replace(/^refs\/remotes\/origin\//, '');
       } catch {
         // Fallback to 'main'
       }
 
       // Count commits behind
       try {
-        const count = execSync(`git rev-list --count HEAD..origin/${defaultBranch}`, {
+        const { stdout } = await execAsync(`git rev-list --count HEAD..origin/${defaultBranch}`, {
           cwd: repoPath,
-          encoding: 'utf-8',
-          stdio: 'pipe',
           timeout: 5000,
-        }).trim();
-        commitsBehind = parseInt(count, 10) || 0;
+        });
+        commitsBehind = parseInt(stdout.trim(), 10) || 0;
       } catch {
         // Non-fatal
       }
@@ -177,10 +174,8 @@ export class TeamManager {
       if (commitsBehind > 0) {
         console.log(`[TeamManager] Local is ${commitsBehind} commits behind origin/${defaultBranch}, pulling...`);
         try {
-          execSync(`git pull origin ${defaultBranch} --ff-only`, {
+          await execAsync(`git pull origin ${defaultBranch} --ff-only`, {
             cwd: repoPath,
-            encoding: 'utf-8',
-            stdio: 'pipe',
             timeout: 30000,
           });
           console.log(`[TeamManager] Pulled ${commitsBehind} commits from origin/${defaultBranch}`);
@@ -246,10 +241,11 @@ export class TeamManager {
     // If no title provided, fetch from GitHub
     if (!issueTitle && project.githubRepo) {
       try {
-        const result = execSync(
+        const { stdout } = await execAsync(
           `gh issue view ${issueNumber} --repo ${project.githubRepo} --json title --jq .title`,
-          { encoding: 'utf-8', timeout: 10000 },
-        ).trim();
+          { timeout: 10000 },
+        );
+        const result = stdout.trim();
         if (result) {
           issueTitle = result;
           console.log(`[TeamManager] Fetched issue title from GitHub: "${issueTitle}"`);
@@ -330,21 +326,19 @@ export class TeamManager {
     this.broadcastSnapshot();
 
     // Sync with origin before creating worktree
-    this.syncWithOrigin(project.repoPath, team.id);
+    await this.syncWithOrigin(project.repoPath, team.id);
 
     // ── Step 2: Create git worktree in the PROJECT's repo ──
     if (!fs.existsSync(worktreeAbsPath)) {
       try {
-        execSync(
+        await execAsync(
           `git -C "${project.repoPath}" worktree add "${worktreeRelPath}" -b "${branchName}"`,
-          { encoding: 'utf-8', stdio: 'pipe' },
         );
       } catch (err: unknown) {
         // Branch may already exist — try without -b
         try {
-          execSync(
+          await execAsync(
             `git -C "${project.repoPath}" worktree add "${worktreeRelPath}" "${branchName}"`,
-            { encoding: 'utf-8', stdio: 'pipe' },
           );
         } catch (err2: unknown) {
           const msg = err2 instanceof Error ? err2.message : String(err2);
@@ -480,7 +474,7 @@ export class TeamManager {
         useWindowsTerminal = true;
       } else if (termPref === 'auto') {
         try {
-          execSync('where wt.exe', { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
+          await execAsync('where wt.exe', { timeout: 3000 });
           useWindowsTerminal = true;
         } catch {
           // wt.exe not found — fall back to cmd.exe
@@ -1073,10 +1067,11 @@ export class TeamManager {
     // Fetch title from GitHub if needed
     if (!issueTitle && project.githubRepo) {
       try {
-        const result = execSync(
+        const { stdout } = await execAsync(
           `gh issue view ${issueNumber} --repo ${project.githubRepo} --json title --jq .title`,
-          { encoding: 'utf-8', timeout: 10000 },
-        ).trim();
+          { timeout: 10000 },
+        );
+        const result = stdout.trim();
         if (result) issueTitle = result;
       } catch {
         issueTitle = `Issue #${issueNumber}`;
@@ -1208,20 +1203,18 @@ export class TeamManager {
     const branchName = team.branchName ?? `worktree-${team.worktreeName}`;
 
     // Sync with origin before creating worktree
-    this.syncWithOrigin(project.repoPath, team.id);
+    await this.syncWithOrigin(project.repoPath, team.id);
 
     // ── Step 1: Create git worktree ──
     if (!fs.existsSync(worktreeAbsPath)) {
       try {
-        execSync(
+        await execAsync(
           `git -C "${project.repoPath}" worktree add "${worktreeRelPath}" -b "${branchName}"`,
-          { encoding: 'utf-8', stdio: 'pipe' },
         );
       } catch {
         try {
-          execSync(
+          await execAsync(
             `git -C "${project.repoPath}" worktree add "${worktreeRelPath}" "${branchName}"`,
-            { encoding: 'utf-8', stdio: 'pipe' },
           );
         } catch (err2: unknown) {
           const msg = err2 instanceof Error ? err2.message : String(err2);
