@@ -39,6 +39,9 @@ const eventsRoutes: FastifyPluginCallback = (
           agent_type: body.agent_type ? String(body.agent_type) : undefined,
           teammate_name: body.teammate_name ? String(body.teammate_name) : undefined,
           message: body.message ? String(body.message) : undefined,
+          error: body.error ? String(body.error) : undefined,
+          tool_use_id: body.tool_use_id ? String(body.tool_use_id) : undefined,
+          tool_input: body.tool_input ? String(body.tool_input) : undefined,
           stop_reason: body.stop_reason ? String(body.stop_reason) : undefined,
           worktree_root: body.worktree_root ? String(body.worktree_root) : undefined,
         };

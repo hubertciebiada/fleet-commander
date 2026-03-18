@@ -413,6 +413,77 @@ describe('SSE broadcast', () => {
 // Edge cases
 // =============================================================================
 
+describe('tool_error event with error field', () => {
+  it('stores error and tool_use_id fields in payload JSON', () => {
+    const db = createMockDb();
+    const sse = createMockSse();
+    const payload = makePayload({
+      event: 'tool_error',
+      tool_name: 'Bash',
+      error: 'exit code 1',
+      tool_use_id: 'toolu_abc123',
+    });
+
+    const result = processEvent(payload, db, sse);
+
+    expect(result.processed).toBe(true);
+    expect(db.insertEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'ToolError',
+        toolName: 'Bash',
+      }),
+    );
+
+    // Verify the full payload JSON contains the error fields
+    const insertCall = (db.insertEvent as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const storedPayload = JSON.parse(insertCall.payload);
+    expect(storedPayload.error).toBe('exit code 1');
+    expect(storedPayload.tool_use_id).toBe('toolu_abc123');
+  });
+
+  it('stores tool_input when provided via route', () => {
+    const db = createMockDb();
+    const sse = createMockSse();
+    const payload = makePayload({
+      event: 'tool_error',
+      tool_name: 'Bash',
+      error: 'permission denied',
+      tool_use_id: 'toolu_xyz',
+      tool_input: '{"command":"rm -rf /"}',
+    });
+
+    processEvent(payload, db, sse);
+
+    const insertCall = (db.insertEvent as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const storedPayload = JSON.parse(insertCall.payload);
+    expect(storedPayload.tool_input).toBe('{"command":"rm -rf /"}');
+  });
+
+  it('handles tool_error with only error field (no message)', () => {
+    const db = createMockDb();
+    const sse = createMockSse();
+    const payload: EventPayload = {
+      event: 'tool_error',
+      team: 'kea-100',
+      session_id: 'sess-abc',
+      tool_name: 'Edit',
+      error: 'file not found',
+    };
+
+    const result = processEvent(payload, db, sse);
+
+    expect(result.processed).toBe(true);
+    const insertCall = (db.insertEvent as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const storedPayload = JSON.parse(insertCall.payload);
+    expect(storedPayload.error).toBe('file not found');
+    expect(storedPayload.message).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// Edge cases
+// =============================================================================
+
 describe('Edge cases', () => {
   it('handles unknown event types (passes through unchanged)', () => {
     const db = createMockDb();
