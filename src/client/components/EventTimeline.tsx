@@ -54,11 +54,14 @@ interface EventTimelineProps {
   teamId: number;
   /** Trigger refetch when this value changes (e.g., from SSE updates) */
   refreshKey?: number;
+  /** Callback to report total event count to parent */
+  onCountChange?: (count: number) => void;
 }
 
-export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
+export function EventTimeline({ teamId, refreshKey, onCountChange }: EventTimelineProps) {
   const api = useApi();
   const [events, setEvents] = useState<Event[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +75,9 @@ export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
         const data = await api.get<Event[]>(`teams/${teamId}/events?limit=20`);
         if (!cancelled) {
           setEvents(data ?? []);
+          const count = data?.length ?? 0;
+          setTotalCount(count);
+          onCountChange?.(count);
         }
       } catch (err) {
         if (!cancelled) {
@@ -117,6 +123,11 @@ export function EventTimeline({ teamId, refreshKey }: EventTimelineProps) {
 
   return (
     <div className="overflow-y-auto custom-scrollbar">
+      {totalCount > 0 && (
+        <div className="text-xs text-dark-muted mb-1.5">
+          Events ({totalCount >= 20 ? '20+' : totalCount})
+        </div>
+      )}
       <ul className="space-y-0">
         {events.map((evt) => (
           <li

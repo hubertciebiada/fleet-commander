@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useSSE } from '../hooks/useSSE';
 import type { TeamDashboardRow } from '../../shared/types';
 
@@ -12,9 +12,13 @@ interface FleetContextValue {
 
 const FleetContext = createContext<FleetContextValue | null>(null);
 
+/** Periodic fallback refresh interval (ms) — guards against missed SSE snapshots */
+const FALLBACK_REFRESH_MS = 45_000;
+
 export function FleetProvider({ children }: { children: ReactNode }) {
   const [teams, setTeams] = useState<TeamDashboardRow[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
+  const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch the full team dashboard from the REST API.
   // Used as a fallback when an SSE event signals a change but
@@ -24,30 +28,44 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       const res = await fetch('/api/teams');
       if (res.ok) {
         const data = (await res.json()) as TeamDashboardRow[];
-        console.log('[FleetContext] Teams fetched via REST:', data.length, data.map(t => ({ id: t.id, status: t.status })));
         setTeams(data);
       }
     } catch {
-      // Network error — will be retried on next event
+      // Network error — will be retried on next event or periodic refresh
     }
   }, []);
 
+  // Debounced fetchTeams — coalesces rapid incremental SSE events into one API call
+  const debouncedFetchTeams = useCallback(() => {
+    if (fetchDebounceRef.current) {
+      clearTimeout(fetchDebounceRef.current);
+    }
+    fetchDebounceRef.current = setTimeout(() => {
+      fetchDebounceRef.current = null;
+      fetchTeams();
+    }, 500);
+  }, [fetchTeams]);
+
   const handleSSEEvent = useCallback((type: string, data: unknown) => {
-    console.log('[FleetContext] SSE event received:', type);
     if (type === 'snapshot') {
-      // Full team list update
+      // Full team list update — apply directly
       const payload = data as { teams?: TeamDashboardRow[] };
       if (Array.isArray(payload.teams)) {
-        console.log('[FleetContext] Teams loaded from SSE:', payload.teams.length, payload.teams.map(t => ({ id: t.id, status: t.status })));
         setTeams(payload.teams);
       }
+    } else if (
+      type === 'team_status_changed' ||
+      type === 'team_launched' ||
+      type === 'team_stopped'
+    ) {
+      // Incremental team change — re-fetch team list so grid stays current
+      // even if the server's follow-up snapshot is missed (e.g., reconnect race)
+      debouncedFetchTeams();
     } else if (type === 'usage_updated' || type === 'pr_updated') {
       // Usage or PR data changed — refresh teams to pick up any related state changes.
-      fetchTeams();
+      debouncedFetchTeams();
     }
-    // Note: team_launched, team_stopped, team_status_changed are NOT handled here
-    // because the server already broadcasts a full 'snapshot' after those events.
-  }, [fetchTeams]);
+  }, [debouncedFetchTeams]);
 
   const { connected, lastEvent } = useSSE({ onEvent: handleSSEEvent });
 
@@ -55,6 +73,21 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchTeams();
   }, [fetchTeams]);
+
+  // Periodic fallback refresh — catches any missed events
+  useEffect(() => {
+    const interval = setInterval(fetchTeams, FALLBACK_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [fetchTeams]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (fetchDebounceRef.current) {
+        clearTimeout(fetchDebounceRef.current);
+      }
+    };
+  }, []);
 
   const value = useMemo<FleetContextValue>(() => ({
     teams,

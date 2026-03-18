@@ -64,9 +64,11 @@ export function TeamDetail() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
+  const [quickActionSent, setQuickActionSent] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [transitions, setTransitions] = useState<TeamTransition[]>([]);
   const [roster, setRoster] = useState<TeamMember[]>([]);
+  const templateCacheRef = useRef<{ data: Array<{ id: string; template: string; enabled: boolean }>; fetchedAt: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedTeamIdRef = useRef(selectedTeamId);
@@ -250,13 +252,23 @@ export function TeamDetail() {
   );
 
   // Quick action handler — send a pre-defined message template to the team
+  // Templates are cached for 60s to avoid re-fetching on every click.
   const handleQuickAction = useCallback(
     async (templateId: string) => {
       if (!selectedTeamId || !detail || quickActionLoading) return;
       setQuickActionLoading(templateId);
       try {
-        // Fetch template
-        const templates = await api.get<Array<{ id: string; template: string; enabled: boolean }>>('message-templates');
+        // Use cached templates if fresh (< 60s), otherwise re-fetch
+        const CACHE_TTL = 60_000;
+        let templates: Array<{ id: string; template: string; enabled: boolean }>;
+        const cached = templateCacheRef.current;
+        if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+          templates = cached.data;
+        } else {
+          templates = await api.get<Array<{ id: string; template: string; enabled: boolean }>>('message-templates');
+          templateCacheRef.current = { data: templates, fetchedAt: Date.now() };
+        }
+
         const tmpl = templates.find(t => t.id === templateId);
         if (!tmpl || !tmpl.enabled) return;
 
@@ -268,6 +280,10 @@ export function TeamDetail() {
         }
 
         await api.post(`teams/${selectedTeamId}/send-message`, { message });
+
+        // Show brief "Sent!" confirmation
+        setQuickActionSent(templateId);
+        setTimeout(() => setQuickActionSent((prev) => prev === templateId ? null : prev), 1500);
       } catch {
         // Silent — message will appear in session log if delivered
       } finally {
@@ -480,11 +496,11 @@ export function TeamDetail() {
 
                   {/* ---- Transition History ---- */}
                   {transitions.length > 0 && (
-                    <section>
+                    <section className="min-w-0">
                       <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1">
                         State Transitions
                       </h4>
-                      <div className="flex items-center gap-0 overflow-x-auto pb-1 custom-scrollbar">
+                      <div className="flex items-center gap-0 overflow-x-auto pb-1 custom-scrollbar max-w-full">
                         {transitions.map((t, i) => {
                           const isFirst = i === 0;
                           const toColor = STATUS_COLORS[t.toStatus] ?? '#8B949E';
@@ -614,10 +630,10 @@ export function TeamDetail() {
                 </div>
               </div>
 
-              {/* MIDDLE: Two columns — Events | Session Log */}
-              <div className="flex-1 min-h-0 flex gap-4 px-5 py-3">
+              {/* MIDDLE: Two columns — Events | Session Log (stacks on narrow screens) */}
+              <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-4 px-5 py-3">
                 {/* Left: Events */}
-                <div className="flex-1 min-w-0 flex flex-col">
+                <div className="flex-1 min-w-0 flex flex-col min-h-[200px] md:min-h-0">
                   <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1 shrink-0">
                     Recent Events
                   </h4>
@@ -627,7 +643,7 @@ export function TeamDetail() {
                 </div>
 
                 {/* Right: Session Log */}
-                <div className="flex-1 min-w-0 flex flex-col">
+                <div className="flex-1 min-w-0 flex flex-col min-h-[200px] md:min-h-0">
                   <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1 shrink-0">
                     Session Log
                   </h4>
@@ -660,7 +676,11 @@ export function TeamDetail() {
                       }}
                       title={`Send "${action.label}" message to TL`}
                     >
-                      {quickActionLoading === action.id ? '...' : action.label}
+                      {quickActionLoading === action.id
+                          ? '...'
+                          : quickActionSent === action.id
+                            ? 'Sent!'
+                            : action.label}
                     </button>
                   ))}
                 </div>
