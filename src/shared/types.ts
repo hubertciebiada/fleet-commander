@@ -265,6 +265,21 @@ export interface AssignmentPlan {
 }
 
 // ---------------------------------------------------------------------------
+// Team Roster (subagent members derived from events)
+// ---------------------------------------------------------------------------
+
+/** A subagent team member derived from hook events */
+export interface TeamMember {
+  name: string;
+  role: string;
+  isActive: boolean;
+  firstSeen: string;
+  lastSeen: string;
+  toolUseCount: number;
+  errorCount: number;
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard View (v_team_dashboard)
 // ---------------------------------------------------------------------------
 

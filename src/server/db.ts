@@ -23,6 +23,7 @@ import type {
   ProjectStatus,
   MessageTemplate,
   TeamTransition,
+  TeamMember,
 } from '../shared/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -48,6 +49,25 @@ export function utcify(value: string | null): string | null {
   if (value.includes('T')) return value;
   // SQLite format: "YYYY-MM-DD HH:MM:SS" -> "YYYY-MM-DDTHH:MM:SS.000Z"
   return value.replace(' ', 'T') + '.000Z';
+}
+
+// ---------------------------------------------------------------------------
+// Agent name -> role mapping
+// ---------------------------------------------------------------------------
+
+const ROLE_MAP: Record<string, string> = {
+  coordinator: 'Coordinator',
+  analyst: 'Analyst',
+  reviewer: 'Reviewer',
+};
+
+/** Derive a human-readable role from the agent name. */
+function deriveRole(name: string): string {
+  const lower = name.toLowerCase();
+  if (ROLE_MAP[lower]) return ROLE_MAP[lower];
+  if (lower.startsWith('dev-')) return `Developer (${name.slice(4)})`;
+  if (lower.includes('dev')) return 'Developer';
+  return name;
 }
 
 // ---------------------------------------------------------------------------
@@ -924,6 +944,42 @@ export class FleetDatabase {
     const stmt = this.db.prepare(sql);
     const rows = (Object.keys(params).length > 0 ? stmt.all(params) : stmt.all()) as Record<string, unknown>[];
     return rows.map((r) => this.mapEventRow(r));
+  }
+
+  // -------------------------------------------------------------------------
+  // Team Roster (subagent members derived from events)
+  // -------------------------------------------------------------------------
+
+  getTeamRoster(teamId: number): TeamMember[] {
+    const sql = `
+      SELECT
+        agent_name AS name,
+        MIN(created_at) AS first_seen,
+        MAX(created_at) AS last_seen,
+        SUM(CASE WHEN event_type = 'ToolUse' THEN 1 ELSE 0 END) AS tool_use_count,
+        SUM(CASE WHEN event_type = 'ToolError' THEN 1 ELSE 0 END) AS error_count,
+        SUM(CASE WHEN event_type = 'SubagentStart' THEN 1 ELSE 0 END) AS starts,
+        SUM(CASE WHEN event_type = 'SubagentStop' THEN 1 ELSE 0 END) AS stops
+      FROM events
+      WHERE team_id = ? AND agent_name IS NOT NULL AND agent_name != ''
+      GROUP BY agent_name
+      ORDER BY MIN(created_at) ASC
+    `;
+    const rows = this.db.prepare(sql).all(teamId) as Record<string, unknown>[];
+    return rows.map((row) => {
+      const name = row.name as string;
+      const starts = (row.starts as number) ?? 0;
+      const stops = (row.stops as number) ?? 0;
+      return {
+        name,
+        role: deriveRole(name),
+        isActive: starts > stops,
+        firstSeen: utcify(row.first_seen as string),
+        lastSeen: utcify(row.last_seen as string),
+        toolUseCount: (row.tool_use_count as number) ?? 0,
+        errorCount: (row.error_count as number) ?? 0,
+      };
+    });
   }
 
   // -------------------------------------------------------------------------
