@@ -473,7 +473,7 @@ class GitHubPoller {
 
   private detectPR(branchName: string, teamId: number, githubRepo: string): void {
     const result = this.execGH(
-      `gh pr list --head ${branchName} --repo ${githubRepo} --json number --limit 1`
+      `gh pr list --head ${branchName} --repo ${githubRepo} --state all --json number --limit 1`
     );
     if (!result) return; // gh CLI failed — skip
 
