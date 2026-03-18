@@ -1170,6 +1170,24 @@ export class TeamManager {
       }
     } finally {
       this._processingQueue.delete(projectId);
+
+      // Re-drain: if a concurrent processQueue call was dropped by the guard
+      // while we were awaiting launchQueued, there may still be queued teams
+      // with available slots. Schedule a re-check via setImmediate to break
+      // the call stack and let the new call acquire the guard cleanly.
+      const db = getDatabase();
+      const project = db.getProject(projectId);
+      if (project) {
+        const activeCount = db.getActiveTeamCountByProject(projectId);
+        const queued = db.getQueuedTeamsByProject(projectId);
+        if (queued.length > 0 && activeCount < project.maxActiveTeams) {
+          setImmediate(() => {
+            this.processQueue(projectId).catch((err) => {
+              console.error(`[TeamManager] processQueue re-drain error:`, err);
+            });
+          });
+        }
+      }
     }
   }
 
