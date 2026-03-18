@@ -1141,7 +1141,7 @@ export class TeamManager {
     });
     db.insertTransition({
       teamId: team.id,
-      fromStatus: 'none',
+      fromStatus: 'queued',
       toStatus: 'queued',
       trigger: 'pm_action',
       reason: 'Team created and queued',
