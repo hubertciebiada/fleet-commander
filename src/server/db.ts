@@ -1165,22 +1165,15 @@ export class FleetDatabase {
     }));
   }
 
-  // -------------------------------------------------------------------------
-  // Individual record deletion helpers (used by project delete)
-  // -------------------------------------------------------------------------
-
-  deleteTeamEvents(teamId: number): void {
-    this.db.prepare('DELETE FROM events WHERE team_id = ?').run(teamId);
-  }
-
-  deleteTeamCommands(teamId: number): void {
-    this.db.prepare('DELETE FROM commands WHERE team_id = ?').run(teamId);
-  }
-
   deleteTeamsByProject(projectId: number): void {
-    this.db.prepare('DELETE FROM team_transitions WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(projectId);
-    this.db.prepare('DELETE FROM pull_requests WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(projectId);
-    this.db.prepare('DELETE FROM teams WHERE project_id = ?').run(projectId);
+    this.db.transaction((pid: number) => {
+      this.db.prepare('DELETE FROM team_transitions WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(pid);
+      this.db.prepare('DELETE FROM events WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(pid);
+      this.db.prepare('DELETE FROM commands WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(pid);
+      this.db.prepare('DELETE FROM usage_snapshots WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(pid);
+      this.db.prepare('DELETE FROM pull_requests WHERE team_id IN (SELECT id FROM teams WHERE project_id = ?)').run(pid);
+      this.db.prepare('DELETE FROM teams WHERE project_id = ?').run(pid);
+    })(projectId);
   }
 
   // -------------------------------------------------------------------------

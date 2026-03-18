@@ -688,12 +688,8 @@ const projectsRoutes: FastifyPluginCallback = (
         const issueFetcher = getIssueFetcher();
         issueFetcher.clearProject(projectId);
 
-        // Delete all related records before deleting project (foreign key constraints)
-        const allTeams = db.getTeams({ projectId });
-        for (const t of allTeams) {
-          db.deleteTeamEvents(t.id);
-          db.deleteTeamCommands(t.id);
-        }
+        // Delete all teams and related records (events, commands, usage_snapshots,
+        // transitions, PRs) in a single transaction
         db.deleteTeamsByProject(projectId);
 
         // Delete the project from DB
