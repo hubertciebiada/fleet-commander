@@ -236,7 +236,7 @@ Fleet Commander sends these messages directly to the TL via stdin. They arrive a
 - **CI must be green** — PR CANNOT be merged with red CI
 - **Branch from {{BASE_BRANCH}}** — NEVER commit directly to {{BASE_BRANCH}}
 - **Coordinator does not implement** — delegate to devs
-- **Idle = normal state** — do not ping, wait at least 5 minutes
+- **Idle = normal state** — do not ping, wait at least 3 minutes
 - **TL does not take over agent tasks** — if an agent is unresponsive, respawn instead of doing their work
 
 ## Anti-Patterns
