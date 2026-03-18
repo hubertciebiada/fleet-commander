@@ -205,5 +205,5 @@ CREATE TABLE IF NOT EXISTS team_transitions (
 
 CREATE INDEX IF NOT EXISTS idx_team_transitions_team ON team_transitions(team_id);
 
--- Insert schema version 2 (or upgrade from 1)
+-- Insert schema version 3 (or upgrade from earlier versions)
 INSERT OR IGNORE INTO schema_version (version) VALUES (3);
