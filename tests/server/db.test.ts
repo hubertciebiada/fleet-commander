@@ -783,6 +783,99 @@ describe('Timestamp UTC normalization', () => {
 // Connection management
 // =============================================================================
 
+// =============================================================================
+// Team Roster
+// =============================================================================
+
+describe('Team Roster', () => {
+  beforeEach(() => {
+    db.insertTeam({ issueNumber: 100, worktreeName: 'kea-100', status: 'running', phase: 'implementing' });
+  });
+
+  it('returns empty roster when no events have agent_name', () => {
+    db.insertEvent({ teamId: 1, eventType: 'ToolUse' });
+    const roster = db.getTeamRoster(1);
+    expect(roster).toHaveLength(0);
+  });
+
+  it('aggregates events by agent_name', () => {
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'coordinator' });
+    db.insertEvent({ teamId: 1, eventType: 'ToolUse', agentName: 'coordinator' });
+    db.insertEvent({ teamId: 1, eventType: 'ToolUse', agentName: 'coordinator' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'dev-typescript' });
+    db.insertEvent({ teamId: 1, eventType: 'ToolUse', agentName: 'dev-typescript' });
+    db.insertEvent({ teamId: 1, eventType: 'ToolError', agentName: 'dev-typescript' });
+
+    const roster = db.getTeamRoster(1);
+    expect(roster).toHaveLength(2);
+
+    const coord = roster.find(m => m.name === 'coordinator')!;
+    expect(coord.role).toBe('Coordinator');
+    expect(coord.toolUseCount).toBe(2);
+    expect(coord.errorCount).toBe(0);
+    expect(coord.isActive).toBe(true);
+
+    const dev = roster.find(m => m.name === 'dev-typescript')!;
+    expect(dev.role).toBe('Developer (typescript)');
+    expect(dev.toolUseCount).toBe(1);
+    expect(dev.errorCount).toBe(1);
+    expect(dev.isActive).toBe(true);
+  });
+
+  it('marks agent as inactive when stops >= starts', () => {
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'analyst' });
+    db.insertEvent({ teamId: 1, eventType: 'ToolUse', agentName: 'analyst' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStop', agentName: 'analyst' });
+
+    const roster = db.getTeamRoster(1);
+    expect(roster).toHaveLength(1);
+    expect(roster[0].isActive).toBe(false);
+  });
+
+  it('returns all members ordered by first_seen', () => {
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'coordinator' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'analyst' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'reviewer' });
+
+    const roster = db.getTeamRoster(1);
+    expect(roster).toHaveLength(3);
+    const names = roster.map(m => m.name);
+    expect(names).toContain('coordinator');
+    expect(names).toContain('analyst');
+    expect(names).toContain('reviewer');
+  });
+
+  it('excludes events from other teams', () => {
+    db.insertTeam({ issueNumber: 200, worktreeName: 'kea-200', status: 'running', phase: 'implementing' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'coordinator' });
+    db.insertEvent({ teamId: 2, eventType: 'SubagentStart', agentName: 'dev-python' });
+
+    const roster1 = db.getTeamRoster(1);
+    expect(roster1).toHaveLength(1);
+    expect(roster1[0].name).toBe('coordinator');
+
+    const roster2 = db.getTeamRoster(2);
+    expect(roster2).toHaveLength(1);
+    expect(roster2[0].name).toBe('dev-python');
+  });
+
+  it('derives roles correctly', () => {
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'coordinator' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'analyst' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'reviewer' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'dev-csharp' });
+    db.insertEvent({ teamId: 1, eventType: 'SubagentStart', agentName: 'some-agent' });
+
+    const roster = db.getTeamRoster(1);
+    const roles = Object.fromEntries(roster.map(m => [m.name, m.role]));
+    expect(roles['coordinator']).toBe('Coordinator');
+    expect(roles['analyst']).toBe('Analyst');
+    expect(roles['reviewer']).toBe('Reviewer');
+    expect(roles['dev-csharp']).toBe('Developer (csharp)');
+    expect(roles['some-agent']).toBe('some-agent');
+  });
+});
+
 describe('Connection management', () => {
   it('closes the database', () => {
     db.close();

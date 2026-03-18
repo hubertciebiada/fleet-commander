@@ -874,6 +874,45 @@ const teamsRoutes: FastifyPluginCallback = (
   );
 
   // -------------------------------------------------------------------------
+  // GET /api/teams/:id/roster — team member roster derived from events
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/teams/:id/roster',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseInt(request.params.id, 10);
+        if (isNaN(teamId) || teamId < 1) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'Invalid team ID',
+          });
+        }
+
+        const db = getDatabase();
+        const team = db.getTeam(teamId);
+        if (!team) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Team ${teamId} not found`,
+          });
+        }
+
+        const roster = db.getTeamRoster(teamId);
+        return reply.code(200).send(roster);
+      } catch (err: unknown) {
+        request.log.error(err, 'Failed to get team roster');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // GET /api/teams/:id/transitions — state transition history
   // -------------------------------------------------------------------------
   fastify.get(
