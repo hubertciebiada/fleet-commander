@@ -19,6 +19,7 @@ import { getDatabase } from '../db.js';
 import config from '../config.js';
 import { sseBroker } from './sse-broker.js';
 import { resolveMessage } from '../utils/resolve-message.js';
+import type { PRState, CIStatus, MergeStatus } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Types for gh CLI JSON output
@@ -217,8 +218,8 @@ class GitHubPoller {
 
     // Map GitHub state to our state — detect merged via mergedAt field
     const isMerged = !!data.mergedAt;
-    const state = isMerged ? 'merged' : (data.state?.toLowerCase() ?? 'open');
-    const mergeState = data.mergeStateStatus?.toLowerCase() ?? 'unknown';
+    const state: PRState = isMerged ? 'merged' : (data.state?.toLowerCase() as PRState ?? 'open');
+    const mergeState: MergeStatus = (data.mergeStateStatus?.toLowerCase() as MergeStatus) ?? 'unknown';
 
     // Derive CI status from statusCheckRollup
     const checks: GHCheckRun[] = data.statusCheckRollup ?? [];
@@ -494,7 +495,7 @@ class GitHubPoller {
   // Private: derive CI status from check runs
   // -------------------------------------------------------------------------
 
-  private deriveCIStatus(checks: GHCheckRun[]): string {
+  private deriveCIStatus(checks: GHCheckRun[]): CIStatus {
     if (checks.length === 0) return 'none';
 
     const allPassed = checks.every(
