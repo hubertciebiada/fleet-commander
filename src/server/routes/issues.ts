@@ -45,18 +45,18 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
   server.get('/api/issues', async (_request: FastifyRequest, _reply: FastifyReply) => {
     const fetcher = getIssueFetcher();
     const db = getDatabase();
-    const projects = db.getProjects({ status: 'active' });
 
-    // Build per-project groups
-    const groups = projects.map((project) => {
-      const issues = fetcher.getIssues(project.id);
-      const cloned = structuredClone(issues);
-      fetcher.enrichWithTeamInfo(cloned, project.id);
+    // Build per-project groups using the fetcher's grouped API
+    const projectCaches = fetcher.getIssuesByProject();
+    const groups = projectCaches.map((entry) => {
+      const project = db.getProject(entry.projectId);
+      const cloned = structuredClone(entry.tree);
+      fetcher.enrichWithTeamInfo(cloned, entry.projectId);
       return {
-        projectId: project.id,
-        projectName: project.name,
+        projectId: entry.projectId,
+        projectName: project?.name ?? `Project #${entry.projectId}`,
         tree: cloned,
-        cachedAt: fetcher.getCachedAt(project.id),
+        cachedAt: entry.cachedAt,
         count: countIssues(cloned),
       };
     });
