@@ -220,6 +220,23 @@ export class IssueFetcher {
   }
 
   /**
+   * Returns issues grouped by project, preserving the project association.
+   * Each entry contains the projectId plus its cached issue tree.
+   * Used by the "All Projects" view to render collapsible project sections.
+   */
+  getIssuesByProject(): Array<{ projectId: number; tree: IssueNode[]; cachedAt: string | null }> {
+    const result: Array<{ projectId: number; tree: IssueNode[]; cachedAt: string | null }> = [];
+    for (const [projectId, cache] of this.cacheByProject.entries()) {
+      result.push({
+        projectId,
+        tree: cache.issues,
+        cachedAt: cache.cachedAt,
+      });
+    }
+    return result;
+  }
+
+  /**
    * Get a single issue by number from the cache (searches recursively).
    * Searches across all project caches if projectId is not specified.
    */
