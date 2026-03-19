@@ -67,6 +67,18 @@ interface ProjectIssueCache {
 }
 
 // ---------------------------------------------------------------------------
+// Per-issue dependency cache entry (60s TTL)
+// ---------------------------------------------------------------------------
+
+interface DependencyCacheEntry {
+  data: IssueDependencyInfo;
+  fetchedAt: number;
+}
+
+/** TTL for per-issue dependency cache entries (milliseconds) */
+const DEPENDENCY_CACHE_TTL_MS = 60_000;
+
+// ---------------------------------------------------------------------------
 // GraphQL query — flat list of all open issues with parent reference
 // ---------------------------------------------------------------------------
 // Fetches ~100 issues per page with ~10 sub-fields each = ~1,000 nodes/page.
@@ -174,6 +186,8 @@ export function parseDependenciesFromBody(body: string, defaultOwner: string, de
 export class IssueFetcher {
   // Per-project cache: projectId -> cache entry
   private cacheByProject: Map<number, ProjectIssueCache> = new Map();
+  // Per-issue dependency cache: "owner/repo#number" -> cached dependency info
+  private dependencyCache: Map<string, DependencyCacheEntry> = new Map();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
 
@@ -384,10 +398,11 @@ export class IssueFetcher {
   }
 
   /**
-   * Clear ALL cached issues (used by factory reset).
+   * Clear ALL cached issues and dependency cache (used by factory reset).
    */
   clearAll(): void {
     this.cacheByProject.clear();
+    this.dependencyCache.clear();
   }
 
   /**
@@ -509,7 +524,8 @@ export class IssueFetcher {
 
   /**
    * Enrich issue nodes with dependency info from GitHub.
-   * Only enriches leaf nodes (no children) since those are the launchable issues.
+   * Enriches ALL issues (not just leaf nodes) so parent issues also show
+   * inline dependency indicators. Uses per-issue caching with 60s TTL.
    * Modifies nodes in place and returns the same array.
    */
   enrichWithDependencies(issues: IssueNode[], projectId: number): IssueNode[] {
@@ -520,16 +536,13 @@ export class IssueFetcher {
     const [owner, repo] = this.parseRepo(project.githubRepo);
 
     const enrichNode = (node: IssueNode): void => {
-      // Only enrich leaf nodes (launchable issues)
-      if (node.children.length === 0) {
-        try {
-          const deps = this.fetchDependencies(owner, repo, node.number);
-          if (deps && deps.blockedBy.length > 0) {
-            node.dependencies = deps;
-          }
-        } catch {
-          // Silently skip — dependency info is optional
+      try {
+        const deps = this.fetchDependenciesCached(owner, repo, node.number);
+        if (deps && deps.blockedBy.length > 0) {
+          node.dependencies = deps;
         }
+      } catch {
+        // Silently skip — dependency info is optional
       }
       for (const child of node.children) {
         enrichNode(child);
@@ -559,6 +572,27 @@ export class IssueFetcher {
     // Go directly to the GraphQL/timeline approach for dependency detection.
     // The REST sub_issues endpoint returns child issues, not blockers.
     return this.fetchDependenciesFromTimeline(owner, repo, issueNumber);
+  }
+
+  /**
+   * Fetch dependencies with per-issue caching (60s TTL).
+   * Avoids re-fetching the same issue's dependencies on every enrichment cycle.
+   * Cache key is "owner/repo#number".
+   */
+  private fetchDependenciesCached(owner: string, repo: string, issueNumber: number): IssueDependencyInfo | null {
+    const cacheKey = `${owner}/${repo}#${issueNumber}`;
+    const now = Date.now();
+    const cached = this.dependencyCache.get(cacheKey);
+
+    if (cached && (now - cached.fetchedAt) < DEPENDENCY_CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    const result = this.fetchDependencies(owner, repo, issueNumber);
+    if (result) {
+      this.dependencyCache.set(cacheKey, { data: result, fetchedAt: now });
+    }
+    return result;
   }
 
   /**

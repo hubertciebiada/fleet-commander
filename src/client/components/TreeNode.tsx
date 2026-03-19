@@ -76,31 +76,41 @@ function IssueStateBadge({ state }: { state: 'open' | 'closed' }) {
 // ---------------------------------------------------------------------------
 
 function BlockedBadge({ dependencies }: { dependencies: IssueDependencyInfo }) {
+  if (!dependencies.blockedBy || dependencies.blockedBy.length === 0) return null;
+
+  // Only show the badge when there are open (unresolved) blockers
   if (dependencies.resolved || dependencies.openCount === 0) return null;
 
-  const blockerLabels = dependencies.blockedBy
-    .filter((d) => d.state === 'open')
-    .map((d) => {
-      // Show owner/repo#N for cross-repo, just #N for same-repo
-      const prefix = d.owner && d.repo ? `${d.owner}/${d.repo}` : '';
-      return prefix ? `${prefix}#${d.number}` : `#${d.number}`;
-    })
-    .join(', ');
-
-  const tooltipText = `Blocked by: ${blockerLabels}`;
-
   return (
-    <span
-      className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded text-xs font-medium cursor-default"
-      style={{ backgroundColor: 'rgba(248, 81, 73, 0.15)', color: '#F85149' }}
-      title={tooltipText}
-    >
-      {/* Shield/block icon */}
-      <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M4.25 7.25a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" />
-        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0Zm-1.5 0a6.5 6.5 0 1 0-13 0 6.5 6.5 0 0 0 13 0Z" />
-      </svg>
-      {dependencies.openCount} blocked
+    <span className="inline-flex items-center gap-1 text-xs text-dark-muted cursor-default flex-wrap">
+      <span>blocked by</span>
+      {dependencies.blockedBy.map((dep, idx) => {
+        const issueUrl = `https://github.com/${dep.owner}/${dep.repo}/issues/${dep.number}`;
+        const isClosed = dep.state === 'closed';
+        const tooltipText = dep.title
+          ? `${dep.title} (${dep.state})`
+          : `#${dep.number} (${dep.state})`;
+
+        return (
+          <span key={`${dep.owner}/${dep.repo}#${dep.number}`}>
+            <a
+              href={issueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={tooltipText}
+              className={`hover:text-dark-accent transition-colors ${
+                isClosed ? 'line-through text-dark-muted/60' : 'text-dark-muted'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              #{dep.number}
+            </a>
+            {idx < dependencies.blockedBy.length - 1 && (
+              <span className="text-dark-muted">,</span>
+            )}
+          </span>
+        );
+      })}
     </span>
   );
 }
