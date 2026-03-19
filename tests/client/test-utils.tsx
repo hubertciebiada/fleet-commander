@@ -16,6 +16,7 @@ interface FleetContextValue {
   setSelectedTeamId: (id: number | null) => void;
   connected: boolean;
   lastEvent: Date | null;
+  lastEventTeamId: number | null;
 }
 
 /**
@@ -62,6 +63,7 @@ interface MockFleetProviderProps {
   selectedTeamId?: number | null;
   connected?: boolean;
   lastEvent?: Date | null;
+  lastEventTeamId?: number | null;
 }
 
 export function MockFleetProvider({
@@ -70,6 +72,7 @@ export function MockFleetProvider({
   selectedTeamId = null,
   connected = true,
   lastEvent = null,
+  lastEventTeamId = null,
 }: MockFleetProviderProps) {
   const value: FleetContextValue = {
     teams,
@@ -77,6 +80,7 @@ export function MockFleetProvider({
     setSelectedTeamId: () => {},
     connected,
     lastEvent,
+    lastEventTeamId,
   };
 
   return (

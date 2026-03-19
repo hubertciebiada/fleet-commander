@@ -8,6 +8,8 @@ interface FleetContextValue {
   setSelectedTeamId: (id: number | null) => void;
   connected: boolean;
   lastEvent: Date | null;
+  /** The team_id from the most recent SSE event, or null for non-team events */
+  lastEventTeamId: number | null;
 }
 
 const FleetContext = createContext<FleetContextValue | null>(null);
@@ -67,7 +69,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     }
   }, [debouncedFetchTeams]);
 
-  const { connected, lastEvent } = useSSE({ onEvent: handleSSEEvent });
+  const { connected, lastEvent, lastEventTeamId } = useSSE({ onEvent: handleSSEEvent });
 
   // Fetch teams on mount as a fallback in case the SSE snapshot is missed
   useEffect(() => {
@@ -95,7 +97,8 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     setSelectedTeamId,
     connected,
     lastEvent,
-  }), [teams, selectedTeamId, connected, lastEvent]);
+    lastEventTeamId,
+  }), [teams, selectedTeamId, connected, lastEvent, lastEventTeamId]);
 
   return (
     <FleetContext.Provider value={value}>

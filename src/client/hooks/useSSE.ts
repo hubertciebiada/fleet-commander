@@ -8,6 +8,8 @@ interface UseSSEOptions {
 interface UseSSEResult {
   connected: boolean;
   lastEvent: Date | null;
+  /** The team_id from the most recent SSE event, or null for non-team events */
+  lastEventTeamId: number | null;
 }
 
 /**
@@ -17,6 +19,7 @@ interface UseSSEResult {
 export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
   const [connected, setConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<Date | null>(null);
+  const [lastEventTeamId, setLastEventTeamId] = useState<number | null>(null);
   const onEventRef = useRef(options.onEvent);
   const retryDelayRef = useRef(1000);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,9 +55,14 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
     const handleSSEMessage = (event: MessageEvent) => {
       if (!mountedRef.current) return;
       let eventType = 'message';
+      let teamId: number | null = null;
       try {
         const parsed = JSON.parse(event.data);
         eventType = parsed.type ?? event.type ?? 'message';
+        // Extract team_id from team-scoped SSE events
+        if (typeof parsed.team_id === 'number') {
+          teamId = parsed.team_id;
+        }
         onEventRef.current?.(eventType, parsed);
       } catch {
         // Non-JSON message — still invoke callback with raw data
@@ -66,6 +74,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
         if (now - lastEventTimeRef.current > 1000) {
           lastEventTimeRef.current = now;
           setLastEvent(new Date(now));
+          setLastEventTeamId(teamId);
         }
       }
     };
@@ -111,5 +120,5 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
     };
   }, [connect]);
 
-  return { connected, lastEvent };
+  return { connected, lastEvent, lastEventTeamId };
 }
