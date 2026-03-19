@@ -58,7 +58,7 @@ function truncateName(name: string, maxLen = 5): string {
 // ---------------------------------------------------------------------------
 
 export function TeamDetail() {
-  const { selectedTeamId, setSelectedTeamId, lastEvent } = useFleet();
+  const { selectedTeamId, setSelectedTeamId, lastEvent, lastEventTeamId } = useFleet();
   const api = useApi();
   const [detail, setDetail] = useState<TeamDetailType | null>(null);
   const [loading, setLoading] = useState(false);
@@ -215,9 +215,16 @@ export function TeamDetail() {
   }, [selectedTeamId, api]);
 
   // Refresh detail on SSE updates (when lastEvent changes and panel is open)
-  // Debounced to 2 seconds to avoid hammering the REST API on rapid SSE events
+  // Debounced to 2 seconds to avoid hammering the REST API on rapid SSE events.
+  // Only refresh when the SSE event pertains to the selected team — events from
+  // other teams (or non-team events like usage_updated, project_*) are skipped.
   useEffect(() => {
     if (selectedTeamId == null || !lastEvent) return;
+
+    // Skip refresh when the SSE event is for a different team.
+    // lastEventTeamId === null means a non-team event (e.g. usage_updated,
+    // project_*, snapshot) which does not affect team detail — skip those too.
+    if (lastEventTeamId !== selectedTeamId) return;
 
     // Clear any pending debounce timer
     if (refreshTimerRef.current) {
@@ -245,7 +252,7 @@ export function TeamDetail() {
         refreshTimerRef.current = null;
       }
     };
-  }, [lastEvent, selectedTeamId, api]);
+  }, [lastEvent, lastEventTeamId, selectedTeamId, api]);
 
   // Close panel handler
   const handleClose = useCallback(() => {
