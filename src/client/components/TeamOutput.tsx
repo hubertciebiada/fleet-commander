@@ -21,7 +21,7 @@ interface StreamEvent {
 
 const TYPE_STYLES: Record<string, { color: string; label: string }> = {
   assistant:    { color: '#58A6FF', label: 'TL' },
-  user:         { color: '#3FB950', label: 'you' },
+  user:         { color: '#3FB950', label: 'You' },
   fc:           { color: '#D29922', label: 'FC' },
   system:       { color: '#8B949E', label: 'system' },
   tool_use:     { color: '#D29922', label: 'tool' },
