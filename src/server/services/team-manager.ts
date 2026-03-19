@@ -1649,6 +1649,13 @@ export class TeamManager {
             const event: StreamEvent = JSON.parse(trimmed);
             console.log(`[CC:${logPrefix}] ${event.type}: ${summarizeEvent(event)}`);
 
+            // Skip CC-echoed "user" events — sendMessage() and
+            // setupStdinAndOutput() already inject properly-labeled
+            // synthetic events (type 'user' or 'fc') into parsedEvents.
+            // The CC echo is redundant and would misattribute automated
+            // FC messages as PM ("You") messages in the Session Log.
+            if (event.type === 'user') continue;
+
             // Store parsed event with timestamp
             const timestampedEvent: StreamEvent = {
               ...event,
@@ -1686,17 +1693,21 @@ export class TeamManager {
           try {
             const event: StreamEvent = JSON.parse(trimmed);
             console.log(`[CC:${logPrefix}] ${event.type}: ${summarizeEvent(event)}`);
-            const timestampedEvent: StreamEvent = {
-              ...event,
-              timestamp: new Date().toISOString(),
-            };
-            events.push(timestampedEvent);
-            if (events.length > MAX_PARSED_EVENTS) {
-              events.shift();
-            }
 
-            // Accumulate token counts from assistant events
-            this.accumulateTokens(teamId, event);
+            // Skip CC-echoed "user" events (same rationale as in 'data' handler)
+            if (event.type !== 'user') {
+              const timestampedEvent: StreamEvent = {
+                ...event,
+                timestamp: new Date().toISOString(),
+              };
+              events.push(timestampedEvent);
+              if (events.length > MAX_PARSED_EVENTS) {
+                events.shift();
+              }
+
+              // Accumulate token counts from assistant events
+              this.accumulateTokens(teamId, event);
+            }
           } catch {
             console.log(`[CC:${logPrefix}:raw] ${trimmed.substring(0, 200)}`);
           }
