@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApi } from '../hooks/useApi';
+import { useSSE } from '../hooks/useSSE';
 import { getUsageColor } from '../utils/constants';
 import { formatResetsAt } from '../utils/format-resets-at';
+import { UsageChart } from '../components/UsageChart';
 import type { UsageSnapshot } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -77,7 +79,7 @@ export function UsageViewPage() {
     try {
       const [latest, historyData] = await Promise.all([
         api.get<UsageResponse>('usage'),
-        api.get<UsageHistoryResponse>('usage/history?limit=10'),
+        api.get<UsageHistoryResponse>('usage/history?limit=500'),
       ]);
       setUsage(latest);
       if (latest.redThresholds) {
@@ -102,6 +104,15 @@ export function UsageViewPage() {
 
     return () => clearInterval(interval);
   }, [fetchUsage]);
+
+  // SSE-driven auto-update — re-fetch when new usage data arrives
+  const handleSSEEvent = useCallback((type: string) => {
+    if (type === 'usage_updated') {
+      fetchUsage();
+    }
+  }, [fetchUsage]);
+
+  useSSE({ onEvent: handleSSEEvent });
 
   return (
     <div className="p-6 max-w-4xl mx-auto flex flex-col gap-8">
@@ -168,70 +179,14 @@ export function UsageViewPage() {
       </section>
 
       {/* -------------------------------------------------------------------
-        Recent Snapshots — history table
+        Usage History — 24h line chart
       ------------------------------------------------------------------- */}
       <section>
         <h3 className="text-sm font-medium text-dark-muted uppercase tracking-wider mb-3">
-          Recent Snapshots
+          Last 24 Hours
         </h3>
-        <div className="bg-dark-surface rounded-lg border border-dark-border overflow-hidden">
-          {history.length === 0 ? (
-            <div className="flex items-center justify-center py-8">
-              <p className="text-dark-muted text-sm">No usage history yet</p>
-            </div>
-          ) : (
-            <div className="w-full overflow-x-auto">
-              <table className="w-full table-auto">
-                <thead>
-                  <tr className="border-b border-dark-border">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-dark-muted uppercase tracking-wider">
-                      Time
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-dark-muted uppercase tracking-wider">
-                      Daily
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-dark-muted uppercase tracking-wider">
-                      Weekly
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-dark-muted uppercase tracking-wider">
-                      Sonnet
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-dark-muted uppercase tracking-wider">
-                      Extra
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((snap) => (
-                    <tr
-                      key={snap.id}
-                      className="h-10 border-b border-dark-border bg-dark-surface hover:bg-[#1C2128] transition-colors"
-                    >
-                      <td className="px-4 whitespace-nowrap text-sm text-dark-muted">
-                        {snap.recordedAt ? formatTimestamp(snap.recordedAt) : '--'}
-                      </td>
-                      <td className="px-4 whitespace-nowrap text-sm text-right tabular-nums"
-                        style={{ color: getUsageColor(snap.dailyPercent, redThresholds.daily) }}>
-                        {snap.dailyPercent.toFixed(1)}%
-                      </td>
-                      <td className="px-4 whitespace-nowrap text-sm text-right tabular-nums"
-                        style={{ color: getUsageColor(snap.weeklyPercent, redThresholds.weekly) }}>
-                        {snap.weeklyPercent.toFixed(1)}%
-                      </td>
-                      <td className="px-4 whitespace-nowrap text-sm text-right tabular-nums"
-                        style={{ color: getUsageColor(snap.sonnetPercent, redThresholds.sonnet) }}>
-                        {snap.sonnetPercent.toFixed(1)}%
-                      </td>
-                      <td className="px-4 whitespace-nowrap text-sm text-right tabular-nums"
-                        style={{ color: getUsageColor(snap.extraPercent, redThresholds.extra) }}>
-                        {snap.extraPercent.toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <div className="bg-dark-surface rounded-lg border border-dark-border p-4">
+          <UsageChart snapshots={history} redThresholds={redThresholds} />
         </div>
       </section>
     </div>
