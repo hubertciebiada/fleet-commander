@@ -65,16 +65,15 @@ The TL absorbs all orchestration that the coordinator used to do:
 
 | Responsibility | How |
 |----------------|-----|
-| Spawn analyst with issue context | `Agent` tool with issue number and project context |
-| Receive brief from analyst | Analyst returns brief as its final output (Agent tool result) |
-| Spawn dev with brief + guidebook list | `Agent` tool with brief in prompt |
-| Detect "ready for review" signal from dev | Dev writes a signal file OR TL polls for it |
-| Spawn reviewer with file list | `Agent` tool with changed files |
-| Route reviewer feedback to dev (first round) | TL receives reviewer output, sends to dev via `SendMessage` |
-| Enable p2p for subsequent rounds | Dev and reviewer communicate directly after first round |
+| Spawn all 3 agents at startup (Phase 0) | `Agent` tool — spawn analyst, dev, reviewer simultaneously with issue context |
+| Receive brief from analyst | Analyst sends brief via `SendMessage` to dev, reviewer, and TL |
+| Monitor dev warm-up → implementation transition | Dev receives brief from analyst via `SendMessage`, transitions automatically |
+| Detect "ready for review" signal from dev | Dev sends review request directly to reviewer via `SendMessage`; TL is notified |
+| Monitor review rounds (all p2p) | Dev and reviewer communicate directly via `SendMessage` from the first round |
 | Enforce review round limit | TL counts rounds, intervenes at max |
 | Create PR after final approval | TL runs `gh pr create` + `gh pr merge --auto` directly |
 | Handle FC stdin messages (CI, stuck, etc.) | TL is already the stdin recipient |
+| Shut down agents on BLOCKED or Done | TL sends `shutdown_request` to all active agents |
 
 **Key insight:** The TL already exists as the CC main process. It has full tool access. The coordinator was a subagent doing what the TL should have been doing all along.
 
