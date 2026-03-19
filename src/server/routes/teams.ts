@@ -858,6 +858,9 @@ const teamsRoutes: FastifyPluginCallback = (
         const delivered = manager.sendMessage(teamId, message.trim(), 'user');
         if (delivered) {
           db.markCommandDelivered(command.id);
+          // Reset lastEventAt so the stuck detector doesn't race between
+          // PM message delivery and the agent's next hook event (#190)
+          db.updateTeam(teamId, { lastEventAt: new Date().toISOString() });
           request.log.info(`[Teams] Message delivered to team ${teamId} via stdin`);
         }
 
