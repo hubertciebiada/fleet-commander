@@ -371,6 +371,7 @@ export interface TeamDashboardRow {
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
   totalCostUsd: number;
+  githubRepo: string | null;
   prState: PRState | null;
   ciStatus: CIStatus | null;
   mergeStatus: MergeStatus | null;
@@ -410,6 +411,7 @@ export interface TeamDetail {
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
   totalCostUsd: number;
+  githubRepo?: string | null;
   pr: {
     number: number;
     state: PRState | null;

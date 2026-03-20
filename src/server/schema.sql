@@ -136,6 +136,7 @@ SELECT
   t.project_id,
   p.name AS project_name,
   p.model AS model,
+  p.github_repo AS github_repo,
   t.status,
   t.phase,
   t.worktree_name,

@@ -500,12 +500,14 @@ const teamsRoutes: FastifyPluginCallback = (
           });
         }
 
-        // Look up project to get model
+        // Look up project to get model and GitHub repo
         let projectModel: string | null = null;
+        let projectGithubRepo: string | null = null;
         if (team.projectId) {
           const project = db.getProject(team.projectId);
           if (project) {
             projectModel = project.model ?? null;
+            projectGithubRepo = project.githubRepo ?? null;
           }
         }
 
@@ -562,6 +564,7 @@ const teamsRoutes: FastifyPluginCallback = (
           issueNumber: team.issueNumber,
           issueTitle: team.issueTitle,
           model: projectModel,
+          githubRepo: projectGithubRepo,
           status: team.status,
           phase: team.phase,
           pid: team.pid,

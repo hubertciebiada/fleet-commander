@@ -23,9 +23,10 @@ interface PRBadgeProps {
   ciStatus: CIStatus | null;
   teamId?: number;
   prState?: PRState | null;
+  githubRepo?: string | null;
 }
 
-export function PRBadge({ prNumber, ciStatus, teamId, prState }: PRBadgeProps) {
+export function PRBadge({ prNumber, ciStatus, teamId, prState, githubRepo }: PRBadgeProps) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
@@ -87,7 +88,7 @@ export function PRBadge({ prNumber, ciStatus, teamId, prState }: PRBadgeProps) {
 
       {/* PRDetail popover */}
       {popoverOpen && teamId != null && (
-        <PRDetail prNumber={prNumber} teamId={teamId} onClose={handleClose} />
+        <PRDetail prNumber={prNumber} teamId={teamId} onClose={handleClose} githubRepo={githubRepo} />
       )}
     </span>
   );
