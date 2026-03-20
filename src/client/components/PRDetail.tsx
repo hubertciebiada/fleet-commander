@@ -33,9 +33,10 @@ interface PRDetailProps {
   prNumber: number;
   teamId: number;
   onClose: () => void;
+  githubRepo?: string | null;
 }
 
-export function PRDetail({ prNumber, teamId, onClose }: PRDetailProps) {
+export function PRDetail({ prNumber, teamId, onClose, githubRepo }: PRDetailProps) {
   const api = useApi();
   const [detail, setDetail] = useState<TeamDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -138,6 +139,8 @@ export function PRDetail({ prNumber, teamId, onClose }: PRDetailProps) {
   }, [actionLoading, api, prNumber, teamId]);
 
   const pr = detail?.pr ?? null;
+  const effectiveGithubRepo = githubRepo ?? detail?.githubRepo ?? null;
+  const prUrl = effectiveGithubRepo && pr ? `https://github.com/${effectiveGithubRepo}/pull/${pr.number}` : null;
   const stateInfo = STATE_COLORS[pr?.state ?? ''] ?? { color: '#8B949E', label: 'UNKNOWN' };
   const mergeStatusColor = MERGE_STATUS_COLORS[(pr?.mergeStatus ?? 'unknown').toLowerCase()] ?? '#8B949E';
   const isOpen = pr?.state === 'open';
@@ -167,9 +170,21 @@ export function PRDetail({ prNumber, teamId, onClose }: PRDetailProps) {
         <div className="p-4 space-y-3">
           {/* Header: PR number as link */}
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-dark-accent">
-              PR #{pr.number}
-            </span>
+            {prUrl ? (
+              <a
+                href={prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-sm font-semibold text-dark-accent hover:underline"
+              >
+                PR #{pr.number}
+              </a>
+            ) : (
+              <span className="text-sm font-semibold text-dark-accent">
+                PR #{pr.number}
+              </span>
+            )}
             <button
               onClick={onClose}
               className="text-dark-muted hover:text-dark-text transition-colors p-0.5 rounded hover:bg-dark-border/30"

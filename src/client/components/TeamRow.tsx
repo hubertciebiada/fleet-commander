@@ -162,7 +162,7 @@ export function TeamRow({ team, selected, onClick }: TeamRowProps) {
 
       {/* PR */}
       <td className="px-4 whitespace-nowrap">
-        <PRBadge prNumber={team.prNumber} ciStatus={team.ciStatus} teamId={team.id} prState={team.prState} />
+        <PRBadge prNumber={team.prNumber} ciStatus={team.ciStatus} teamId={team.id} prState={team.prState} githubRepo={team.githubRepo} />
       </td>
 
       {/* Actions */}

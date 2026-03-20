@@ -1912,6 +1912,7 @@ export class FleetDatabase {
       totalCacheCreationTokens: (row.total_cache_creation_tokens as number | undefined) ?? 0,
       totalCacheReadTokens: (row.total_cache_read_tokens as number | undefined) ?? 0,
       totalCostUsd: (row.total_cost_usd as number | undefined) ?? 0,
+      githubRepo: (row.github_repo as string | null) ?? null,
       prState: (row.pr_state as PRState | null) ?? null,
       ciStatus: (row.ci_status as CIStatus | null) ?? null,
       mergeStatus: row.merge_status as MergeStatus | null,
