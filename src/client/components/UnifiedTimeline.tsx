@@ -268,17 +268,15 @@ function HookEntryRow({ entry }: { entry: HookTimelineEntry }) {
       : '#8B949E';
 
     return (
-      <div className="py-1 leading-relaxed flex items-center gap-1.5">
-        <span className="text-dark-muted">
-          {formatLocalTime(entry.timestamp)}
-        </span>
+      <div className="py-0 leading-snug flex items-center gap-1.5 text-[10px] text-dark-muted">
+        <span>{formatLocalTime(entry.timestamp)}</span>
         <span
           className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
           style={{ backgroundColor: color }}
         />
-        <span style={{ color }} className="font-semibold">{label}</span>
+        <span style={{ color }} className="font-medium">{label}</span>
         <span
-          className="text-xs font-medium px-1.5 py-0.5 rounded"
+          className="font-normal px-1.5 rounded"
           style={{ color: lifecycleColor, backgroundColor: lifecycleColor + '18' }}
         >
           {entry.eventType}
@@ -290,27 +288,25 @@ function HookEntryRow({ entry }: { entry: HookTimelineEntry }) {
   // Error events — agent dot + name + red error info
   if (isError) {
     return (
-      <div className="py-1 leading-relaxed">
+      <div className="py-0 leading-snug text-[10px] text-dark-muted">
         <div className="flex items-center gap-1.5">
-          <span className="text-dark-muted">
-            {formatLocalTime(entry.timestamp)}
-          </span>
+          <span>{formatLocalTime(entry.timestamp)}</span>
           <span
             className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
             style={{ backgroundColor: color }}
           />
-          <span style={{ color }} className="font-semibold">{label}</span>
-          <span className="text-xs font-medium text-[#F85149]">
+          <span style={{ color }} className="font-medium">{label}</span>
+          <span className="font-normal text-[#F85149]">
             {entry.eventType}
           </span>
           {entry.toolName && (
-            <span className="text-xs text-dark-muted bg-dark-border/30 px-1.5 py-0.5 rounded">
+            <span className="text-dark-muted bg-dark-border/30 px-1.5 rounded">
               {entry.toolName}
             </span>
           )}
         </div>
         {errorMsg && (
-          <div className="ml-[52px] text-xs text-[#F85149] mt-0.5 line-clamp-2">
+          <div className="ml-[52px] text-[#F85149] mt-0.5 line-clamp-2">
             {errorMsg}
           </div>
         )}
@@ -320,20 +316,18 @@ function HookEntryRow({ entry }: { entry: HookTimelineEntry }) {
 
   // Generic hook event — agent dot + name + event type + tool badge
   return (
-    <div className="py-0.5 leading-relaxed flex items-center gap-1.5">
-      <span className="text-dark-muted">
-        {formatLocalTime(entry.timestamp)}
-      </span>
+    <div className="py-0 leading-snug flex items-center gap-1.5 text-[10px] text-dark-muted">
+      <span>{formatLocalTime(entry.timestamp)}</span>
       <span
         className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
         style={{ backgroundColor: color }}
       />
-      <span style={{ color }} className="font-semibold">{label}</span>
-      <span className="text-xs text-dark-text font-medium">
+      <span style={{ color }} className="font-medium">{label}</span>
+      <span className="text-dark-text font-normal">
         {entry.eventType}
       </span>
       {entry.toolName && (
-        <span className="text-xs text-dark-muted bg-dark-border/30 px-1.5 py-0.5 rounded">
+        <span className="text-dark-muted bg-dark-border/30 px-1.5 rounded">
           {entry.toolName}
         </span>
       )}
