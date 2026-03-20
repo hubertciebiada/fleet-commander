@@ -500,4 +500,47 @@ describe('buildTimeline', () => {
     );
     expect(earlyFcHigh.length).toBe(20);
   });
+
+  it('excludes noise stream types (stream_event, content_block_*) from timeline output', () => {
+    const stream: RawStreamEvent[] = [
+      // Legitimate events that should appear
+      makeStreamEvent({ type: 'assistant', timestamp: '2026-03-20T10:00:00.000Z' }),
+      makeStreamEvent({ type: 'tool_use', timestamp: '2026-03-20T10:00:01.000Z', tool: { name: 'Read' } }),
+      // Noise types that should be filtered out
+      makeStreamEvent({ type: 'stream_event', timestamp: '2026-03-20T10:00:02.000Z' }),
+      makeStreamEvent({ type: 'content_block_start', timestamp: '2026-03-20T10:00:03.000Z' }),
+      makeStreamEvent({ type: 'content_block_delta', timestamp: '2026-03-20T10:00:04.000Z' }),
+      makeStreamEvent({ type: 'content_block_stop', timestamp: '2026-03-20T10:00:05.000Z' }),
+      // Another legitimate event
+      makeStreamEvent({ type: 'result', timestamp: '2026-03-20T10:00:06.000Z' }),
+    ];
+
+    const result = buildTimeline(stream, [], 1);
+
+    // Only 3 legitimate events should remain (assistant, tool_use, result)
+    expect(result).toHaveLength(3);
+    const types = result.map((e) => (e as any).streamType);
+    expect(types).toEqual(['assistant', 'tool_use', 'result']);
+
+    // Verify none of the noise types leaked through
+    expect(types).not.toContain('stream_event');
+    expect(types).not.toContain('content_block_start');
+    expect(types).not.toContain('content_block_delta');
+    expect(types).not.toContain('content_block_stop');
+  });
+
+  it('reindexes stream entry IDs after noise filtering', () => {
+    const stream: RawStreamEvent[] = [
+      makeStreamEvent({ type: 'assistant', timestamp: '2026-03-20T10:00:00.000Z' }),
+      makeStreamEvent({ type: 'stream_event', timestamp: '2026-03-20T10:00:01.000Z' }),
+      makeStreamEvent({ type: 'tool_use', timestamp: '2026-03-20T10:00:02.000Z', tool: { name: 'Read' } }),
+    ];
+
+    const result = buildTimeline(stream, [], 1);
+
+    // After filtering, IDs should be contiguous (stream-0, stream-1)
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('stream-0');
+    expect(result[1].id).toBe('stream-1');
+  });
 });

@@ -30,6 +30,19 @@ export interface RawStreamEvent {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * High-frequency partial-message types emitted by --include-partial-messages.
+ * These should be filtered out by captureOutput() in team-manager.ts, but as a
+ * defense-in-depth measure we also exclude them here so they never appear in
+ * the timeline even if upstream filtering is bypassed.
+ */
+const NOISE_STREAM_TYPES = new Set([
+  'stream_event',
+  'content_block_start',
+  'content_block_delta',
+  'content_block_stop',
+]);
+
 /** 10-second dedup window in milliseconds */
 const DEDUP_WINDOW_MS = 10_000;
 
@@ -73,8 +86,9 @@ export function buildTimeline(
   teamId: number,
   limit = 500,
 ): TimelineEntry[] {
-  // 1. Map stream events to StreamTimelineEntry
-  const streamEntries: StreamTimelineEntry[] = streamEvents.map((e, i) => ({
+  // 1. Filter out noise stream types (defense-in-depth), then map to StreamTimelineEntry
+  const filteredStreamEvents = streamEvents.filter(e => !NOISE_STREAM_TYPES.has(e.type));
+  const streamEntries: StreamTimelineEntry[] = filteredStreamEvents.map((e, i) => ({
     id: `stream-${i}`,
     source: 'stream' as const,
     timestamp: normalizeTimestamp(e.timestamp),
