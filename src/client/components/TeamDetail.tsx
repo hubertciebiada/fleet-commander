@@ -411,7 +411,7 @@ export function TeamDetail() {
                 </div>
 
                 {/* Collapsible metadata content */}
-                <div className={`overflow-y-auto custom-scrollbar transition-all duration-200 ${metadataCollapsed ? 'max-h-0 overflow-hidden' : 'max-h-[35%]'}`}>
+                <div className={`overflow-y-auto custom-scrollbar transition-all duration-200 ${metadataCollapsed ? 'max-h-0 overflow-hidden' : 'max-h-[2000px]'}`}>
                 <div className="px-5 pb-4 space-y-4">
                   {/* ---- Header Section ---- */}
                   <section>
@@ -587,7 +587,9 @@ export function TeamDetail() {
                       {/* CI Checks */}
                       <div className="ml-1">
                         <p className="text-xs text-dark-muted mb-1.5 uppercase tracking-wide">CI Checks</p>
-                        <CIChecks checks={detail.pr.checks ?? []} />
+                        <div className="max-h-[120px] overflow-y-auto custom-scrollbar">
+                          <CIChecks checks={detail.pr.checks ?? []} />
+                        </div>
                       </div>
                     </section>
                   )}
