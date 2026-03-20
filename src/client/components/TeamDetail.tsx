@@ -69,7 +69,7 @@ export function TeamDetail() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [transitions, setTransitions] = useState<TeamTransition[]>([]);
   const [roster, setRoster] = useState<TeamMember[]>([]);
-  const [activeTab, setActiveTab] = useState<'activity' | 'communication'>('activity');
+  const [activeTab, setActiveTab] = useState<'session-log' | 'events' | 'team'>('session-log');
   const [messageEdges, setMessageEdges] = useState<MessageEdge[]>([]);
   const [metadataCollapsed, setMetadataCollapsed] = useState(false);
   const templateCacheRef = useRef<{ data: Array<{ id: string; template: string; enabled: boolean }>; fetchedAt: number } | null>(null);
@@ -167,7 +167,7 @@ export function TeamDetail() {
 
   // Reset active tab and metadata collapse state when team changes
   useEffect(() => {
-    setActiveTab('activity');
+    setActiveTab('session-log');
     // Auto-collapse metadata for done/failed teams to give more space to content
     setMetadataCollapsed(false);
   }, [selectedTeamId]);
@@ -702,53 +702,55 @@ export function TeamDetail() {
                 {/* Tab bar */}
                 <div className="shrink-0 flex items-center gap-0 px-5 border-b border-dark-border">
                   <button
-                    onClick={() => setActiveTab('activity')}
+                    onClick={() => setActiveTab('session-log')}
                     className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                      activeTab === 'activity'
+                      activeTab === 'session-log'
                         ? 'border-dark-accent text-dark-text'
                         : 'border-transparent text-dark-muted hover:text-dark-text'
                     }`}
                   >
-                    Activity
+                    Session Log
                   </button>
                   <button
-                    onClick={() => setActiveTab('communication')}
+                    onClick={() => setActiveTab('events')}
                     className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                      activeTab === 'communication'
+                      activeTab === 'events'
                         ? 'border-dark-accent text-dark-text'
                         : 'border-transparent text-dark-muted hover:text-dark-text'
                     }`}
                   >
-                    Communication
+                    Events
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('team')}
+                    className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === 'team'
+                        ? 'border-dark-accent text-dark-text'
+                        : 'border-transparent text-dark-muted hover:text-dark-text'
+                    }`}
+                  >
+                    Team
                   </button>
                 </div>
 
                 {/* Tab content */}
-                {activeTab === 'activity' && (
-                  <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-4 px-5 py-3">
-                    {/* Left: Events */}
-                    <div className="flex-1 min-w-0 flex flex-col min-h-[200px] md:min-h-0">
-                      <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1 shrink-0">
-                        Recent Events
-                      </h4>
-                      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                        <EventTimeline teamId={detail.id} refreshKey={refreshKey} />
-                      </div>
-                    </div>
-
-                    {/* Right: Session Log */}
-                    <div className="flex-1 min-w-0 flex flex-col min-h-[200px] md:min-h-0">
-                      <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1 shrink-0">
-                        Session Log
-                      </h4>
-                      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                        <TeamOutput teamId={detail.id} teamStatus={detail.status} />
-                      </div>
+                {activeTab === 'session-log' && (
+                  <div className="flex-1 min-h-0 flex flex-col px-5 py-3">
+                    <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                      <TeamOutput teamId={detail.id} teamStatus={detail.status} />
                     </div>
                   </div>
                 )}
 
-                {activeTab === 'communication' && (
+                {activeTab === 'events' && (
+                  <div className="flex-1 min-h-0 flex flex-col px-5 py-3">
+                    <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                      <EventTimeline teamId={detail.id} refreshKey={refreshKey} />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'team' && (
                   <div className="flex-1 min-h-0 px-5 py-3">
                     <CommGraph edges={messageEdges} agents={roster} />
                   </div>
