@@ -18,3 +18,38 @@ export function getUsageColor(percent: number, redThreshold: number): string {
   if (percent >= yellowStart) return '#D29922';
   return '#3FB950';
 }
+
+// ---------------------------------------------------------------------------
+// Agent colors — role-based with hash fallback for consistent coloring
+// ---------------------------------------------------------------------------
+
+/** Role-specific colors for agent nodes */
+export const AGENT_ROLE_COLORS: Record<string, string> = {
+  'team-lead': '#58A6FF',
+  'coordinator': '#58A6FF',
+  'tl': '#58A6FF',
+  'analyst': '#D29922',
+  'dev': '#3FB950',
+  'developer': '#3FB950',
+  'reviewer': '#A371F7',
+};
+
+/** Fallback palette for agents with unknown roles */
+const AGENT_FALLBACK_PALETTE = [
+  '#58A6FF', '#3FB950', '#D29922', '#A371F7', '#F778BA',
+  '#79C0FF', '#7EE787', '#E3B341', '#D2A8FF', '#FF7B72',
+];
+
+/** Get a deterministic color for an agent. Prefers role-based color, falls back to name hash. */
+export function agentColor(name: string, role?: string): string {
+  if (role) {
+    const roleColor = AGENT_ROLE_COLORS[role.toLowerCase()];
+    if (roleColor) return roleColor;
+  }
+  // Hash-based fallback
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  }
+  return AGENT_FALLBACK_PALETTE[Math.abs(hash) % AGENT_FALLBACK_PALETTE.length];
+}
