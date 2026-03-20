@@ -375,6 +375,15 @@ const teamsRoutes: FastifyPluginCallback = (
           });
         }
 
+        // Reject resume for completed teams
+        const existingTeam = getDatabase().getTeam(teamId);
+        if (existingTeam && existingTeam.status === 'done') {
+          return reply.code(409).send({
+            error: 'Conflict',
+            message: 'Cannot resume a completed team',
+          });
+        }
+
         const manager = getTeamManager();
         const team = await manager.resume(teamId);
         return reply.code(200).send(team);
@@ -412,6 +421,15 @@ const teamsRoutes: FastifyPluginCallback = (
           return reply.code(400).send({
             error: 'Bad Request',
             message: 'Invalid team ID',
+          });
+        }
+
+        // Reject restart for completed teams
+        const existingTeam = getDatabase().getTeam(teamId);
+        if (existingTeam && existingTeam.status === 'done') {
+          return reply.code(409).send({
+            error: 'Conflict',
+            message: 'Cannot restart a completed team',
           });
         }
 
