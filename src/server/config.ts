@@ -37,6 +37,12 @@ const config = Object.freeze({
   launchTimeoutMin: safeParseInt(process.env['FLEET_LAUNCH_TIMEOUT_MIN'] || '5', 'FLEET_LAUNCH_TIMEOUT_MIN'),
   maxUniqueCiFailures: safeParseInt(process.env['FLEET_MAX_CI_FAILURES'] || '3', 'FLEET_MAX_CI_FAILURES'),
 
+  /** Seconds after SubagentStart before a SubagentStop is considered an early crash */
+  earlyCrashThresholdSec: safeParseInt(process.env['FLEET_EARLY_CRASH_THRESHOLD_SEC'] || '120', 'FLEET_EARLY_CRASH_THRESHOLD_SEC'),
+
+  /** Minimum tool-use events for a subagent session to be considered healthy */
+  earlyCrashMinTools: safeParseInt(process.env['FLEET_EARLY_CRASH_MIN_TOOLS'] || '5', 'FLEET_EARLY_CRASH_MIN_TOOLS'),
+
   usageRedDailyPct: safeParseInt(process.env['FLEET_USAGE_RED_DAILY_PCT'] || '85', 'FLEET_USAGE_RED_DAILY_PCT'),
   usageRedWeeklyPct: safeParseInt(process.env['FLEET_USAGE_RED_WEEKLY_PCT'] || '95', 'FLEET_USAGE_RED_WEEKLY_PCT'),
   usageRedSonnetPct: safeParseInt(process.env['FLEET_USAGE_RED_SONNET_PCT'] || '95', 'FLEET_USAGE_RED_SONNET_PCT'),
@@ -86,6 +92,8 @@ export function validateConfig(): void {
     ['launchTimeoutMin', config.launchTimeoutMin],
     ['maxUniqueCiFailures', config.maxUniqueCiFailures],
     ['mergeShutdownGraceMs', config.mergeShutdownGraceMs],
+    ['earlyCrashThresholdSec', config.earlyCrashThresholdSec],
+    ['earlyCrashMinTools', config.earlyCrashMinTools],
   ];
   for (const [name, value] of positiveIntegers) {
     if (isNaN(value) || value <= 0) {
