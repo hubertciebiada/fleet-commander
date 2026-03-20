@@ -88,6 +88,16 @@ export class TeamManager {
   private _processingQueue = new Set<number>();
   private shutdownTimers: Map<number, NodeJS.Timeout> = new Map();
 
+  /**
+   * Per-team map of tool_use_id -> agent name.
+   * When the TL spawns a subagent via the "Agent" or "Task" tool, the tool_use
+   * content block's `id` becomes the `parent_tool_use_id` on subsequent
+   * assistant events from that subagent. We extract the agent name from the
+   * tool input (e.g. `input.name` = "dev") and store it here so every stream
+   * event can be tagged with the originating agent name.
+   */
+  private agentMaps: Map<number, Map<string, string>> = new Map();
+
   /** Teams currently in extended thinking — tracked in-memory only */
   readonly thinkingTeams: Set<number> = new Set();
   /** Timestamp when thinking started for each team (for duration tracking) */
@@ -424,6 +434,7 @@ export class TeamManager {
     this.childProcesses.delete(teamId);
     this.outputBuffers.delete(teamId);
     this.parsedEvents.delete(teamId);
+    this.agentMaps.delete(teamId);
     this.tokenCounters.delete(teamId);
 
     // Re-read to get the latest status (process exit handler may have already updated it)
@@ -1696,6 +1707,12 @@ export class TeamManager {
     }
     const events = this.parsedEvents.get(teamId)!;
 
+    // Initialize agent map for tracking tool_use_id -> agent name
+    if (!this.agentMaps.has(teamId)) {
+      this.agentMaps.set(teamId, new Map());
+    }
+    const agentMap = this.agentMaps.get(teamId)!;
+
     // Initialize token counter (seed from DB for restarts)
     if (!this.tokenCounters.has(teamId)) {
       const existingTeam = db.getTeam(teamId);
@@ -1755,10 +1772,69 @@ export class TeamManager {
               continue;
             }
 
-            // Store parsed event with timestamp
+            // ----- Agent name resolution -----
+            // 1. Learn agent names: when the TL's assistant event contains
+            //    a tool_use content block for "Agent" or "Task", record the
+            //    mapping from tool_use_id -> agent name.
+            const ev = event as Record<string, unknown>;
+            if (event.type === 'assistant') {
+              const msg = ev.message as Record<string, unknown> | undefined;
+              const content = msg?.content;
+              if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (
+                    block &&
+                    typeof block === 'object' &&
+                    (block as Record<string, unknown>).type === 'tool_use'
+                  ) {
+                    const toolBlock = block as Record<string, unknown>;
+                    const toolName = toolBlock.name as string | undefined;
+                    const toolId = toolBlock.id as string | undefined;
+                    if (toolId && (toolName === 'Agent' || toolName === 'Task' || toolName === 'dispatch_agent')) {
+                      const input = toolBlock.input as Record<string, unknown> | undefined;
+                      const agentName = (input?.agent_name ?? input?.name ?? 'subagent') as string;
+                      agentMap.set(toolId, agentName.toLowerCase());
+                    }
+                  }
+                }
+              }
+            }
+
+            // 2. Resolve the agent name for this event
+            const parentToolUseId = (ev.parent_tool_use_id as string | null | undefined) ?? null;
+            let resolvedAgentName: string;
+            if (event.type === 'user' || event.type === 'fc') {
+              resolvedAgentName = 'team-lead';
+            } else if (parentToolUseId) {
+              resolvedAgentName = agentMap.get(parentToolUseId) ?? 'subagent';
+            } else {
+              resolvedAgentName = 'team-lead';
+            }
+
+            // 3. Extract description and lastToolName from system/task_progress
+            let description: string | undefined;
+            let lastToolName: string | undefined;
+            if (event.type === 'system') {
+              const subtype = ev.subtype as string | undefined;
+              if (subtype === 'task_progress' || subtype === 'task_notification') {
+                description = (ev.description as string | undefined) ?? undefined;
+                lastToolName = (ev.last_tool_name as string | undefined) ??
+                  (ev.tool_name as string | undefined) ?? undefined;
+                // system task events may carry a tool_use_id referencing the parent agent
+                const sysToolUseId = ev.tool_use_id as string | undefined;
+                if (sysToolUseId && agentMap.has(sysToolUseId)) {
+                  resolvedAgentName = agentMap.get(sysToolUseId)!;
+                }
+              }
+            }
+
+            // Store parsed event with timestamp + agent attribution
             const timestampedEvent: StreamEvent = {
               ...event,
               timestamp: new Date().toISOString(),
+              agentName: resolvedAgentName,
+              ...(description ? { description } : {}),
+              ...(lastToolName ? { lastToolName } : {}),
             };
             events.push(timestampedEvent);
             if (events.length > MAX_PARSED_EVENTS) {
@@ -1769,7 +1845,8 @@ export class TeamManager {
             this.accumulateTokens(teamId, event);
 
             // Broadcast interesting events via SSE
-            if (['assistant', 'tool_use', 'tool_result', 'result'].includes(event.type)) {
+            // Include 'system' for task_progress/task_notification visibility
+            if (['assistant', 'tool_use', 'tool_result', 'result', 'system'].includes(event.type)) {
               sseBroker.broadcast('team_output', {
                 team_id: teamId,
                 event: timestampedEvent,
@@ -1800,9 +1877,17 @@ export class TeamManager {
 
               // Filter out content_block events (same rationale as in 'data' handler)
               if (event.type !== 'content_block_start' && event.type !== 'content_block_delta' && event.type !== 'content_block_stop') {
+                // Resolve agent name (same logic as 'data' handler)
+                const endEv = event as Record<string, unknown>;
+                const endParentId = (endEv.parent_tool_use_id as string | null | undefined) ?? null;
+                const endAgentName = endParentId
+                  ? (agentMap.get(endParentId) ?? 'subagent')
+                  : 'team-lead';
+
                 const timestampedEvent: StreamEvent = {
                   ...event,
                   timestamp: new Date().toISOString(),
+                  agentName: endAgentName,
                 };
                 events.push(timestampedEvent);
                 if (events.length > MAX_PARSED_EVENTS) {

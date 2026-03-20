@@ -83,6 +83,10 @@ export function buildTimeline(
     subtype: e.subtype,
     message: e.message,
     tool: e.tool,
+    // Pass through agent attribution fields injected by captureOutput()
+    ...(e.agentName ? { agentName: e.agentName as string } : {}),
+    ...(e.description ? { description: e.description as string } : {}),
+    ...(e.lastToolName ? { lastToolName: e.lastToolName as string } : {}),
   }));
 
   // 2. Map hook events to HookTimelineEntry
