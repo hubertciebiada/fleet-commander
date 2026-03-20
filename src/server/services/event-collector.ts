@@ -17,6 +17,7 @@
 
 import type { TeamStatus } from '../../shared/types.js';
 import type { SSEEventType, SSEEventPayloads } from './sse-broker.js';
+import config from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -109,12 +110,6 @@ interface SubagentTracker {
 }
 
 const subagentTrackers = new Map<string, SubagentTracker>();
-
-/** Minimum duration (ms) for a subagent to be considered healthy */
-const SUBAGENT_MIN_DURATION_MS = 120_000; // 2 minutes
-
-/** Minimum event count for a subagent to be considered having done meaningful work */
-const SUBAGENT_MIN_EVENTS = 5;
 
 /** Throttle window: tool_use events from the same team within this period are deduplicated */
 const TOOL_USE_THROTTLE_MS = 5000; // 5 seconds
@@ -350,7 +345,7 @@ export function processEvent(
       const durationMs = now - tracker.startTime;
       const durationSec = Math.round(durationMs / 1000);
 
-      if (durationMs < SUBAGENT_MIN_DURATION_MS && tracker.eventCount < SUBAGENT_MIN_EVENTS) {
+      if (durationMs < config.earlyCrashThresholdSec * 1000 && tracker.eventCount < config.earlyCrashMinTools) {
         const crashMsg =
           `Subagent '${subagentName}' appears to have crashed (${durationSec}s after start, ${tracker.eventCount} events). Consider respawning.`;
         try {

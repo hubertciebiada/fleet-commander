@@ -209,6 +209,8 @@ The SSE broker emits 14 event types:
 | `FLEET_STUCK_THRESHOLD_MIN` | `5` | Minutes before stuck status |
 | `FLEET_LAUNCH_TIMEOUT_MIN` | `5` | Minutes before a launching team is marked failed |
 | `FLEET_MAX_CI_FAILURES` | `3` | Unique CI failures before blocking |
+| `FLEET_EARLY_CRASH_THRESHOLD_SEC` | `120` | Seconds before a SubagentStop is considered an early crash |
+| `FLEET_EARLY_CRASH_MIN_TOOLS` | `5` | Minimum tool-use events for a subagent to be considered healthy |
 | `FLEET_GITHUB_POLL_MS` | `30000` | GitHub poll interval |
 | `FLEET_DB_PATH` | `./fleet.db` | Database file location |
 | `FLEET_TERMINAL` | `auto` | Windows terminal preference (`auto`/`wt`/`cmd`) |

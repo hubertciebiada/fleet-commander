@@ -12,6 +12,8 @@ interface SettingsResponse {
   stuckThresholdMin: number;
   launchTimeoutMin: number;
   maxUniqueCiFailures: number;
+  earlyCrashThresholdSec: number;
+  earlyCrashMinTools: number;
   githubPollIntervalMs: number;
   issuePollIntervalMs: number;
   stuckCheckIntervalMs: number;
@@ -106,6 +108,19 @@ const SETTING_GROUPS: SettingGroup[] = [
         label: 'Max CI Failures',
         envVar: 'FLEET_MAX_CI_FAILURES',
         description: 'Unique CI failures before a team is blocked',
+      },
+      {
+        key: 'earlyCrashThresholdSec',
+        label: 'Early Crash Threshold',
+        envVar: 'FLEET_EARLY_CRASH_THRESHOLD_SEC',
+        description: 'Seconds before a SubagentStop is considered an early crash',
+        format: (v) => `${v}s`,
+      },
+      {
+        key: 'earlyCrashMinTools',
+        label: 'Early Crash Min Tools',
+        envVar: 'FLEET_EARLY_CRASH_MIN_TOOLS',
+        description: 'Minimum tool-use events for a subagent to be considered healthy',
       },
     ],
   },
