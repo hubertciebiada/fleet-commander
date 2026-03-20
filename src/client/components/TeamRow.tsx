@@ -2,6 +2,7 @@ import type { TeamDashboardRow } from '../../shared/types';
 import { StatusBadge } from './StatusBadge';
 import { PRBadge } from './PRBadge';
 import { useApi } from '../hooks/useApi';
+import { useFleet } from '../context/FleetContext';
 import { useState } from 'react';
 
 // ---------------------------------------------------------------------------
@@ -42,8 +43,10 @@ interface TeamRowProps {
 
 export function TeamRow({ team, selected, onClick }: TeamRowProps) {
   const api = useApi();
+  const { isThinking } = useFleet();
   const [stopping, setStopping] = useState(false);
   const [forceLaunching, setForceLaunching] = useState(false);
+  const teamIsThinking = isThinking(team.id);
 
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -141,9 +144,16 @@ export function TeamRow({ team, selected, onClick }: TeamRowProps) {
 
       {/* Last Activity */}
       <td className="px-4 whitespace-nowrap">
-        <span className={`text-sm ${activityColor}`} title={team.lastEventAt ?? undefined}>
-          {activityLabel}
-        </span>
+        {teamIsThinking ? (
+          <span className="inline-flex items-center gap-1.5 text-sm text-[#E8976C]">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#E8976C] animate-thinking-dot" />
+            thinking...
+          </span>
+        ) : (
+          <span className={`text-sm ${activityColor}`} title={team.lastEventAt ?? undefined}>
+            {activityLabel}
+          </span>
+        )}
       </td>
 
       {/* Tokens */}

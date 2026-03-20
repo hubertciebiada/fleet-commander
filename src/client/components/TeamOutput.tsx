@@ -82,9 +82,10 @@ function getEventText(event: StreamEvent): string {
 interface TeamOutputProps {
   teamId: number;
   teamStatus?: string;
+  isThinking?: boolean;
 }
 
-export function TeamOutput({ teamId, teamStatus }: TeamOutputProps) {
+export function TeamOutput({ teamId, teamStatus, isThinking }: TeamOutputProps) {
   const api = useApi();
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [copied, setCopied] = useState(false);
@@ -169,7 +170,7 @@ export function TeamOutput({ teamId, teamStatus }: TeamOutputProps) {
         {copied ? 'Copied!' : copyFailed ? 'Failed' : 'Copy'}
       </button>
 
-      <div className="font-mono text-xs overflow-y-auto bg-[#0D1117] p-2 rounded border border-dark-border custom-scrollbar">
+      <div className={`font-mono text-xs overflow-y-auto bg-[#0D1117] p-2 rounded border border-dark-border custom-scrollbar${isThinking ? ' thinking-glow' : ''}`}>
         {events.filter((e) => getEventText(e) !== '').map((e, i) => {
           const { color, label } = getStyle(e.type);
           const text = getEventText(e);
@@ -198,6 +199,12 @@ export function TeamOutput({ teamId, teamStatus }: TeamOutputProps) {
             </div>
           );
         })}
+        {isThinking && (
+          <div className="py-1 flex items-center gap-1.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#E8976C] animate-thinking-dot" />
+            <span className="text-[#E8976C] text-[10px] italic">thinking...</span>
+          </div>
+        )}
         <div ref={scrollRef} />
       </div>
     </div>

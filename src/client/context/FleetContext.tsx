@@ -10,6 +10,8 @@ interface FleetContextValue {
   lastEvent: Date | null;
   /** The team_id from the most recent SSE event, or null for non-team events */
   lastEventTeamId: number | null;
+  /** Check whether a team is currently in extended thinking */
+  isThinking: (teamId: number) => boolean;
 }
 
 const FleetContext = createContext<FleetContextValue | null>(null);
@@ -21,6 +23,8 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   const [teams, setTeams] = useState<TeamDashboardRow[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const thinkingTeamIdsRef = useRef<Set<number>>(new Set());
+  const [thinkingVersion, forceThinkingUpdate] = useState(0);
 
   // Fetch the full team dashboard from the REST API.
   // Used as a fallback when an SSE event signals a change but
@@ -63,9 +67,30 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       // Incremental team change — re-fetch team list so grid stays current
       // even if the server's follow-up snapshot is missed (e.g., reconnect race)
       debouncedFetchTeams();
+
+      // Clear thinking state when a team stops (safety net)
+      if (type === 'team_stopped') {
+        const payload = data as { team_id?: number };
+        if (typeof payload.team_id === 'number' && thinkingTeamIdsRef.current.has(payload.team_id)) {
+          thinkingTeamIdsRef.current.delete(payload.team_id);
+          forceThinkingUpdate((n) => n + 1);
+        }
+      }
     } else if (type === 'usage_updated' || type === 'pr_updated') {
       // Usage or PR data changed — refresh teams to pick up any related state changes.
       debouncedFetchTeams();
+    } else if (type === 'team_thinking_start') {
+      const payload = data as { team_id?: number };
+      if (typeof payload.team_id === 'number') {
+        thinkingTeamIdsRef.current.add(payload.team_id);
+        forceThinkingUpdate((n) => n + 1);
+      }
+    } else if (type === 'team_thinking_stop') {
+      const payload = data as { team_id?: number };
+      if (typeof payload.team_id === 'number') {
+        thinkingTeamIdsRef.current.delete(payload.team_id);
+        forceThinkingUpdate((n) => n + 1);
+      }
     }
   }, [debouncedFetchTeams]);
 
@@ -91,6 +116,10 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const isThinking = useCallback((teamId: number): boolean => {
+    return thinkingTeamIdsRef.current.has(teamId);
+  }, []);
+
   const value = useMemo<FleetContextValue>(() => ({
     teams,
     selectedTeamId,
@@ -98,7 +127,9 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     connected,
     lastEvent,
     lastEventTeamId,
-  }), [teams, selectedTeamId, connected, lastEvent, lastEventTeamId]);
+    isThinking,
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- thinkingVersion forces recompute so consumers re-render on thinking state changes
+  }), [teams, selectedTeamId, connected, lastEvent, lastEventTeamId, isThinking, thinkingVersion]);
 
   return (
     <FleetContext.Provider value={value}>

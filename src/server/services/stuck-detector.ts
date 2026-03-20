@@ -119,6 +119,20 @@ class StuckDetector {
         }
 
         if (newStatus) {
+          // Skip idle/stuck transition if the team is currently thinking.
+          // Extended thinking means the model is actively working — not idle.
+          try {
+            const manager = getTeamManager();
+            if (manager.thinkingTeams.has(team.id)) {
+              console.log(
+                `[StuckDetector] Team ${team.id} skipped — currently in extended thinking`
+              );
+              continue;
+            }
+          } catch {
+            // TeamManager not initialized — skip thinking check
+          }
+
           // Skip idle/stuck transition if the team has a PR with pending CI.
           // A team waiting for CI is not idle — it's working.
           if (team.prNumber) {

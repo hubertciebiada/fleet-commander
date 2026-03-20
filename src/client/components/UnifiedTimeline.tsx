@@ -298,9 +298,10 @@ function HookEntryRow({ entry }: { entry: HookTimelineEntry }) {
 interface UnifiedTimelineProps {
   teamId: number;
   teamStatus?: string;
+  isThinking?: boolean;
 }
 
-export function UnifiedTimeline({ teamId, teamStatus }: UnifiedTimelineProps) {
+export function UnifiedTimeline({ teamId, teamStatus, isThinking }: UnifiedTimelineProps) {
   const api = useApi();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [copied, setCopied] = useState(false);
@@ -415,7 +416,7 @@ export function UnifiedTimeline({ teamId, teamStatus }: UnifiedTimelineProps) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="font-mono text-xs overflow-y-auto bg-[#0D1117] p-2 rounded border border-dark-border custom-scrollbar"
+        className={`font-mono text-xs overflow-y-auto bg-[#0D1117] p-2 rounded border border-dark-border custom-scrollbar${isThinking ? ' thinking-glow' : ''}`}
       >
         {entries.map((entry) => {
           if (entry.source === 'stream') {
@@ -423,6 +424,12 @@ export function UnifiedTimeline({ teamId, teamStatus }: UnifiedTimelineProps) {
           }
           return <HookEntryRow key={entry.id} entry={entry} />;
         })}
+        {isThinking && (
+          <div className="py-1 flex items-center gap-1.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#E8976C] animate-thinking-dot" />
+            <span className="text-[#E8976C] text-[10px] italic">thinking...</span>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>
