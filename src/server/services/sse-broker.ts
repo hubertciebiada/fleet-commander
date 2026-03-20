@@ -31,7 +31,9 @@ export type SSEEventType =
   | 'project_cleanup'
   | 'snapshot'
   | 'heartbeat'
-  | 'dependency_resolved';
+  | 'dependency_resolved'
+  | 'team_thinking_start'
+  | 'team_thinking_stop';
 
 /** Payload shapes for each event type */
 export interface SSEEventPayloads {
@@ -49,6 +51,8 @@ export interface SSEEventPayloads {
   snapshot: { teams: unknown[] };
   heartbeat: { timestamp: string };
   dependency_resolved: { issue_number: number; project_id: number; previously_blocked_by: number[] };
+  team_thinking_start: { team_id: number };
+  team_thinking_stop: { team_id: number; duration_ms: number };
 }
 
 // ---------------------------------------------------------------------------

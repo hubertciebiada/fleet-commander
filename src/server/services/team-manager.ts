@@ -88,6 +88,13 @@ export class TeamManager {
   private _processingQueue = new Set<number>();
   private shutdownTimers: Map<number, NodeJS.Timeout> = new Map();
 
+  /** Teams currently in extended thinking — tracked in-memory only */
+  readonly thinkingTeams: Set<number> = new Set();
+  /** Timestamp when thinking started for each team (for duration tracking) */
+  private thinkingStartTimes: Map<number, number> = new Map();
+  /** Content block index of the active thinking block per team */
+  private thinkingBlockIndex: Map<number, number> = new Map();
+
   // -------------------------------------------------------------------------
   // syncWithOrigin — fetch + pull before creating a worktree
   // -------------------------------------------------------------------------
@@ -411,6 +418,7 @@ export class TeamManager {
     }
 
     // Clean up child process reference
+    this.clearThinking(teamId);
     this.flushTokenCounters(teamId);
     this.persistParsedEvents(teamId);
     this.childProcesses.delete(teamId);
@@ -1279,6 +1287,7 @@ export class TeamManager {
     args.push('--input-format', 'stream-json');
     args.push('--output-format', 'stream-json');
     args.push('--verbose');
+    args.push('--include-partial-messages');
     return args;
   }
 
@@ -1435,6 +1444,7 @@ export class TeamManager {
 
     child.on('exit', (code, signal) => {
       console.log(`[TeamManager] Process exited for team ${teamId} (code=${code}, signal=${signal})`);
+      this.clearThinking(teamId);
       this.flushTokenCounters(teamId);
       this.persistParsedEvents(teamId);
       this.childProcesses.delete(teamId);
@@ -1476,6 +1486,7 @@ export class TeamManager {
 
     child.on('error', (err) => {
       console.error(`[TeamManager] ERROR: process error for team ${teamId}:`, err.message);
+      this.clearThinking(teamId);
       this.flushTokenCounters(teamId);
       this.persistParsedEvents(teamId);
       this.childProcesses.delete(teamId);
@@ -1743,6 +1754,9 @@ export class TeamManager {
             // Accumulate token counts from assistant events
             this.accumulateTokens(teamId, event);
 
+            // Detect thinking start/stop from content_block_start/stop events
+            this.detectThinking(teamId, event);
+
             // Broadcast interesting events via SSE
             if (['assistant', 'tool_use', 'tool_result', 'result'].includes(event.type)) {
               sseBroker.broadcast('team_output', {
@@ -1888,6 +1902,55 @@ export class TeamManager {
       }, teamId);
     } catch (err) {
       console.error(`[TeamManager] Failed to flush token counters for team ${teamId}:`, err);
+    }
+  }
+
+  /**
+   * Detect thinking start/stop from Claude Code stream-json events.
+   *
+   * content_block_start with content_block.type === "thinking" signals the
+   * start of an extended thinking block. content_block_stop (matched by
+   * index) signals the end.
+   */
+  private detectThinking(teamId: number, event: StreamEvent): void {
+    const ev = event as Record<string, unknown>;
+
+    if (event.type === 'content_block_start') {
+      const block = ev.content_block as Record<string, unknown> | undefined;
+      if (block && block.type === 'thinking') {
+        this.thinkingTeams.add(teamId);
+        this.thinkingStartTimes.set(teamId, Date.now());
+        const index = typeof ev.index === 'number' ? ev.index : -1;
+        this.thinkingBlockIndex.set(teamId, index);
+        sseBroker.broadcast('team_thinking_start', { team_id: teamId }, teamId);
+        console.log(`[TeamManager] Team ${teamId} thinking started (block index ${index})`);
+      }
+    } else if (event.type === 'content_block_stop') {
+      const index = typeof ev.index === 'number' ? ev.index : -1;
+      const trackedIndex = this.thinkingBlockIndex.get(teamId);
+      if (this.thinkingTeams.has(teamId) && (trackedIndex === undefined || trackedIndex === index)) {
+        const startTime = this.thinkingStartTimes.get(teamId) ?? Date.now();
+        const durationMs = Date.now() - startTime;
+        this.thinkingTeams.delete(teamId);
+        this.thinkingStartTimes.delete(teamId);
+        this.thinkingBlockIndex.delete(teamId);
+        sseBroker.broadcast('team_thinking_stop', { team_id: teamId, duration_ms: durationMs }, teamId);
+        console.log(`[TeamManager] Team ${teamId} thinking stopped (${durationMs}ms)`);
+      }
+    }
+  }
+
+  /**
+   * Clear thinking state for a team (e.g. on stop/cleanup).
+   */
+  clearThinking(teamId: number): void {
+    if (this.thinkingTeams.has(teamId)) {
+      const startTime = this.thinkingStartTimes.get(teamId) ?? Date.now();
+      const durationMs = Date.now() - startTime;
+      this.thinkingTeams.delete(teamId);
+      this.thinkingStartTimes.delete(teamId);
+      this.thinkingBlockIndex.delete(teamId);
+      sseBroker.broadcast('team_thinking_stop', { team_id: teamId, duration_ms: durationMs }, teamId);
     }
   }
 

@@ -50,6 +50,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
       'pr_updated', 'team_launched', 'team_stopped',
       'usage_updated', 'project_added', 'project_updated', 'project_removed',
       'project_cleanup', 'dependency_resolved', 'heartbeat',
+      'team_thinking_start', 'team_thinking_stop',
     ];
 
     const handleSSEMessage = (event: MessageEvent) => {
@@ -69,7 +70,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
         onEventRef.current?.('message', event.data);
       }
       // Throttle lastEvent updates — skip high-frequency events and limit to once per second
-      if (eventType !== 'team_output' && eventType !== 'heartbeat') {
+      if (eventType !== 'team_output' && eventType !== 'heartbeat' && eventType !== 'team_thinking_start' && eventType !== 'team_thinking_stop') {
         const now = Date.now();
         if (now - lastEventTimeRef.current > 1000) {
           lastEventTimeRef.current = now;

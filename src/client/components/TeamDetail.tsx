@@ -28,7 +28,7 @@ function formatDuration(minutes: number | undefined | null): string {
 // ---------------------------------------------------------------------------
 
 export function TeamDetail() {
-  const { selectedTeamId, setSelectedTeamId, lastEvent, lastEventTeamId } = useFleet();
+  const { selectedTeamId, setSelectedTeamId, lastEvent, lastEventTeamId, isThinking } = useFleet();
   const api = useApi();
   const [detail, setDetail] = useState<TeamDetailType | null>(null);
   const [loading, setLoading] = useState(false);
@@ -635,7 +635,7 @@ export function TeamDetail() {
                 {activeTab === 'session-log' && (
                   <div className="flex-1 min-h-0 flex flex-col px-5 py-3">
                     <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                      <UnifiedTimeline teamId={detail.id} teamStatus={detail.status} />
+                      <UnifiedTimeline teamId={detail.id} teamStatus={detail.status} isThinking={isThinking(detail.id)} />
                     </div>
                   </div>
                 )}
