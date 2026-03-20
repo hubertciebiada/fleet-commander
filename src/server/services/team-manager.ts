@@ -1774,7 +1774,7 @@ export class TeamManager {
             // only needed for thinking detection (above) and must NOT be stored
             // in the parsedEvents buffer — they would flood the event cap
             // and evict meaningful session log entries.
-            if (event.type === 'content_block_start' || event.type === 'content_block_delta' || event.type === 'content_block_stop') {
+            if (event.type === 'content_block_start' || event.type === 'content_block_delta' || event.type === 'content_block_stop' || event.type === 'stream_event') {
               continue;
             }
 
@@ -1882,7 +1882,7 @@ export class TeamManager {
               this.detectThinking(teamId, event);
 
               // Filter out content_block events (same rationale as in 'data' handler)
-              if (event.type !== 'content_block_start' && event.type !== 'content_block_delta' && event.type !== 'content_block_stop') {
+              if (event.type !== 'content_block_start' && event.type !== 'content_block_delta' && event.type !== 'content_block_stop' && event.type !== 'stream_event') {
                 // Resolve agent name (same logic as 'data' handler)
                 const endEv = event as Record<string, unknown>;
                 const endParentId = (endEv.parent_tool_use_id as string | null | undefined) ?? null;
@@ -2021,9 +2021,21 @@ export class TeamManager {
    * index) signals the end.
    */
   private detectThinking(teamId: number, event: StreamEvent): void {
-    const ev = event as Record<string, unknown>;
+    let ev = event as Record<string, unknown>;
+    let effectiveType = event.type;
 
-    if (event.type === 'content_block_start') {
+    // Unwrap stream_event envelopes: thinking signals from
+    // --include-partial-messages arrive wrapped as
+    // { type: "stream_event", event: { type: "content_block_start", ... } }
+    if (event.type === 'stream_event') {
+      const inner = ev.event as Record<string, unknown> | undefined;
+      if (inner && typeof inner.type === 'string') {
+        ev = inner;
+        effectiveType = inner.type as string;
+      }
+    }
+
+    if (effectiveType === 'content_block_start') {
       const block = ev.content_block as Record<string, unknown> | undefined;
       if (block && block.type === 'thinking') {
         this.thinkingTeams.add(teamId);
@@ -2033,7 +2045,7 @@ export class TeamManager {
         sseBroker.broadcast('team_thinking_start', { team_id: teamId }, teamId);
         console.log(`[TeamManager] Team ${teamId} thinking started (block index ${index})`);
       }
-    } else if (event.type === 'content_block_stop') {
+    } else if (effectiveType === 'content_block_stop') {
       const index = typeof ev.index === 'number' ? ev.index : -1;
       const trackedIndex = this.thinkingBlockIndex.get(teamId);
       if (this.thinkingTeams.has(teamId) && (trackedIndex === undefined || trackedIndex === index)) {
