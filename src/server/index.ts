@@ -25,6 +25,7 @@ import { getDatabase, closeDatabase } from './db.js';
 import { recoverOnStartup } from './services/startup-recovery.js';
 import { usagePoller } from './services/usage-tracker.js';
 import config from './config.js';
+import { resolveClaudePath } from './utils/resolve-claude-path.js';
 import { DEFAULT_MESSAGE_TEMPLATES } from '../shared/message-templates.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -91,7 +92,8 @@ async function main() {
   try {
     server.log.info(`Agent Teams: ${config.enableAgentTeams ? 'enabled' : 'disabled'} (FLEET_ENABLE_AGENT_TEAMS)`);
 
-    const versionOutput = execSync(`${config.claudeCmd} --version`, {
+    const claudePath = resolveClaudePath();
+    const versionOutput = execSync(`"${claudePath}" --version`, {
       encoding: 'utf-8',
       timeout: 10000,
     }).trim();

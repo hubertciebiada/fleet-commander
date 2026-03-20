@@ -20,6 +20,7 @@ import { DEFAULT_MESSAGE_TEMPLATES } from '../../shared/message-templates.js';
 import { getIssueFetcher } from '../services/issue-fetcher.js';
 import { uninstallHooks } from '../utils/hook-installer.js';
 import config from '../config.js';
+import { resolveClaudePath } from '../utils/resolve-claude-path.js';
 
 // ---------------------------------------------------------------------------
 // Server start time (captured at module load)
@@ -295,6 +296,7 @@ const systemRoutes: FastifyPluginCallback = (
           sseHeartbeatMs: config.sseHeartbeatMs,
           outputBufferLines: config.outputBufferLines,
           claudeCmd: config.claudeCmd,
+          resolvedClaudeCmd: resolveClaudePath(),
           enableAgentTeams: config.enableAgentTeams,
           fleetCommanderRoot: config.fleetCommanderRoot,
           dbPath: config.dbPath,
