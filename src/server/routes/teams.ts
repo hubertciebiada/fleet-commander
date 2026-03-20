@@ -163,7 +163,7 @@ const teamsRoutes: FastifyPluginCallback = (
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
 
-        if (message.includes('already active')) {
+        if (message.includes('already active') || message.includes('already completed')) {
           return reply.code(409).send({ error: 'Conflict', message });
         }
 
