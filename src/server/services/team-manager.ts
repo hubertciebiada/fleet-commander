@@ -776,6 +776,10 @@ export class TeamManager {
     if (this._processingQueue.has(projectId)) return;
     this._processingQueue.add(projectId);
 
+    // Track whether any teams were actually launched — used by re-drain to
+    // avoid an infinite loop when all queued teams are blocked by dependencies.
+    let launchedCount = 0;
+
     try {
       const db = getDatabase();
       const project = db.getProject(projectId);
@@ -792,7 +796,10 @@ export class TeamManager {
       if (available <= 0) return;
 
       const queued = db.getQueuedTeamsByProject(projectId);
-      const toDequeue = queued.slice(0, available);
+
+      // Filter queued teams by dependency status — only launch unblocked teams
+      const toDequeue = await this.filterUnblockedTeams(queued, available, projectId);
+      launchedCount = toDequeue.length;
 
       for (const team of toDequeue) {
         console.log(`[TeamManager] Dequeuing team ${team.id} (${team.worktreeName})`);
@@ -820,20 +827,140 @@ export class TeamManager {
       // while we were awaiting launchQueued, there may still be queued teams
       // with available slots. Schedule a re-check via setImmediate to break
       // the call stack and let the new call acquire the guard cleanly.
-      const db = getDatabase();
-      const project = db.getProject(projectId);
-      if (project) {
-        const activeCount = db.getActiveTeamCountByProject(projectId);
-        const queued = db.getQueuedTeamsByProject(projectId);
-        if (queued.length > 0 && activeCount < project.maxActiveTeams) {
-          setImmediate(() => {
-            this.processQueue(projectId).catch((err) => {
-              console.error(`[TeamManager] processQueue re-drain error:`, err);
+      // Only re-drain if we actually launched at least one team — otherwise
+      // all remaining queued teams are blocked by dependencies and re-draining
+      // would cause an infinite loop.
+      if (launchedCount > 0) {
+        const db = getDatabase();
+        const project = db.getProject(projectId);
+        if (project) {
+          const activeCount = db.getActiveTeamCountByProject(projectId);
+          const queued = db.getQueuedTeamsByProject(projectId);
+          if (queued.length > 0 && activeCount < project.maxActiveTeams) {
+            setImmediate(() => {
+              this.processQueue(projectId).catch((err) => {
+                console.error(`[TeamManager] processQueue re-drain error:`, err);
+              });
             });
-          });
+          }
         }
       }
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // filterUnblockedTeams — check dependencies for queued teams
+  // -------------------------------------------------------------------------
+
+  /**
+   * Filter queued teams to only include those with no open dependencies.
+   * Teams with open dependencies are logged and tracked in the GitHubPoller
+   * for auto-launch when dependencies resolve.
+   *
+   * If a circular dependency is detected, the team is treated as unblocked
+   * to avoid deadlocking the queue.
+   *
+   * Uses the IssueFetcher's cached data when available, falling back to
+   * fresh API calls. If the dependency check fails entirely, the team is
+   * treated as unblocked (permissive fallback).
+   */
+  private async filterUnblockedTeams(
+    queued: Team[],
+    available: number,
+    projectId: number,
+  ): Promise<Team[]> {
+    const unblocked: Team[] = [];
+
+    // Dynamic imports to avoid circular dependencies
+    let getIssueFetcher: (() => import('./issue-fetcher.js').IssueFetcher) | null = null;
+    let detectCircularDeps: ((n: number, deps: Map<number, number[]>) => number[] | null) | null = null;
+    let githubPollerModule: typeof import('./github-poller.js') | null = null;
+
+    try {
+      const issueFetcherMod = await import('./issue-fetcher.js');
+      getIssueFetcher = issueFetcherMod.getIssueFetcher;
+      detectCircularDeps = issueFetcherMod.detectCircularDependencies;
+    } catch (err) {
+      console.error('[TeamManager] Failed to import issue-fetcher for dependency check:', err);
+      // Permissive fallback: if we can't check deps, allow all queued teams
+      return queued.slice(0, available);
+    }
+
+    try {
+      githubPollerModule = await import('./github-poller.js');
+    } catch (err) {
+      console.error('[TeamManager] Failed to import github-poller for blocked tracking:', err);
+    }
+
+    const fetcher = getIssueFetcher();
+
+    for (const team of queued) {
+      if (unblocked.length >= available) break;
+
+      try {
+        const deps = await fetcher.fetchDependenciesForIssue(projectId, team.issueNumber);
+
+        // Permissive fallback: if fetch returns null, treat as unblocked
+        if (!deps || deps.resolved) {
+          unblocked.push(team);
+          continue;
+        }
+
+        // Has open dependencies — check for circular dependencies
+        const openDeps = deps.blockedBy.filter((d) => d.state === 'open');
+
+        if (detectCircularDeps && openDeps.length > 0) {
+          // Build a local dependency graph for cycle detection
+          const depGraph = new Map<number, number[]>();
+          depGraph.set(team.issueNumber, openDeps.map((d) => d.number));
+
+          // Add the open deps' own dependencies (if we can fetch them)
+          for (const dep of openDeps) {
+            try {
+              const subDeps = await fetcher.fetchDependenciesForIssue(projectId, dep.number);
+              if (subDeps && subDeps.blockedBy.length > 0) {
+                depGraph.set(dep.number, subDeps.blockedBy.filter((d) => d.state === 'open').map((d) => d.number));
+              }
+            } catch {
+              // Can't fetch sub-deps — skip (cycle detection will still work for direct cycles)
+            }
+          }
+
+          const cycle = detectCircularDeps(team.issueNumber, depGraph);
+          if (cycle) {
+            console.warn(
+              `[TeamManager] Circular dependency detected for team ${team.id} (issue #${team.issueNumber}): ` +
+              `${cycle.map((n) => '#' + n).join(' -> ')} — treating as unblocked to avoid deadlock`
+            );
+            unblocked.push(team);
+            continue;
+          }
+        }
+
+        // Genuinely blocked — log and track for auto-launch on resolution
+        console.log(
+          `[TeamManager] Skipping team ${team.id} (issue #${team.issueNumber}) — ` +
+          `blocked by open deps: ${openDeps.map((d) => '#' + d.number).join(', ')}`
+        );
+
+        if (githubPollerModule) {
+          githubPollerModule.githubPoller.trackBlockedIssue(
+            projectId,
+            team.issueNumber,
+            openDeps.map((d) => d.number),
+          );
+        }
+      } catch (err) {
+        // Permissive fallback: if dependency check fails, allow the team to launch
+        console.error(
+          `[TeamManager] Dependency check failed for team ${team.id} (issue #${team.issueNumber}), ` +
+          `allowing launch: ${err instanceof Error ? err.message : String(err)}`
+        );
+        unblocked.push(team);
+      }
+    }
+
+    return unblocked;
   }
 
   // -------------------------------------------------------------------------
