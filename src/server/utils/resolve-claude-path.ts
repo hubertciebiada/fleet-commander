@@ -16,6 +16,14 @@ let _resolvedClaudePath: string | null = null;
 export function resolveClaudePath(): string {
   if (_resolvedClaudePath) return _resolvedClaudePath;
 
+  // If the user explicitly set FLEET_CLAUDE_CMD to something other than the
+  // default 'claude', honour it directly — skip auto-detection entirely.
+  if (config.claudeCmd !== 'claude') {
+    _resolvedClaudePath = config.claudeCmd;
+    console.log(`[resolveClaudePath] Using explicit FLEET_CLAUDE_CMD: ${_resolvedClaudePath}`);
+    return _resolvedClaudePath;
+  }
+
   if (process.platform === 'win32') {
     try {
       const result = execSync('where claude.exe', {
@@ -53,4 +61,9 @@ export function resolveClaudePath(): string {
   _resolvedClaudePath = config.claudeCmd;
   console.log(`[resolveClaudePath] Using claude command: ${_resolvedClaudePath}`);
   return _resolvedClaudePath;
+}
+
+/** Reset the cached path — exposed only for unit tests. */
+export function _resetForTesting(): void {
+  _resolvedClaudePath = null;
 }

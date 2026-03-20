@@ -21,6 +21,7 @@ interface SettingsResponse {
   sseHeartbeatMs: number;
   outputBufferLines: number;
   claudeCmd: string;
+  resolvedClaudeCmd: string;
   enableAgentTeams: boolean;
   fleetCommanderRoot: string;
   dbPath: string;
@@ -71,6 +72,12 @@ const SETTING_GROUPS: SettingGroup[] = [
         label: 'Claude Command',
         envVar: 'FLEET_CLAUDE_CMD',
         description: 'CLI command used to invoke Claude',
+      },
+      {
+        key: 'resolvedClaudeCmd',
+        label: 'Resolved Claude Path',
+        envVar: '(auto-detected)',
+        description: 'Actual path used after auto-detection (Windows) or explicit override',
       },
       {
         key: 'enableAgentTeams',

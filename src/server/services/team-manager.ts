@@ -1333,7 +1333,8 @@ export class TeamManager {
     });
 
     const spawnEnv = this.buildSpawnEnv(project, team.worktreeName, team.projectId!);
-    const fullCmd = `${config.claudeCmd} ${args.join(' ')}`;
+    const claudePath = resolveClaudePath();
+    const fullCmd = `${claudePath} ${args.join(' ')}`;
     const windowTitle = `Team ${team.worktreeName}`;
 
     // Build env set commands dynamically from buildSpawnEnv()
