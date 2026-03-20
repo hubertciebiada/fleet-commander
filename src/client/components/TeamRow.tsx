@@ -110,6 +110,13 @@ export function TeamRow({ team, selected, onClick }: TeamRowProps) {
         <StatusBadge status={team.status} />
       </td>
 
+      {/* Project */}
+      <td className="px-4 whitespace-nowrap">
+        <span className="text-sm text-dark-muted">
+          {team.projectName ?? '\u2014'}
+        </span>
+      </td>
+
       {/* Issue */}
       <td className="px-4 whitespace-nowrap">
         <span className="text-sm">
