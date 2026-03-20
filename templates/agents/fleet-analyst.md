@@ -1,15 +1,5 @@
 ---
 name: fleet-analyst
-tools:
-  - Glob
-  - Grep
-  - LS
-  - Read
-  - Bash
-  - WebFetch
-  - WebSearch
-  - Skill
-  - ToolSearch
 model: inherit
 description: "Codebase analyst. Explores code to produce structured briefs with guidebook recommendations for developers. READ-ONLY — never edits files."
 ---

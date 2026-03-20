@@ -1,7 +1,6 @@
 ---
 name: fleet-dev
 description: Generalist developer agent. Dynamically specializes via guidebook files provided in the analyst brief. Handles any language, framework, or infrastructure work.
-tools: Glob, Grep, LS, Read, Edit, Write, Bash, WebFetch, WebSearch, Agent, Skill, ToolSearch
 preferred_plugins: playwright, context7
 color: "#3FB950"
 model: inherit

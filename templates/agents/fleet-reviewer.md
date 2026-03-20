@@ -1,7 +1,6 @@
 ---
 name: fleet-reviewer
 description: Code reviewer with direct p2p dev communication. Two-pass review (code quality + acceptance criteria). READ-ONLY — never edits files.
-tools: Glob, Grep, LS, Read, Bash, WebFetch, WebSearch, Skill, ToolSearch
 model: inherit
 color: "#D29922"
 ---
