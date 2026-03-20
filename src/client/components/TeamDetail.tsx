@@ -42,6 +42,7 @@ export function TeamDetail() {
   const [activeTab, setActiveTab] = useState<'session-log' | 'team'>('session-log');
   const [messageEdges, setMessageEdges] = useState<MessageEdge[]>([]);
   const [metadataCollapsed, setMetadataCollapsed] = useState(false);
+  const [agentFilters, setAgentFilters] = useState<Set<string>>(new Set());
   const templateCacheRef = useRef<{ data: Array<{ id: string; template: string; enabled: boolean }>; fetchedAt: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,11 +136,13 @@ export function TeamDetail() {
     };
   }, [selectedTeamId, refreshKey, api]);
 
-  // Reset active tab and metadata collapse state when team changes
+  // Reset active tab, metadata collapse state, and agent filters when team changes
   useEffect(() => {
     setActiveTab('session-log');
     // Auto-collapse metadata for done/failed teams to give more space to content
     setMetadataCollapsed(false);
+    // Reset agent filters to "All" for new team
+    setAgentFilters(new Set());
   }, [selectedTeamId]);
 
   // Auto-collapse metadata when team transitions to terminal state
@@ -635,7 +638,14 @@ export function TeamDetail() {
                 {activeTab === 'session-log' && (
                   <div className="flex-1 min-h-0 flex flex-col px-5 py-3">
                     <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                      <UnifiedTimeline teamId={detail.id} teamStatus={detail.status} isThinking={isThinking(detail.id)} />
+                      <UnifiedTimeline
+                        teamId={detail.id}
+                        teamStatus={detail.status}
+                        isThinking={isThinking(detail.id)}
+                        roster={roster}
+                        agentFilters={agentFilters}
+                        onAgentFiltersChange={setAgentFilters}
+                      />
                     </div>
                   </div>
                 )}

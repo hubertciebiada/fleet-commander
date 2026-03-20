@@ -444,6 +444,12 @@ export interface StreamTimelineEntry extends BaseTimelineEntry {
   subtype?: string;
   message?: { content?: Array<{ type: string; text?: string }> };
   tool?: { name?: string; input?: unknown };
+  /** Agent name derived from parent_tool_use_id mapping (e.g. 'team-lead', 'dev', 'planner') */
+  agentName?: string;
+  /** Human-readable description from system/task_progress events */
+  description?: string;
+  /** Last tool name from system/task_progress events */
+  lastToolName?: string;
 }
 
 /** A timeline entry originating from a hook event (DB) */

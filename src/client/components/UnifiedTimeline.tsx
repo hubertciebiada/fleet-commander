@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useApi } from '../hooks/useApi';
-import type { TimelineEntry, StreamTimelineEntry, HookTimelineEntry } from '../../shared/types';
+import type { TimelineEntry, StreamTimelineEntry, HookTimelineEntry, TeamMember } from '../../shared/types';
+import { agentColor } from '../utils/constants';
+import { AgentFilterBar } from './AgentFilterBar';
 import {
   PlayIcon,
   SquareIcon,
@@ -14,6 +16,16 @@ import {
   CircleDotIcon,
   ClockIcon,
 } from './Icons';
+
+// ---------------------------------------------------------------------------
+// Helpers — agent name display
+// ---------------------------------------------------------------------------
+
+/** Canonical display name for an agent (capitalise first letter) */
+function agentDisplayName(name: string | undefined): string {
+  if (!name || name === 'team-lead' || name === 'tl') return 'TL';
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
 
 // ---------------------------------------------------------------------------
 // Helpers — stream event rendering
@@ -126,23 +138,76 @@ function formatLocalTime(iso: string): string {
   }
 }
 
+/** Resolve agent name for a stream entry, falling back to type-based label */
+function resolveAgentLabel(entry: StreamTimelineEntry): { label: string; color: string } {
+  // user and fc types always use their own labels
+  if (entry.streamType === 'user') return { label: 'You', color: '#3FB950' };
+  if (entry.streamType === 'fc') return { label: 'FC', color: '#D29922' };
+
+  // For assistant and tool_use, use the agentName if available
+  if (entry.agentName && (entry.streamType === 'assistant' || entry.streamType === 'tool_use')) {
+    const name = agentDisplayName(entry.agentName);
+    const color = agentColor(entry.agentName);
+    return { label: name, color };
+  }
+
+  // Fallback to type-based styles
+  return getStreamStyle(entry.streamType);
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components for each entry type
 // ---------------------------------------------------------------------------
 
 function StreamEntryRow({ entry }: { entry: StreamTimelineEntry }) {
-  const { color, label } = getStreamStyle(entry.streamType);
   const text = getStreamText(entry);
   const isMultiline = text.includes('\n');
 
+  // System task_progress/task_notification — compact single-line entry
+  if (entry.streamType === 'system' && (entry.subtype === 'task_progress' || entry.subtype === 'task_notification')) {
+    const name = agentDisplayName(entry.agentName);
+    const color = entry.agentName ? agentColor(entry.agentName) : '#8B949E';
+    const toolLabel = entry.lastToolName ?? entry.tool?.name;
+    const desc = entry.description;
+
+    return (
+      <div className="py-0 leading-snug flex items-center gap-1.5 text-[10px] text-dark-muted">
+        <span>{formatLocalTime(entry.timestamp)}</span>
+        <span
+          className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+          style={{ backgroundColor: color }}
+        />
+        <span style={{ color }} className="font-medium">{name}</span>
+        {toolLabel && (
+          <>
+            <span className="text-dark-muted">
+              <SettingsIcon size={10} />
+            </span>
+            <span className="text-dark-muted">{toolLabel}</span>
+          </>
+        )}
+        {desc && (
+          <span className="text-dark-muted truncate">{desc}</span>
+        )}
+      </div>
+    );
+  }
+
   // Text messages (assistant, user, fc)
   if (TEXT_TYPES.has(entry.streamType) && text) {
+    const { label, color } = resolveAgentLabel(entry);
     return (
       <div className="py-0.5 leading-relaxed">
         <span className="text-dark-muted">
           {formatLocalTime(entry.timestamp)}
         </span>
         {' '}
+        {entry.agentName && entry.streamType === 'assistant' && (
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full mr-0.5 align-middle"
+            style={{ backgroundColor: color }}
+          />
+        )}
         <span style={{ color }} className="font-semibold">{label}</span>
         {entry.streamType === 'fc' && entry.subtype && (
           <span className="text-dark-muted text-[10px] ml-1">[{getSubtypeLabel(entry.subtype)}]</span>
@@ -159,11 +224,18 @@ function StreamEntryRow({ entry }: { entry: StreamTimelineEntry }) {
 
   // Tool use — compact badge
   if (entry.streamType === 'tool_use' && entry.tool?.name) {
+    const { label, color } = resolveAgentLabel(entry);
     return (
       <div className="py-0.5 leading-relaxed flex items-center gap-1.5">
         <span className="text-dark-muted">
           {formatLocalTime(entry.timestamp)}
         </span>
+        {entry.agentName && (
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ backgroundColor: color }}
+          />
+        )}
         <span style={{ color }} className="font-semibold">{label}</span>
         <span className="text-xs text-dark-muted bg-dark-border/30 px-1.5 py-0.5 rounded">
           {entry.tool.name}
@@ -174,6 +246,7 @@ function StreamEntryRow({ entry }: { entry: StreamTimelineEntry }) {
 
   // Result / tool_result — compact
   if (entry.streamType === 'result' || entry.streamType === 'tool_result') {
+    const { color, label } = getStreamStyle(entry.streamType);
     return (
       <div className="py-0.5 leading-relaxed">
         <span className="text-dark-muted">
@@ -187,6 +260,7 @@ function StreamEntryRow({ entry }: { entry: StreamTimelineEntry }) {
 
   // All other stream types — generic line
   if (text) {
+    const { color, label } = getStreamStyle(entry.streamType);
     return (
       <div className="py-0.5 leading-relaxed">
         <span className="text-dark-muted">
@@ -299,9 +373,31 @@ interface UnifiedTimelineProps {
   teamId: number;
   teamStatus?: string;
   isThinking?: boolean;
+  /** Team roster for agent filter pills */
+  roster?: TeamMember[];
+  /** Currently active agent name filters (empty set = show all) */
+  agentFilters?: Set<string>;
+  /** Callback to update agent filters */
+  onAgentFiltersChange?: (filters: Set<string>) => void;
 }
 
-export function UnifiedTimeline({ teamId, teamStatus, isThinking }: UnifiedTimelineProps) {
+/** Resolve the agent name for a timeline entry (for filtering purposes) */
+function getEntryAgentName(entry: TimelineEntry): string | undefined {
+  if (entry.source === 'stream') {
+    return entry.agentName;
+  }
+  // Hook entries already have agentName
+  return entry.agentName;
+}
+
+export function UnifiedTimeline({
+  teamId,
+  teamStatus,
+  isThinking,
+  roster,
+  agentFilters,
+  onAgentFiltersChange,
+}: UnifiedTimelineProps) {
   const api = useApi();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [copied, setCopied] = useState(false);
@@ -350,28 +446,43 @@ export function UnifiedTimeline({ teamId, teamStatus, isThinking }: UnifiedTimel
     };
   }, [api, teamId, teamStatus]);
 
+  // Filter entries by active agent filters
+  const filteredEntries = useMemo(() => {
+    if (!agentFilters || agentFilters.size === 0) return entries;
+    return entries.filter((entry) => {
+      const name = getEntryAgentName(entry);
+      // If entry has no agent name, always show it (lifecycle events, etc.)
+      if (!name) return true;
+      return agentFilters.has(name);
+    });
+  }, [entries, agentFilters]);
+
   // Auto-scroll to bottom when new entries arrive (only if stuck to bottom)
   useEffect(() => {
     if (stickToBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [entries.length]);
+  }, [filteredEntries.length]);
 
   // Copy full text log to clipboard
   const handleCopy = useCallback(() => {
     const lines: string[] = [];
-    for (const entry of entries) {
+    for (const entry of filteredEntries) {
       const ts = formatLocalTime(entry.timestamp);
       if (entry.source === 'stream') {
         const text = getStreamText(entry);
         if (text) {
-          const { label } = getStreamStyle(entry.streamType);
+          const agent = entry.agentName ? agentDisplayName(entry.agentName) : getStreamStyle(entry.streamType).label;
           const subtypeTag = entry.streamType === 'fc' && entry.subtype
             ? ` [${getSubtypeLabel(entry.subtype)}]`
             : '';
-          lines.push(`[${ts}] ${label}${subtypeTag}: ${text}`);
+          lines.push(`[${ts}] ${agent}${subtypeTag}: ${text}`);
         } else if (entry.streamType === 'tool_use' && entry.tool?.name) {
-          lines.push(`[${ts}] tool: ${entry.tool.name}`);
+          const agent = entry.agentName ? agentDisplayName(entry.agentName) : 'tool';
+          lines.push(`[${ts}] ${agent}: ${entry.tool.name}`);
+        } else if (entry.streamType === 'system' && entry.description) {
+          const agent = entry.agentName ? agentDisplayName(entry.agentName) : 'system';
+          lines.push(`[${ts}] ${agent}: ${entry.lastToolName ?? ''} ${entry.description}`);
         }
       } else {
         const hook = entry;
@@ -389,7 +500,7 @@ export function UnifiedTimeline({ teamId, teamStatus, isThinking }: UnifiedTimel
       setCopyFailed(true);
       setTimeout(() => setCopyFailed(false), 2000);
     });
-  }, [entries]);
+  }, [filteredEntries]);
 
   if (entries.length === 0) {
     const isTerminal = teamStatus === 'done' || teamStatus === 'failed';
@@ -404,6 +515,15 @@ export function UnifiedTimeline({ teamId, teamStatus, isThinking }: UnifiedTimel
 
   return (
     <div className="relative">
+      {/* Agent filter pills — only shown when roster has subagents */}
+      {roster && onAgentFiltersChange && (
+        <AgentFilterBar
+          roster={roster}
+          activeFilters={agentFilters ?? new Set()}
+          onFiltersChange={onAgentFiltersChange}
+        />
+      )}
+
       {/* Copy button */}
       <button
         onClick={handleCopy}
@@ -418,7 +538,7 @@ export function UnifiedTimeline({ teamId, teamStatus, isThinking }: UnifiedTimel
         onScroll={handleScroll}
         className={`font-mono text-xs overflow-y-auto bg-[#0D1117] p-2 rounded border border-dark-border custom-scrollbar${isThinking ? ' thinking-glow' : ''}`}
       >
-        {entries.map((entry) => {
+        {filteredEntries.map((entry) => {
           if (entry.source === 'stream') {
             return <StreamEntryRow key={entry.id} entry={entry} />;
           }
