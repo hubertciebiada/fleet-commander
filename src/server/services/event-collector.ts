@@ -121,7 +121,7 @@ const TOOL_USE_THROTTLE_MS = 5000; // 5 seconds
 /**
  * Normalize agent name for consistent matching across roster and messages.
  *
- * - Strips `fleet-` prefix (e.g. "fleet-dev" -> "dev", "fleet-analyst" -> "analyst")
+ * - Strips `fleet-` prefix (e.g. "fleet-dev" -> "dev", "fleet-planner" -> "planner")
  * - Maps empty/null/undefined to "team-lead" (the main CC process has no agent_type)
  * - Returns lowercase trimmed name
  */

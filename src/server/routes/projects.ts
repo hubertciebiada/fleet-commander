@@ -157,7 +157,7 @@ function checkInstallStatus(repoPath: string): InstallStatus {
 
   // Agent templates expected in .claude/agents/
   const agentNames = [
-    'fleet-analyst.md',
+    'fleet-planner.md',
     'fleet-dev.md',
     'fleet-reviewer.md',
   ];
@@ -347,8 +347,8 @@ const projectsRoutes: FastifyPluginCallback = (
               // Create a basic default prompt inline
               fs.writeFileSync(promptAbsPath,
                 'Read the ENTIRE file `.claude/prompts/fleet-workflow.md` before taking any actions.\n' +
-                'You are the TL. There is NO coordinator — you orchestrate the Diamond team directly: Analyst → Dev → Reviewer.\n' +
-                'Phase 1: Spawn fleet-analyst. Phase 2: Spawn fleet-dev (from brief TYPE). Phase 3: Spawn fleet-reviewer.\n' +
+                'You are the TL. There is NO coordinator — you orchestrate the Diamond team directly.\n' +
+                'Phase 0: Spawn fleet-planner. Wait for plan. Phase 1: Spawn fleet-dev WITH the planner\'s plan. Wait for ready. Phase 2: Spawn fleet-reviewer. Planner stays alive for p2p questions.\n' +
                 'Issue: #{{ISSUE_NUMBER}}\n',
                 'utf-8',
               );
