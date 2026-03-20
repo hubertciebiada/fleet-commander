@@ -1,28 +1,13 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
+import ForceGraph from 'react-force-graph-2d';
+import type { ForceGraphMethods } from 'react-force-graph-2d';
 import type { MessageEdge, TeamMember } from '../../shared/types';
+import { agentColor } from '../utils/constants';
 
 // ---------------------------------------------------------------------------
-// Color helper — same hash-to-palette approach as TeamDetail roster
+// Name normalization — client-side defense for historical data
 // ---------------------------------------------------------------------------
 
-const AGENT_PALETTE = [
-  '#58A6FF', '#3FB950', '#D29922', '#A371F7', '#F778BA',
-  '#79C0FF', '#7EE787', '#E3B341', '#D2A8FF', '#FF7B72',
-];
-
-function agentColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  }
-  return AGENT_PALETTE[Math.abs(hash) % AGENT_PALETTE.length];
-}
-
-/**
- * Normalize agent name for consistent matching between roster and message edges.
- * Strips "fleet-" prefix and lowercases. Client-side defense in case server-side
- * normalization hasn't been applied to historical data.
- */
 function normalizeName(name: string): string {
   let n = name.trim().toLowerCase();
   if (n.startsWith('fleet-')) n = n.slice(6);
@@ -30,109 +15,26 @@ function normalizeName(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Layout helpers
+// Graph node and link types
 // ---------------------------------------------------------------------------
 
-interface NodePosition {
+interface GraphNode {
+  id: string;
   name: string;
-  x: number;
-  y: number;
-  radius: number;
+  role: string;
   color: string;
   isActive: boolean;
-  messageCount: number;
+  isTL: boolean;
+  fx?: number;
+  fy?: number;
 }
 
-/** Determine edge thickness class from message count */
-function edgeWidth(count: number): number {
-  if (count >= 9) return 3.5;
-  if (count >= 4) return 2;
-  return 1;
-}
-
-function edgeOpacity(count: number): number {
-  if (count >= 9) return 1;
-  if (count >= 4) return 0.7;
-  return 0.4;
-}
-
-/** Place nodes in hub-and-spoke: hub at center, spokes radially */
-function layoutNodes(
-  agents: TeamMember[],
-  edges: MessageEdge[],
-  cx: number,
-  cy: number,
-  orbitRadius: number,
-): NodePosition[] {
-  // Build total message counts per agent for sizing
-  const msgCounts = new Map<string, number>();
-  for (const e of edges) {
-    msgCounts.set(e.sender, (msgCounts.get(e.sender) ?? 0) + e.count);
-    msgCounts.set(e.recipient, (msgCounts.get(e.recipient) ?? 0) + e.count);
-  }
-
-  // Identify the hub: prefer "team-lead" or "coordinator" by normalized name,
-  // else pick the agent with the most messages. When all counts are 0 (no edges),
-  // fall back to the first roster member (typically team-lead).
-  const hubCandidates = agents.filter((a) => {
-    const n = normalizeName(a.name);
-    return n === 'team-lead' || n === 'coordinator' || n === 'tl';
-  });
-  let hub: TeamMember | undefined = hubCandidates[0];
-  if (!hub) {
-    // Pick the agent with highest message volume
-    let maxCount = -1;
-    for (const a of agents) {
-      const c = msgCounts.get(a.name) ?? 0;
-      if (c > maxCount) {
-        maxCount = c;
-        hub = a;
-      }
-    }
-  }
-  if (!hub) hub = agents[0];
-
-  const maxMsg = Math.max(1, ...Array.from(msgCounts.values()));
-
-  const hubName = hub.name;
-  const spokes = agents.filter((a) => a.name !== hubName);
-
-  const positions: NodePosition[] = [];
-
-  // Radius: scale between 14 and 24 based on message volume
-  const nodeRadius = (name: string) => {
-    const count = msgCounts.get(name) ?? 0;
-    return 14 + (count / maxMsg) * 10;
-  };
-
-  // Hub
-  positions.push({
-    name: hubName,
-    x: cx,
-    y: cy,
-    radius: nodeRadius(hubName),
-    color: agentColor(hubName),
-    isActive: hub.isActive,
-    messageCount: msgCounts.get(hubName) ?? 0,
-  });
-
-  // Spokes
-  const angleStep = (2 * Math.PI) / Math.max(spokes.length, 1);
-  const startAngle = -Math.PI / 2; // Start from top
-  spokes.forEach((agent, i) => {
-    const angle = startAngle + i * angleStep;
-    positions.push({
-      name: agent.name,
-      x: cx + orbitRadius * Math.cos(angle),
-      y: cy + orbitRadius * Math.sin(angle),
-      radius: nodeRadius(agent.name),
-      color: agentColor(agent.name),
-      isActive: agent.isActive,
-      messageCount: msgCounts.get(agent.name) ?? 0,
-    });
-  });
-
-  return positions;
+interface GraphLink {
+  source: string;
+  target: string;
+  count: number;
+  isSpawn: boolean;
+  lastSummary: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,270 +47,341 @@ interface CommGraphProps {
 }
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const NODE_RADIUS = 16;
+const ACTIVE_DOT_RADIUS = 4;
+const FONT_SIZE_INITIAL = 14;
+const FONT_SIZE_LABEL = 10;
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function CommGraph({ edges, agents }: CommGraphProps) {
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [hoveredEdge, setHoveredEdge] = useState<{ sender: string; recipient: string } | null>(null);
-  const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const graphRef = useRef<ForceGraphMethods<GraphNode, GraphLink>>();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 500, height: 380 });
+  const prevEdgesRef = useRef<MessageEdge[]>([]);
 
-  // SVG viewBox dimensions
-  const vw = 500;
-  const vh = 380;
-  const cx = vw / 2;
-  const cy = vh / 2;
-  const orbitRadius = Math.min(cx, cy) * 0.6;
+  // Track container size with ResizeObserver
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-  const nodes = useMemo(
-    () => layoutNodes(agents, edges, cx, cy, orbitRadius),
-    [agents, edges, cx, cy, orbitRadius],
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setDimensions({ width: Math.floor(width), height: Math.floor(height) });
+        }
+      }
+    });
+
+    observer.observe(container);
+    // Set initial dimensions
+    const rect = container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setDimensions({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Find TL node
+  const tlName = useMemo(() => {
+    const tl = agents.find((a) => {
+      const n = normalizeName(a.name);
+      return n === 'team-lead' || n === 'coordinator' || n === 'tl';
+    });
+    return tl?.name ?? (agents.length > 0 ? agents[0].name : null);
+  }, [agents]);
+
+  // Build graph data
+  const graphData = useMemo(() => {
+    const nodes: GraphNode[] = agents.map((agent) => {
+      const isTL = agent.name === tlName;
+      return {
+        id: agent.name,
+        name: agent.name,
+        role: agent.role,
+        color: agentColor(agent.name, agent.role),
+        isActive: agent.isActive,
+        isTL,
+        // Pin TL node near center-top
+        ...(isTL ? { fx: 0, fy: -40 } : {}),
+      };
+    });
+
+    const links: GraphLink[] = [];
+
+    // Build a normalized name -> original name lookup for edge matching
+    const nameMap = new Map<string, string>();
+    for (const agent of agents) {
+      nameMap.set(normalizeName(agent.name), agent.name);
+    }
+
+    // Spawn edges: TL -> every non-TL agent (dashed, no count)
+    if (tlName) {
+      for (const agent of agents) {
+        if (agent.name !== tlName) {
+          links.push({
+            source: tlName,
+            target: agent.name,
+            count: 0,
+            isSpawn: true,
+            lastSummary: null,
+          });
+        }
+      }
+    }
+
+    // Message edges from the edges prop
+    for (const edge of edges) {
+      // Resolve sender/recipient to roster names
+      const senderResolved = nameMap.get(normalizeName(edge.sender)) ?? edge.sender;
+      const recipientResolved = nameMap.get(normalizeName(edge.recipient)) ?? edge.recipient;
+
+      // Skip if either end is not in the roster
+      const senderInRoster = agents.some((a) => a.name === senderResolved);
+      const recipientInRoster = agents.some((a) => a.name === recipientResolved);
+      if (!senderInRoster || !recipientInRoster) continue;
+
+      // Skip if this would duplicate a spawn edge in the same direction
+      const isSpawnDuplicate =
+        (senderResolved === tlName || recipientResolved === tlName) &&
+        links.some(
+          (l) =>
+            l.isSpawn &&
+            l.source === senderResolved &&
+            l.target === recipientResolved,
+        );
+      if (isSpawnDuplicate) {
+        // Update the spawn edge with message count instead
+        const spawnEdge = links.find(
+          (l) =>
+            l.isSpawn &&
+            l.source === senderResolved &&
+            l.target === recipientResolved,
+        );
+        if (spawnEdge) {
+          spawnEdge.count = edge.count;
+          spawnEdge.isSpawn = false;
+          spawnEdge.lastSummary = edge.lastSummary;
+        }
+        continue;
+      }
+
+      links.push({
+        source: senderResolved,
+        target: recipientResolved,
+        count: edge.count,
+        isSpawn: false,
+        lastSummary: edge.lastSummary,
+      });
+    }
+
+    return { nodes, links };
+  }, [agents, edges, tlName]);
+
+  // Emit particles for new or increased message edges (synapse animation)
+  useEffect(() => {
+    const fg = graphRef.current;
+    if (!fg || !edges.length) return;
+
+    const prevEdges = prevEdgesRef.current;
+    const prevMap = new Map<string, number>();
+    for (const e of prevEdges) {
+      prevMap.set(`${e.sender}->${e.recipient}`, e.count);
+    }
+
+    for (const edge of edges) {
+      const key = `${edge.sender}->${edge.recipient}`;
+      const prevCount = prevMap.get(key) ?? 0;
+      if (edge.count > prevCount) {
+        // Find the matching link in graphData
+        const link = graphData.links.find(
+          (l) => {
+            const src = typeof l.source === 'object' ? (l.source as GraphNode).id : l.source;
+            const tgt = typeof l.target === 'object' ? (l.target as GraphNode).id : l.target;
+            return src === edge.sender && tgt === edge.recipient;
+          },
+        );
+        if (link) {
+          try {
+            fg.emitParticle(link);
+          } catch {
+            // Silently ignore — particle emission is cosmetic
+          }
+        }
+      }
+    }
+
+    prevEdgesRef.current = edges;
+  }, [edges, graphData.links]);
+
+  // Zoom to fit after data loads
+  useEffect(() => {
+    const fg = graphRef.current;
+    if (!fg || agents.length === 0) return;
+    const timer = setTimeout(() => {
+      fg.zoomToFit(400, 60);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [agents.length]);
+
+  // Custom node rendering
+  const nodeCanvasObject = useCallback(
+    (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const x = node.x ?? 0;
+      const y = node.y ?? 0;
+      const r = NODE_RADIUS;
+      const fontSize = FONT_SIZE_INITIAL / globalScale;
+      const labelFontSize = FONT_SIZE_LABEL / globalScale;
+
+      // Node circle fill
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 2 * Math.PI);
+      ctx.fillStyle = node.color + '20';
+      ctx.fill();
+
+      // Node circle border
+      ctx.strokeStyle = node.isActive ? node.color : '#484F58';
+      ctx.lineWidth = 2 / globalScale;
+      ctx.stroke();
+
+      // Active/stopped indicator dot
+      const dotX = x + r * 0.65;
+      const dotY = y - r * 0.65;
+      const dotR = ACTIVE_DOT_RADIUS / globalScale;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, dotR, 0, 2 * Math.PI);
+      ctx.fillStyle = node.isActive ? '#3FB950' : '#484F58';
+      ctx.fill();
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5 / globalScale;
+      ctx.stroke();
+
+      // Agent initial
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = node.isActive ? node.color : '#484F58';
+      ctx.fillText(node.name.charAt(0).toUpperCase(), x, y);
+
+      // Full agent name below node
+      ctx.font = `${labelFontSize}px sans-serif`;
+      ctx.fillStyle = '#8B949E';
+      ctx.fillText(node.name, x, y + r + 10 / globalScale);
+
+      // Role label below name (smaller)
+      if (node.role) {
+        ctx.font = `${labelFontSize * 0.85}px sans-serif`;
+        ctx.fillStyle = '#484F58';
+        ctx.fillText(node.role, x, y + r + 20 / globalScale);
+      }
+    },
+    [],
   );
 
-  const nodeMap = useMemo(() => {
-    const map = new Map<string, NodePosition>();
-    for (const n of nodes) {
-      map.set(n.name, n);
-      // Also index by normalized name for edge matching with un-normalized data
-      map.set(normalizeName(n.name), n);
-    }
-    return map;
-  }, [nodes]);
+  // Node pointer area for hover/click detection
+  const nodePointerAreaPaint = useCallback(
+    (node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
+      const x = node.x ?? 0;
+      const y = node.y ?? 0;
+      ctx.beginPath();
+      ctx.arc(x, y, NODE_RADIUS + 4, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+    },
+    [],
+  );
 
-  // Filter edges when a node is selected (compare with normalized names)
-  const visibleEdges = useMemo(() => {
-    if (!selectedNode) return edges;
-    const selectedNorm = normalizeName(selectedNode);
-    return edges.filter(
-      (e) =>
-        e.sender === selectedNode ||
-        e.recipient === selectedNode ||
-        normalizeName(e.sender) === selectedNorm ||
-        normalizeName(e.recipient) === selectedNorm,
-    );
-  }, [edges, selectedNode]);
-
-  const handleNodeClick = useCallback((name: string) => {
-    setSelectedNode((prev) => (prev === name ? null : name));
+  // Link width based on message count
+  const linkWidth = useCallback((link: GraphLink) => {
+    if (link.isSpawn) return 1;
+    if (link.count >= 9) return 3.5;
+    if (link.count >= 4) return 2;
+    return 1;
   }, []);
 
-  const handleBackgroundClick = useCallback(() => {
-    setSelectedNode(null);
+  // Link color
+  const linkColor = useCallback((link: GraphLink) => {
+    if (link.isSpawn) return '#30363D';
+    return '#8B949E';
   }, []);
 
-  // Empty state
-  if (agents.length < 2 || edges.length === 0) {
+  // Link dashed pattern: spawn edges are dashed, message edges are solid
+  const linkLineDash = useCallback((link: GraphLink) => {
+    return link.isSpawn ? [4, 4] : null;
+  }, []);
+
+  // Link label on hover
+  const linkLabel = useCallback((link: GraphLink) => {
+    if (link.isSpawn && link.count === 0) return '';
+    const summary = link.lastSummary ? `<br/><i>${link.lastSummary}</i>` : '';
+    return `<div style="padding:4px 8px;background:#161B22;border:1px solid #30363D;border-radius:4px;font-size:11px;color:#E6EDF3;">
+      <b>${typeof link.source === 'object' ? (link.source as GraphNode).id : link.source}</b>
+      &rarr;
+      <b>${typeof link.target === 'object' ? (link.target as GraphNode).id : link.target}</b>
+      <br/>${link.count} message${link.count !== 1 ? 's' : ''}${summary}
+    </div>`;
+  }, []);
+
+  // Directional particles for message edges
+  const linkDirectionalParticles = useCallback((link: GraphLink) => {
+    if (link.isSpawn) return 0;
+    if (link.count >= 6) return 3;
+    if (link.count >= 3) return 2;
+    return link.count > 0 ? 1 : 0;
+  }, []);
+
+  // Directional arrows for message edges
+  const linkDirectionalArrowLength = useCallback((link: GraphLink) => {
+    return link.isSpawn ? 0 : 6;
+  }, []);
+
+  // Empty state — show only when no agents at all
+  if (agents.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-dark-muted text-sm">
-        {agents.length < 2
-          ? 'Waiting for multiple agents to communicate...'
-          : 'No communication data available'}
+        Waiting for agents to join the team...
       </div>
     );
   }
 
-  // Arrowhead marker ID
-  const markerId = 'comm-arrow';
-
   return (
-    <div className="relative w-full h-full min-h-[300px]">
-      <svg
-        viewBox={`0 0 ${vw} ${vh}`}
-        className="w-full h-full"
-        style={{ maxHeight: '100%' }}
-        onClick={handleBackgroundClick}
-      >
-        <defs>
-          <marker
-            id={markerId}
-            viewBox="0 0 10 7"
-            refX="10"
-            refY="3.5"
-            markerWidth="8"
-            markerHeight="6"
-            orient="auto-start-reverse"
-          >
-            <polygon points="0 0, 10 3.5, 0 7" fill="#8B949E" />
-          </marker>
-        </defs>
-
-        {/* Edges */}
-        {visibleEdges.map((edge) => {
-          // Look up by exact name first, then by normalized name for backward compat
-          const from = nodeMap.get(edge.sender) ?? nodeMap.get(normalizeName(edge.sender));
-          const to = nodeMap.get(edge.recipient) ?? nodeMap.get(normalizeName(edge.recipient));
-          if (!from || !to) return null;
-
-          // Shorten line to stop at node border (radius + gap)
-          const dx = to.x - from.x;
-          const dy = to.y - from.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist === 0) return null;
-
-          const ux = dx / dist;
-          const uy = dy / dist;
-          const startGap = from.radius + 3;
-          const endGap = to.radius + 6; // extra for arrowhead
-
-          const x1 = from.x + ux * startGap;
-          const y1 = from.y + uy * startGap;
-          const x2 = to.x - ux * endGap;
-          const y2 = to.y - uy * endGap;
-
-          const isHovered =
-            hoveredEdge?.sender === edge.sender &&
-            hoveredEdge?.recipient === edge.recipient;
-
-          const dimmed =
-            selectedNode !== null &&
-            edge.sender !== selectedNode &&
-            edge.recipient !== selectedNode;
-
-          const key = `${edge.sender}->${edge.recipient}`;
-
-          return (
-            <line
-              key={key}
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke={isHovered ? '#E6EDF3' : agentColor(edge.sender)}
-              strokeWidth={edgeWidth(edge.count)}
-              strokeOpacity={dimmed ? 0.12 : edgeOpacity(edge.count)}
-              markerEnd={`url(#${markerId})`}
-              className="cursor-pointer transition-all duration-150"
-              onMouseEnter={(e) => {
-                e.stopPropagation();
-                setHoveredEdge({ sender: edge.sender, recipient: edge.recipient });
-              }}
-              onMouseMove={(e) => {
-                const rect = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
-                setMousePos({
-                  x: e.clientX - rect.left,
-                  y: e.clientY - rect.top,
-                });
-              }}
-              onMouseLeave={() => setHoveredEdge(null)}
-            />
-          );
-        })}
-
-        {/* Nodes */}
-        {nodes.map((node) => {
-          const dimmed =
-            selectedNode !== null && selectedNode !== node.name;
-          const isSelected = selectedNode === node.name;
-
-          return (
-            <g
-              key={node.name}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleNodeClick(node.name);
-              }}
-              className="cursor-pointer"
-              opacity={dimmed ? 0.35 : 1}
-            >
-              {/* Selection ring */}
-              {isSelected && (
-                <circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={node.radius + 4}
-                  fill="none"
-                  stroke={node.color}
-                  strokeWidth={1.5}
-                  strokeDasharray="4 2"
-                  opacity={0.6}
-                />
-              )}
-              {/* Node circle */}
-              <circle
-                cx={node.x}
-                cy={node.y}
-                r={node.radius}
-                fill={node.color + '20'}
-                stroke={node.isActive ? node.color : '#484F58'}
-                strokeWidth={2}
-              />
-              {/* Active/stopped indicator dot */}
-              <circle
-                cx={node.x + node.radius * 0.65}
-                cy={node.y - node.radius * 0.65}
-                r={4}
-                fill={node.isActive ? '#3FB950' : '#484F58'}
-                stroke="#0D1117"
-                strokeWidth={1.5}
-              />
-              {/* Agent initial */}
-              <text
-                x={node.x}
-                y={node.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fill={node.isActive ? node.color : '#484F58'}
-                fontSize={node.radius * 0.85}
-                fontWeight="bold"
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                {node.name.charAt(0).toUpperCase()}
-              </text>
-              {/* Agent name below */}
-              <text
-                x={node.x}
-                y={node.y + node.radius + 13}
-                textAnchor="middle"
-                fill={dimmed ? '#484F58' : '#8B949E'}
-                fontSize={10}
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                {node.name.length > 12 ? node.name.slice(0, 11) + '\u2026' : node.name}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-
-      {/* Tooltip for hovered edge */}
-      {hoveredEdge && (() => {
-        const edge = edges.find(
-          (e) => e.sender === hoveredEdge.sender && e.recipient === hoveredEdge.recipient,
-        );
-        if (!edge) return null;
-        return (
-          <div
-            className="absolute px-2.5 py-1.5 bg-dark-surface border border-dark-border rounded text-[11px] text-dark-text shadow-lg pointer-events-none z-20"
-            style={{
-              left: mousePos.x + 12,
-              top: mousePos.y - 8,
-              maxWidth: 260,
-            }}
-          >
-            <div className="font-semibold">
-              <span style={{ color: agentColor(edge.sender) }}>{edge.sender}</span>
-              {' \u2192 '}
-              <span style={{ color: agentColor(edge.recipient) }}>{edge.recipient}</span>
-            </div>
-            <div className="text-dark-muted mt-0.5">
-              {edge.count} message{edge.count !== 1 ? 's' : ''}
-            </div>
-            {edge.lastSummary && (
-              <div className="text-dark-muted mt-0.5 italic truncate">
-                {edge.lastSummary}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* Legend */}
-      {selectedNode && (
-        <div className="absolute top-2 right-2 text-[10px] text-dark-muted bg-dark-surface/80 border border-dark-border/50 rounded px-2 py-1">
-          Filtering: <span className="text-dark-text font-medium">{selectedNode}</span>
-          <span className="ml-1 opacity-60">(click to clear)</span>
-        </div>
-      )}
+    <div ref={containerRef} className="relative w-full h-full min-h-[300px]">
+      <ForceGraph
+        ref={graphRef}
+        graphData={graphData}
+        width={dimensions.width}
+        height={dimensions.height}
+        backgroundColor="transparent"
+        nodeCanvasObject={nodeCanvasObject}
+        nodeCanvasObjectMode={() => 'replace'}
+        nodePointerAreaPaint={nodePointerAreaPaint}
+        linkWidth={linkWidth}
+        linkColor={linkColor}
+        linkLineDash={linkLineDash}
+        linkLabel={linkLabel}
+        linkDirectionalParticles={linkDirectionalParticles}
+        linkDirectionalParticleWidth={3}
+        linkDirectionalParticleSpeed={0.005}
+        linkDirectionalArrowLength={linkDirectionalArrowLength}
+        linkDirectionalArrowRelPos={1}
+        linkDirectionalArrowColor={linkColor}
+        linkCurvature={0.15}
+        d3AlphaDecay={0.05}
+        d3VelocityDecay={0.3}
+        cooldownTicks={100}
+        enableZoomInteraction={true}
+        enablePanInteraction={true}
+        enableNodeDrag={true}
+        minZoom={0.5}
+        maxZoom={4}
+      />
     </div>
   );
 }

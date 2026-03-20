@@ -23,35 +23,6 @@ function formatDuration(minutes: number | undefined | null): string {
   return `${m}m`;
 }
 
-/** Deterministic color from agent name — hash name to pick from a palette. */
-const AGENT_PALETTE = [
-  '#58A6FF', '#3FB950', '#D29922', '#A371F7', '#F778BA',
-  '#79C0FF', '#7EE787', '#E3B341', '#D2A8FF', '#FF7B72',
-];
-
-function agentColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  }
-  return AGENT_PALETTE[Math.abs(hash) % AGENT_PALETTE.length];
-}
-
-/** Format a relative time string like "2m", "1h", "just now" */
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return 'now';
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  return `${h}h`;
-}
-
-/** Truncate agent name to fit in a small card */
-function truncateName(name: string, maxLen = 5): string {
-  if (name.length <= maxLen) return name;
-  return name.slice(0, maxLen);
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -496,69 +467,6 @@ export function TeamDetail() {
                       </div>
                     )}
                   </section>
-
-                  {/* ---- Team Roster ---- */}
-                  {roster.length > 0 && (
-                    <section>
-                      <h4 className="text-sm font-semibold text-dark-text mb-2 border-b border-dark-border/50 pb-1">
-                        Team Members ({roster.filter(m => m.isActive).length} active)
-                      </h4>
-                      <div className="flex items-start gap-2 overflow-x-auto pb-1 custom-scrollbar">
-                        {roster.map((member) => {
-                          const color = agentColor(member.name);
-                          const lastActivity = member.isActive ? relativeTime(member.lastSeen) : 'done';
-                          return (
-                            <div
-                              key={member.name}
-                              className="flex flex-col items-center w-14 shrink-0 group relative cursor-default"
-                            >
-                              {/* Status dot */}
-                              <div
-                                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2"
-                                style={{
-                                  borderColor: member.isActive ? color : '#484F58',
-                                  color: member.isActive ? color : '#484F58',
-                                  backgroundColor: (member.isActive ? color : '#484F58') + '18',
-                                }}
-                              >
-                                {member.name.charAt(0).toUpperCase()}
-                              </div>
-                              {/* Name */}
-                              <span
-                                className="text-[10px] mt-1 leading-tight text-center"
-                                style={{ color: member.isActive ? '#E6EDF3' : '#484F58' }}
-                              >
-                                {truncateName(member.name)}
-                              </span>
-                              {/* Last activity */}
-                              <span
-                                className="text-[9px] leading-none"
-                                style={{ color: member.isActive ? '#8B949E' : '#484F58' }}
-                              >
-                                {lastActivity}
-                              </span>
-                              {/* Tooltip */}
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 bg-dark-surface border border-dark-border rounded text-[10px] text-dark-text whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg">
-                                <div className="font-semibold">{member.name}</div>
-                                <div className="text-dark-muted">{member.role}</div>
-                                <div className="text-dark-muted mt-0.5">
-                                  Tools: {member.toolUseCount}
-                                  {member.errorCount > 0 && (
-                                    <span className="text-[#F85149] ml-1">Errors: {member.errorCount}</span>
-                                  )}
-                                </div>
-                                <div className="text-dark-muted">
-                                  First: {new Date(member.firstSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  {' / '}
-                                  Last: {new Date(member.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  )}
 
                   {/* ---- Transition History ---- */}
                   {transitions.length > 0 && (
