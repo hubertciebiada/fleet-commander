@@ -41,7 +41,12 @@ jobs:
       - name: Test (server)
         run: npx vitest run --project server
 
-      - name: Test (client)
-        run: npx vitest run --project client --no-file-parallelism --isolate
+      - name: Test (client shard 1/2)
+        run: npx vitest run --project client --shard=1/2
         env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
+          NODE_OPTIONS: "--max-old-space-size=3072"
+
+      - name: Test (client shard 2/2)
+        run: npx vitest run --project client --shard=2/2
+        env:
+          NODE_OPTIONS: "--max-old-space-size=3072"
