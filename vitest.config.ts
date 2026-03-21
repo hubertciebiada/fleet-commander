@@ -5,17 +5,30 @@ export default defineConfig({
   plugins: [react()],
   test: {
     globals: true,
-    environmentMatchGlobs: [
-      ['tests/client/**', 'jsdom'],
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'client',
+          environment: 'jsdom',
+          include: ['tests/client/**/*.test.{ts,tsx}'],
+          setupFiles: ['tests/client/setup.ts'],
+          logHeapUsage: true,
+          teardownTimeout: 1000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'server',
+          environment: 'node',
+          include: [
+            'src/**/*.test.{ts,tsx}',
+            'tests/server/**/*.test.{ts,tsx}',
+            'tests/integration/**/*.test.{ts,tsx}',
+          ],
+        },
+      },
     ],
-    setupFiles: ['tests/client/setup.ts'],
-    include: [
-      'tests/client/**/*.test.{ts,tsx}',
-      'tests/server/**/*.test.{ts,tsx}',
-      'tests/integration/**/*.test.{ts,tsx}',
-      'src/**/*.test.{ts,tsx}',
-    ],
-    logHeapUsage: true,
-    teardownTimeout: 1000,
   },
 });
