@@ -12,7 +12,10 @@ export default defineConfig({
           name: 'client',
           environment: 'jsdom',
           include: ['tests/client/**/*.test.{ts,tsx}'],
+          setupFiles: ['tests/client/setup.ts'],
           pool: 'forks',
+          logHeapUsage: true,
+          teardownTimeout: 1000,
           poolOptions: {
             forks: {
               maxForks: 1,
