@@ -31,10 +31,10 @@ vi.mock('../../src/server/config.js', () => ({
   },
 }));
 
-// Mock child_process.execSync for isProcessAlive
-const mockExecSync = vi.fn();
-vi.mock('child_process', () => ({
-  execSync: (...args: unknown[]) => mockExecSync(...args),
+// Mock isProcessAlive directly (avoids platform-specific child_process / process.kill differences)
+const mockIsProcessAlive = vi.fn<(pid: number) => boolean>().mockReturnValue(false);
+vi.mock('../../src/server/utils/process-utils.js', () => ({
+  isProcessAlive: (pid: number) => mockIsProcessAlive(pid),
 }));
 
 // Mock fs for worktree scanning
@@ -114,6 +114,7 @@ beforeEach(() => {
   mockDb.getActiveTeams.mockReturnValue([]);
   mockDb.getProjects.mockReturnValue([]);
   mockDb.getQueuedTeamsByProject.mockReturnValue([]);
+  mockIsProcessAlive.mockReturnValue(false);
   mockFs.existsSync.mockReturnValue(false);
   mockFs.readdirSync.mockReturnValue([]);
 });
@@ -126,10 +127,7 @@ describe('Dead PID recovery', () => {
   it('marks running team with dead PID as idle', async () => {
     const team = makeTeam({ id: 1, status: 'running', pid: 9999 });
     mockDb.getActiveTeams.mockReturnValue([team]);
-    // Simulate dead process: execSync throws (Windows) or process.kill throws (POSIX)
-    mockExecSync.mockImplementation(() => {
-      throw new Error('process not found');
-    });
+    mockIsProcessAlive.mockReturnValue(false);
 
     await recoverOnStartup();
 
@@ -151,9 +149,7 @@ describe('Dead PID recovery', () => {
   it('marks launching team with dead PID as failed', async () => {
     const team = makeTeam({ id: 2, status: 'launching', pid: 8888 });
     mockDb.getActiveTeams.mockReturnValue([team]);
-    mockExecSync.mockImplementation(() => {
-      throw new Error('process not found');
-    });
+    mockIsProcessAlive.mockReturnValue(false);
 
     await recoverOnStartup();
 
@@ -174,9 +170,7 @@ describe('Dead PID recovery', () => {
   it('marks idle team with dead PID as idle (keeps idle)', async () => {
     const team = makeTeam({ id: 3, status: 'idle', pid: 7777 });
     mockDb.getActiveTeams.mockReturnValue([team]);
-    mockExecSync.mockImplementation(() => {
-      throw new Error('process not found');
-    });
+    mockIsProcessAlive.mockReturnValue(false);
 
     await recoverOnStartup();
 
@@ -197,9 +191,7 @@ describe('Dead PID recovery', () => {
   it('marks stuck team with dead PID as idle', async () => {
     const team = makeTeam({ id: 4, status: 'stuck', pid: 6666 });
     mockDb.getActiveTeams.mockReturnValue([team]);
-    mockExecSync.mockImplementation(() => {
-      throw new Error('process not found');
-    });
+    mockIsProcessAlive.mockReturnValue(false);
 
     await recoverOnStartup();
 
@@ -226,8 +218,7 @@ describe('Alive PID recovery', () => {
   it('updates lastEventAt for running team with alive PID', async () => {
     const team = makeTeam({ id: 5, status: 'running', pid: 5555 });
     mockDb.getActiveTeams.mockReturnValue([team]);
-    // Simulate alive process on Windows: tasklist returns output containing the PID
-    mockExecSync.mockReturnValue(`node.exe    5555 Console    1    50,000 K`);
+    mockIsProcessAlive.mockReturnValue(true);
 
     await recoverOnStartup();
 
