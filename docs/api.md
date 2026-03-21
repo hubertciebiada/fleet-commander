@@ -81,7 +81,7 @@ Complete reference for the Fleet Commander REST API (71 endpoints) and SSE strea
   - [PUT /api/message-templates/:id](#put-apimessage-templatesid)
 - [Query (1 endpoint)](#query)
   - [POST /api/query/:queryName](#post-apiqueryqueryname)
-- [System and Diagnostics (8 endpoints)](#system-and-diagnostics)
+- [System and Diagnostics (9 endpoints)](#system-and-diagnostics)
   - [GET /api/health](#get-apihealth)
   - [GET /api/status](#get-apistatus)
   - [GET /api/settings](#get-apisettings)
@@ -1031,9 +1031,6 @@ Send a PM (project manager) message to a running team. The message is written to
 
 ```json
 {
-  "id": 10,
-  "teamId": 1,
-  "message": "Please focus on the failing test",
   "error": "Unprocessable Entity",
   "message": "Team is not running \u2014 message not delivered"
 }
