@@ -23,6 +23,10 @@ import { recoverOnStartup } from '../services/startup-recovery.js';
 import { DEFAULT_MESSAGE_TEMPLATES } from '../../shared/message-templates.js';
 import config from '../config.js';
 import { registerSystemHealthTool } from './tools/system-health.js';
+import { registerGetTeamTimelineTool } from './tools/get-team-timeline.js';
+import { registerListIssuesTool } from './tools/list-issues.js';
+import { registerListProjectsTool } from './tools/list-projects.js';
+import { registerAddProjectTool } from './tools/add-project.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,6 +63,10 @@ export async function startMcpServer(): Promise<void> {
 
   // Register all tools
   registerSystemHealthTool(mcpServer);
+  registerGetTeamTimelineTool(mcpServer);
+  registerListIssuesTool(mcpServer);
+  registerListProjectsTool(mcpServer);
+  registerAddProjectTool(mcpServer);
 
   // Initialize database
   const db = getDatabase();
