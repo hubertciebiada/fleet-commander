@@ -193,15 +193,17 @@ export class TeamService {
     }
 
     // Compute duration & idle in minutes
+    // For completed teams (done/failed), cap at stopped_at rather than growing forever
     const launchedAt = team.launchedAt ? new Date(team.launchedAt) : null;
     const now = new Date();
+    const endTime = team.stoppedAt ? new Date(team.stoppedAt) : now;
     const durationMin = launchedAt
-      ? Math.round((now.getTime() - launchedAt.getTime()) / 60_000)
+      ? Math.round((endTime.getTime() - launchedAt.getTime()) / 60_000)
       : 0;
 
     const lastEventAt = team.lastEventAt ? new Date(team.lastEventAt) : null;
     const idleMin = lastEventAt
-      ? Math.round((now.getTime() - lastEventAt.getTime()) / 60_000 * 10) / 10
+      ? Math.round((endTime.getTime() - lastEventAt.getTime()) / 60_000 * 10) / 10
       : null;
 
     // Pull request detail
