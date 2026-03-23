@@ -137,6 +137,7 @@ export interface Team {
   launchedAt: string | null;
   stoppedAt: string | null;
   lastEventAt: string | null;
+  blockedByJson: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -81,8 +81,8 @@ describe('Schema', () => {
     expect(() => db.initSchema()).not.toThrow();
   });
 
-  it('sets schema version to 6', () => {
-    expect(db.getSchemaVersion()).toBe(6);
+  it('sets schema version to 7', () => {
+    expect(db.getSchemaVersion()).toBe(7);
   });
 });
 
@@ -1109,8 +1109,8 @@ describe('Schema includes stream_events', () => {
     expect(names).toContain('stream_events');
   });
 
-  it('sets schema version to 6', () => {
-    expect(db.getSchemaVersion()).toBe(6);
+  it('sets schema version to 7', () => {
+    expect(db.getSchemaVersion()).toBe(7);
   });
 });
 

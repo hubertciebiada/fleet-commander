@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS teams (
   pr_number       INTEGER,
   custom_prompt   TEXT,                            -- custom prompt override (persisted for queued teams)
   headless        INTEGER NOT NULL DEFAULT 1,     -- 0=interactive terminal, 1=headless stream-json
+  blocked_by_json TEXT,                            -- JSON array of blocking issue numbers e.g. [368, 370]
   total_input_tokens INTEGER DEFAULT 0,
   total_output_tokens INTEGER DEFAULT 0,
   total_cache_creation_tokens INTEGER DEFAULT 0,
@@ -263,5 +264,5 @@ CREATE TABLE IF NOT EXISTS stream_events (
 
 CREATE INDEX IF NOT EXISTS idx_stream_events_team ON stream_events(team_id);
 
--- Insert schema version 6 (or upgrade from earlier versions)
-INSERT OR IGNORE INTO schema_version (version) VALUES (6);
+-- Insert schema version 7 (or upgrade from earlier versions)
+INSERT OR IGNORE INTO schema_version (version) VALUES (7);

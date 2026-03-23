@@ -15,6 +15,7 @@ const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'no-team', label: 'No Team' },
   { key: 'blocked-deps', label: 'Blocked', color: '#F85149' },
+  { key: 'queued', label: 'Queued', color: '#58A6FF' },
   { key: 'running', label: 'Running', color: '#3FB950' },
   { key: 'idle', label: 'Idle', color: '#D29922' },
   { key: 'stuck', label: 'Stuck', color: '#F85149' },
@@ -315,6 +316,54 @@ export function IssueTreeView() {
     }
   }, [api, depConfirm, fetchTree]);
 
+  // Handle queue launch (queue with blockers until dependencies resolve)
+  const handleQueueLaunch = useCallback(async () => {
+    if (!depConfirm) return;
+    const { issueNumber, title, projectId } = depConfirm;
+    setDepConfirm(null);
+    setLaunchingIssues(prev => new Set(prev).add(issueNumber));
+
+    try {
+      await api.post('teams/launch', {
+        issueNumber,
+        issueTitle: title,
+        projectId,
+        queue: true,
+      });
+      const tid = setTimeout(() => {
+        pendingTimeouts.current.delete(tid);
+        setLaunchingIssues(prev => {
+          const next = new Set(prev);
+          next.delete(issueNumber);
+          return next;
+        });
+        fetchTree();
+      }, 5000);
+      pendingTimeouts.current.add(tid);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setLaunchingIssues(prev => {
+        const next = new Set(prev);
+        next.delete(issueNumber);
+        return next;
+      });
+      setLaunchErrors(prev => {
+        const next = new Map(prev);
+        next.set(issueNumber, message);
+        return next;
+      });
+      const tid = setTimeout(() => {
+        pendingTimeouts.current.delete(tid);
+        setLaunchErrors(prev => {
+          const next = new Map(prev);
+          next.delete(issueNumber);
+          return next;
+        });
+      }, 5000);
+      pendingTimeouts.current.add(tid);
+    }
+  }, [api, depConfirm, fetchTree]);
+
   // -------------------------------------------------------------------------
   // Filter tree by search query
   // -------------------------------------------------------------------------
@@ -564,6 +613,7 @@ export function IssueTreeView() {
           issueNumber={depConfirm.issueNumber}
           message={depConfirm.message}
           onForce={handleForceLaunch}
+          onQueue={handleQueueLaunch}
           onCancel={() => setDepConfirm(null)}
         />
       )}
@@ -575,10 +625,11 @@ export function IssueTreeView() {
 // DependencyConfirmDialog — shown when launching a blocked issue
 // ---------------------------------------------------------------------------
 
-function DependencyConfirmDialog({ issueNumber, message, onForce, onCancel }: {
+function DependencyConfirmDialog({ issueNumber, message, onForce, onQueue, onCancel }: {
   issueNumber: number;
   message: string;
   onForce: () => void;
+  onQueue: () => void;
   onCancel: () => void;
 }) {
   return (
@@ -598,7 +649,7 @@ function DependencyConfirmDialog({ issueNumber, message, onForce, onCancel }: {
             {message}
           </p>
           <p className="text-xs text-dark-muted">
-            You can force launch to bypass the dependency check, but the issue may not be ready to work on.
+            You can <strong>queue</strong> this issue to auto-launch when blockers resolve, or <strong>force launch</strong> to bypass the dependency check.
           </p>
         </div>
         <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-dark-border">
@@ -607,6 +658,12 @@ function DependencyConfirmDialog({ issueNumber, message, onForce, onCancel }: {
             className="px-3 py-1.5 text-sm rounded border border-dark-border text-dark-muted hover:text-dark-text hover:border-dark-muted transition-colors"
           >
             Cancel
+          </button>
+          <button
+            onClick={onQueue}
+            className="px-4 py-1.5 text-sm font-medium rounded border border-[#58A6FF]/40 text-[#58A6FF] bg-[#58A6FF]/10 hover:bg-[#58A6FF]/20 transition-colors"
+          >
+            Queue
           </button>
           <button
             onClick={onForce}

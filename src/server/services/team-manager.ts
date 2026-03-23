@@ -762,6 +762,116 @@ export class TeamManager {
   }
 
   // -------------------------------------------------------------------------
+  // queueTeamWithBlockers — queue a team with explicit blocker metadata
+  // -------------------------------------------------------------------------
+
+  /**
+   * Queue a team that has unresolved dependencies, storing the blocker
+   * issue numbers in the `blocked_by_json` column. This allows the GitHub
+   * poller to detect when blockers are resolved and trigger queue processing.
+   *
+   * Similar to queueTeam() but stores blocker metadata in the DB for
+   * persistence across server restarts.
+   */
+  async queueTeamWithBlockers(
+    projectId: number,
+    issueNumber: number,
+    blockerNumbers: number[],
+    issueTitle?: string,
+    headless?: boolean,
+    prompt?: string,
+  ): Promise<Team> {
+    const db = getDatabase();
+    const project = db.getProject(projectId);
+    if (!project) {
+      throw new Error(`Project ${projectId} not found`);
+    }
+
+    // Fetch title from GitHub if needed
+    if (!issueTitle && project.githubRepo) {
+      try {
+        const { stdout } = await execAsync(
+          `gh issue view ${issueNumber} --repo ${project.githubRepo} --json title --jq .title`,
+          { timeout: 10000 },
+        );
+        const result = stdout.trim();
+        if (result) issueTitle = result;
+      } catch {
+        issueTitle = `Issue #${issueNumber}`;
+      }
+    } else if (!issueTitle) {
+      issueTitle = `Issue #${issueNumber}`;
+    }
+
+    const { worktreeName, branchName } = this.deriveWorktreeNames(project, issueNumber);
+    const blockedByJson = JSON.stringify(blockerNumbers);
+
+    // Check for existing team
+    const existing = db.getTeamByWorktree(worktreeName);
+    if (existing) {
+      if (['running', 'launching', 'idle', 'stuck', 'queued'].includes(existing.status)) {
+        throw new Error(`Team already active for issue ${issueNumber} (status: ${existing.status})`);
+      }
+      if (existing.status === 'done') {
+        throw new Error(`Team already completed for issue ${issueNumber} — completed teams cannot be relaunched`);
+      }
+      // Terminal state (failed) — reuse the existing team record as queued
+      const now = new Date().toISOString();
+      db.updateTeam(existing.id, {
+        status: 'queued',
+        phase: 'init',
+        pid: null,
+        sessionId: null,
+        issueTitle: issueTitle ?? null,
+        customPrompt: prompt ?? null,
+        headless: headless !== false,
+        blockedByJson,
+        launchedAt: now,
+        stoppedAt: null,
+        lastEventAt: null,
+      });
+      db.insertTransition({
+        teamId: existing.id,
+        fromStatus: existing.status,
+        toStatus: 'queued',
+        trigger: 'pm_action',
+        reason: `Queued with blockers: ${blockerNumbers.map(n => '#' + n).join(', ')}`,
+      });
+      const team = db.getTeam(existing.id)!;
+      console.log(`[TeamManager] Team ${team.id} queued with blockers ${blockedByJson}`);
+      this.broadcastSnapshot();
+      return team;
+    }
+
+    // Fresh insert with queued status and blocker metadata
+    const now = new Date().toISOString();
+    const team = db.insertTeam({
+      projectId,
+      issueNumber,
+      issueTitle: issueTitle ?? null,
+      worktreeName,
+      branchName,
+      status: 'queued',
+      phase: 'init',
+      customPrompt: prompt ?? null,
+      headless: headless !== false,
+      blockedByJson,
+      launchedAt: now,
+    });
+    db.insertTransition({
+      teamId: team.id,
+      fromStatus: 'queued',
+      toStatus: 'queued',
+      trigger: 'pm_action',
+      reason: `Team created and queued with blockers: ${blockerNumbers.map(n => '#' + n).join(', ')}`,
+    });
+
+    console.log(`[TeamManager] Team ${team.id} queued with blockers ${blockedByJson}`);
+    this.broadcastSnapshot();
+    return team;
+  }
+
+  // -------------------------------------------------------------------------
   // forceLaunch — bypass usage gate and slot limits to launch a queued team
   // -------------------------------------------------------------------------
 
@@ -1048,7 +1158,8 @@ export class TeamManager {
 
     console.log(`[TeamManager] Worktree created for dequeued team: ${team.worktreeName}`);
 
-    db.updateTeam(team.id, { status: 'launching' });
+    // Clear blocker metadata now that the team is being launched
+    db.updateTeam(team.id, { status: 'launching', blockedByJson: null });
     this.broadcastSnapshot();
 
     // ── Step 2: Copy hooks and settings ──

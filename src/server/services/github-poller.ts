@@ -88,6 +88,10 @@ class GitHubPoller {
       return; // already running
     }
 
+    // Reseed blocked issues from DB so dependency resolution detection
+    // survives server restarts
+    this.reseedBlockedFromDb();
+
     this.scheduleNextPoll();
 
     // Initial poll after a short delay so the server has time to finish setup
@@ -515,16 +519,25 @@ class GitHubPoller {
    * and triggers processQueue() to auto-launch newly unblocked teams.
    */
   private async checkDependencyResolution(): Promise<void> {
-    if (this.previouslyBlocked.size === 0) return;
-
     // Collect project IDs that had dependencies resolve so we can trigger
     // processQueue once per project after the loop.
     const resolvedProjectIds = new Set<number>();
+
+    // Also check DB-persisted blockers (queued teams with blocked_by_json).
+    // This covers teams queued with the "Queue" action whose blocker info
+    // survives server restarts, unlike the in-memory previouslyBlocked map.
+    const db = getDatabase();
+    const dbBlockedTeams = db.getQueuedBlockedTeams();
+    const hasInMemoryBlocked = this.previouslyBlocked.size > 0;
+    const hasDbBlocked = dbBlockedTeams.length > 0;
+
+    if (!hasInMemoryBlocked && !hasDbBlocked) return;
 
     try {
       const { getIssueFetcher } = await import('./issue-fetcher.js');
       const fetcher = getIssueFetcher();
 
+      // Check in-memory blocked issues
       for (const [key, entry] of this.previouslyBlocked) {
         try {
           const deps = await fetcher.fetchDependenciesForIssue(entry.projectId, entry.issueNumber);
@@ -550,6 +563,36 @@ class GitHubPoller {
           // Log and continue — don't let one failure stop others
           console.error(
             `[GitHubPoller] Failed to check dependencies for ${key}:`,
+            err instanceof Error ? err.message : err
+          );
+        }
+      }
+
+      // Check DB-persisted blocked teams
+      for (const team of dbBlockedTeams) {
+        if (!team.projectId) continue;
+
+        try {
+          const deps = await fetcher.fetchDependenciesForIssue(team.projectId, team.issueNumber);
+          if (deps && deps.resolved) {
+            // All blockers resolved — clear blocked_by_json and broadcast
+            db.updateTeam(team.id, { blockedByJson: null });
+
+            sseBroker.broadcast('dependency_resolved', {
+              issue_number: team.issueNumber,
+              project_id: team.projectId,
+              previously_blocked_by: JSON.parse(team.blockedByJson!),
+            });
+
+            console.log(
+              `[GitHubPoller] DB-persisted blockers resolved for team ${team.id} (issue #${team.issueNumber})`
+            );
+
+            resolvedProjectIds.add(team.projectId);
+          }
+        } catch (err) {
+          console.error(
+            `[GitHubPoller] Failed to check DB-persisted blockers for team ${team.id}:`,
             err instanceof Error ? err.message : err
           );
         }
@@ -599,6 +642,42 @@ class GitHubPoller {
   untrackBlockedIssue(projectId: number, issueNumber: number): void {
     const key = `${projectId}:${issueNumber}`;
     this.previouslyBlocked.delete(key);
+  }
+
+  /**
+   * Reseed the in-memory previouslyBlocked map from queued teams in the DB
+   * that have a non-null blocked_by_json column. Called on poller start so
+   * that dependency resolution detection survives server restarts.
+   */
+  reseedBlockedFromDb(): void {
+    try {
+      const db = getDatabase();
+      const queuedTeams = db.getTeams({ status: 'queued' });
+      let seeded = 0;
+
+      for (const team of queuedTeams) {
+        if (team.blockedByJson && team.projectId) {
+          try {
+            const blockerNumbers = JSON.parse(team.blockedByJson) as number[];
+            if (Array.isArray(blockerNumbers) && blockerNumbers.length > 0) {
+              this.trackBlockedIssue(team.projectId, team.issueNumber, blockerNumbers);
+              seeded++;
+            }
+          } catch {
+            // Malformed JSON — skip this team
+          }
+        }
+      }
+
+      if (seeded > 0) {
+        console.log(`[GitHubPoller] Reseeded ${seeded} blocked issue(s) from DB`);
+      }
+    } catch (err) {
+      console.error(
+        '[GitHubPoller] Failed to reseed blocked issues from DB:',
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   // -------------------------------------------------------------------------

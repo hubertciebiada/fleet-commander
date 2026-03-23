@@ -28,6 +28,7 @@ interface LaunchBody {
   prompt?: string;
   headless?: boolean;
   force?: boolean;
+  queue?: boolean;
 }
 
 interface LaunchBatchBody {
@@ -95,7 +96,7 @@ const teamsRoutes: FastifyPluginCallback = (
             return reply.code(409).send({
               error: 'Blocked by Dependencies',
               message: err.message,
-              hint: 'Set force: true to bypass dependency check',
+              hint: 'Set force: true to bypass dependency check, or queue: true to queue until blockers resolve',
             });
           }
           return reply.code(err.statusCode).send({ error: err.code, message: err.message });
