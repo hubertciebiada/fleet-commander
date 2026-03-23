@@ -1,6 +1,6 @@
 {
   "name": "fleet-commander-ai",
-  "version": "0.0.1", bd57796 (Rename npm package to fleet-commander-ai)
+  "version": "0.0.1",
   "description": "Web dashboard for orchestrating Claude Code agent teams",
   "type": "module",
   "main": "dist/server/index.js",
@@ -66,7 +66,8 @@
     "dagre": "^0.8.5",
     "fastify": "^5.3.3",
     "react-force-graph-2d": "^1.29.1",
-    "recharts": "^3.8.0"
+    "recharts": "^3.8.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
