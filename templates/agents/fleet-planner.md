@@ -1,3 +1,4 @@
+<!-- fleet-commander v0.0.6 -->
 ---
 name: fleet-planner
 model: inherit

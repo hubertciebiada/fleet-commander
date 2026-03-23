@@ -75,24 +75,12 @@ echo ""
 HOOK_DIR="$TARGET/.claude/hooks/fleet-commander"
 mkdir -p "$HOOK_DIR"
 
-# Copy all .sh files from the hooks directory with version stamps
+# Copy all .sh files from the hooks directory, updating version stamps.
+# Source files already carry a stamp on line 2; replace it with the install-time version.
 for SH_FILE in "$FC_ROOT/hooks/"*.sh; do
   [ -f "$SH_FILE" ] || continue
   SH_NAME="$(basename "$SH_FILE")"
-  # Insert version stamp AFTER the shebang line (shebang must stay on line 1)
-  FIRST_LINE="$(head -1 "$SH_FILE")"
-  if echo "$FIRST_LINE" | grep -q '^#!'; then
-    {
-      echo "$FIRST_LINE"
-      echo "# fleet-commander v${FC_VERSION}"
-      tail -n +2 "$SH_FILE"
-    } > "$HOOK_DIR/$SH_NAME"
-  else
-    {
-      echo "# fleet-commander v${FC_VERSION}"
-      cat "$SH_FILE"
-    } > "$HOOK_DIR/$SH_NAME"
-  fi
+  sed "2s|^# fleet-commander v.*|# fleet-commander v${FC_VERSION}|" "$SH_FILE" > "$HOOK_DIR/$SH_NAME"
 done
 # Ensure LF line endings — bash on Windows chokes on CRLF shebangs
 sed -i 's/\r$//' "$HOOK_DIR/"*.sh
@@ -166,10 +154,13 @@ if [ -z "$BASE_BRANCH" ]; then
   BASE_BRANCH="main"
 fi
 
-# Copy workflow template with placeholder replacement + version stamp
+# Copy workflow template with placeholder replacement + version stamp.
+# Source file already carries a stamp on line 1; strip it before replacement
+# and prepend the install-time version stamp.
 WORKFLOW_TARGET="$PROMPTS_DIR/fleet-workflow.md"
 VERSION_STAMP="<!-- fleet-commander v${FC_VERSION} -->"
-TEMPLATE_CONTENT=$(sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+TEMPLATE_CONTENT=$(sed -e '1{/^<!-- fleet-commander v/d}' \
+    -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
     -e "s|{{project_slug}}|$project_slug|g" \
     -e "s|{{BASE_BRANCH}}|$BASE_BRANCH|g" \
     "$FC_ROOT/templates/workflow.md")
@@ -212,13 +203,12 @@ if [ -d "$AGENTS_SRC" ]; then
   for AGENT_FILE in "$AGENTS_SRC"/*.md; do
     [ -f "$AGENT_FILE" ] || continue
     AGENT_NAME="$(basename "$AGENT_FILE")"
-    {
-      echo "<!-- fleet-commander v${FC_VERSION} -->"
-      sed -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
-          -e "s|{{project_slug}}|$project_slug|g" \
-          -e "s|{{BASE_BRANCH}}|$BASE_BRANCH|g" \
-          "$AGENT_FILE"
-    } > "$AGENTS_DIR/$AGENT_NAME"
+    # Source files already carry a stamp on line 1; replace it with install-time version
+    sed -e "1s|^<!-- fleet-commander v.* -->|<!-- fleet-commander v${FC_VERSION} -->|" \
+        -e "s|{{PROJECT_NAME}}|$PROJECT_NAME|g" \
+        -e "s|{{project_slug}}|$project_slug|g" \
+        -e "s|{{BASE_BRANCH}}|$BASE_BRANCH|g" \
+        "$AGENT_FILE" > "$AGENTS_DIR/$AGENT_NAME"
     AGENT_COUNT=$((AGENT_COUNT + 1))
   done
   echo "  Installed $AGENT_COUNT agent templates to $AGENTS_DIR (v${FC_VERSION})"
@@ -237,10 +227,9 @@ if [ -d "$GUIDES_SRC" ]; then
     [ -f "$GUIDE_FILE" ] || continue
     GUIDE_NAME="$(basename "$GUIDE_FILE")"
     if [ ! -f "$GUIDES_DIR/$GUIDE_NAME" ]; then
-      {
-        echo "<!-- fleet-commander v${FC_VERSION} -->"
-        cat "$GUIDE_FILE"
-      } > "$GUIDES_DIR/$GUIDE_NAME"
+      # Source files already carry a stamp on line 1; replace it with install-time version
+      sed "1s|^<!-- fleet-commander v.* -->|<!-- fleet-commander v${FC_VERSION} -->|" \
+          "$GUIDE_FILE" > "$GUIDES_DIR/$GUIDE_NAME"
       GUIDE_COUNT=$((GUIDE_COUNT + 1))
     fi
   done

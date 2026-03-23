@@ -30,6 +30,9 @@ jobs:
       - name: Build native dependencies
         run: npm rebuild better-sqlite3
 
+      - name: Verify version stamps
+        run: bash scripts/verify-version-stamps.sh
+
       - name: Typecheck
         run: npm run typecheck
 
