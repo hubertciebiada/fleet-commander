@@ -1,4 +1,5 @@
 ![CI](https://github.com/hubertciebiada/fleet-commander/actions/workflows/ci.yml/badge.svg)
+[![npm version](https://img.shields.io/npm/v/fleet-commander.svg)](https://www.npmjs.com/package/fleet-commander)
 
 # Fleet Commander
 
@@ -12,7 +13,15 @@ One-click dashboard for orchestrating multiple Claude Code agent teams across re
 
 Running 15+ parallel Claude Code agents across multiple repos is chaos without a control plane. You lose track of which teams are working on what, miss CI failures, and have no way to intervene when an agent gets stuck. Fleet Commander gives you a single dashboard to launch, monitor, message, and shut down every agent team from one place.
 
-## Quick Start
+## Install from npm
+
+```bash
+npm install -g fleet-commander
+```
+
+Once installed, run `fleet-commander` to start the server on port 4680 and open the dashboard.
+
+## Quick Start (from source)
 
 **Windows (recommended):**
 ```
