@@ -33,6 +33,7 @@ import { registerGetTeamTool } from './tools/get-team.js';
 import { registerStopTeamTool } from './tools/stop-team.js';
 import { registerRestartTeamTool } from './tools/restart-team.js';
 import { registerSendMessageTool } from './tools/send-message.js';
+import { registerLaunchTeamTool } from './tools/launch-team.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -79,6 +80,7 @@ export async function startMcpServer(): Promise<void> {
   registerStopTeamTool(mcpServer);
   registerRestartTeamTool(mcpServer);
   registerSendMessageTool(mcpServer);
+  registerLaunchTeamTool(mcpServer);
 
   // Initialize database
   const db = getDatabase();
