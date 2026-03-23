@@ -20,11 +20,13 @@ const mockDb = {
   getProjects: vi.fn().mockReturnValue([]),
   getActiveTeams: vi.fn().mockReturnValue([]),
   getTeam: vi.fn(),
+  getTeams: vi.fn().mockReturnValue([]),
   getPullRequest: vi.fn(),
   updateTeam: vi.fn(),
   updatePullRequest: vi.fn(),
   insertPullRequest: vi.fn(),
   insertTransition: vi.fn(),
+  getQueuedBlockedTeams: vi.fn().mockReturnValue([]),
 };
 
 vi.mock('../../src/server/db.js', () => ({
@@ -746,6 +748,97 @@ describe('Dependency tracking', () => {
     await githubPoller.poll();
 
     expect(mockManager.processQueue).toHaveBeenCalledWith(1);
+  });
+
+  it('reseedBlockedFromDb populates previouslyBlocked from queued teams', async () => {
+    // Set up queued teams with blocked_by_json in the DB
+    mockDb.getTeams.mockReturnValue([
+      {
+        id: 10,
+        issueNumber: 100,
+        projectId: 1,
+        status: 'queued',
+        blockedByJson: JSON.stringify([50, 60]),
+        worktreeName: 'test-100',
+        branchName: null,
+        phase: 'init',
+        pid: null,
+        sessionId: null,
+        prNumber: null,
+        customPrompt: null,
+        headless: true,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
+        totalCostUsd: 0,
+        launchedAt: null,
+        stoppedAt: null,
+        lastEventAt: null,
+        issueTitle: null,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ]);
+
+    // Reseed from DB
+    githubPoller.reseedBlockedFromDb();
+
+    // Now when dependency resolves, it should broadcast
+    mockFetcher.fetchDependenciesForIssue.mockResolvedValue({
+      issueNumber: 100,
+      blockedBy: [],
+      resolved: true,
+      openCount: 0,
+    });
+
+    mockDb.getProjects.mockReturnValue([makeProject()]);
+    mockDb.getActiveTeams.mockReturnValue([]);
+
+    await githubPoller.poll();
+
+    expect(mockSseBroker.broadcast).toHaveBeenCalledWith(
+      'dependency_resolved',
+      expect.objectContaining({
+        issue_number: 100,
+        project_id: 1,
+        previously_blocked_by: [50, 60],
+      }),
+    );
+  });
+
+  it('reseedBlockedFromDb skips teams without blockedByJson', () => {
+    mockDb.getTeams.mockReturnValue([
+      {
+        id: 11,
+        issueNumber: 200,
+        projectId: 1,
+        status: 'queued',
+        blockedByJson: null,
+        worktreeName: 'test-200',
+        branchName: null,
+        phase: 'init',
+        pid: null,
+        sessionId: null,
+        prNumber: null,
+        customPrompt: null,
+        headless: true,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
+        totalCostUsd: 0,
+        launchedAt: null,
+        stoppedAt: null,
+        lastEventAt: null,
+        issueTitle: null,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ]);
+
+    // Should not throw
+    githubPoller.reseedBlockedFromDb();
   });
 });
 

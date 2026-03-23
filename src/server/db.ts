@@ -109,6 +109,7 @@ export interface TeamInsert {
   prNumber?: number | null;
   customPrompt?: string | null;
   headless?: boolean;
+  blockedByJson?: string | null;
   launchedAt?: string | null;
 }
 
@@ -122,6 +123,7 @@ export interface TeamUpdate {
   prNumber?: number | null;
   customPrompt?: string | null;
   headless?: boolean;
+  blockedByJson?: string | null;
   totalInputTokens?: number;
   totalOutputTokens?: number;
   totalCacheCreationTokens?: number;
@@ -318,6 +320,9 @@ export class FleetDatabase {
 
     // Add stream_events table if missing (v6 migration — persist session log)
     this.addStreamEventsTable();
+
+    // Add blocked_by_json column to teams if missing (v7 migration)
+    this.addBlockedByJsonColumn();
 
     // Migrate any 'paused' projects to 'active' (paused status removed in #228)
     this.migratePausedProjects();
@@ -642,6 +647,23 @@ export class FleetDatabase {
   }
 
   /**
+   * Add blocked_by_json column to teams table if it doesn't exist.
+   * Stores a JSON array of blocking issue numbers for queued teams.
+   * v7 migration.
+   */
+  private addBlockedByJsonColumn(): void {
+    try {
+      const columns = this.db.prepare("PRAGMA table_info(teams)").all() as Array<{ name: string }>;
+      const hasColumn = columns.some((c) => c.name === 'blocked_by_json');
+      if (!hasColumn) {
+        this.db.exec('ALTER TABLE teams ADD COLUMN blocked_by_json TEXT');
+      }
+    } catch {
+      // Table may not exist yet (fresh database) — schema.sql will create it
+    }
+  }
+
+  /**
    * Migrate any projects with status 'paused' to 'active'.
    * The paused status was removed in issue #228.
    */
@@ -875,8 +897,8 @@ export class FleetDatabase {
   insertTeam(data: TeamInsert): Team {
     const now = new Date().toISOString();
     const stmt = this.db.prepare(`
-      INSERT INTO teams (issue_number, issue_title, project_id, worktree_name, branch_name, status, phase, pid, session_id, pr_number, custom_prompt, headless, launched_at, created_at, updated_at)
-      VALUES (@issueNumber, @issueTitle, @projectId, @worktreeName, @branchName, @status, @phase, @pid, @sessionId, @prNumber, @customPrompt, @headless, @launchedAt, @createdAt, @updatedAt)
+      INSERT INTO teams (issue_number, issue_title, project_id, worktree_name, branch_name, status, phase, pid, session_id, pr_number, custom_prompt, headless, blocked_by_json, launched_at, created_at, updated_at)
+      VALUES (@issueNumber, @issueTitle, @projectId, @worktreeName, @branchName, @status, @phase, @pid, @sessionId, @prNumber, @customPrompt, @headless, @blockedByJson, @launchedAt, @createdAt, @updatedAt)
     `);
 
     const info = stmt.run({
@@ -892,6 +914,7 @@ export class FleetDatabase {
       prNumber: data.prNumber ?? null,
       customPrompt: data.customPrompt ?? null,
       headless: data.headless === false ? 0 : 1,
+      blockedByJson: data.blockedByJson ?? null,
       launchedAt: data.launchedAt ?? null,
       createdAt: now,
       updatedAt: now,
@@ -980,6 +1003,18 @@ export class FleetDatabase {
     return rows.map((r) => this.mapTeamRow(r));
   }
 
+  /**
+   * Get queued teams that have non-null blocked_by_json.
+   * Used by the GitHub poller to check DB-persisted blockers for resolution.
+   */
+  getQueuedBlockedTeams(): Team[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM teams WHERE status = 'queued' AND blocked_by_json IS NOT NULL ORDER BY created_at ASC"
+    );
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => this.mapTeamRow(r));
+  }
+
   updateTeam(id: number, fields: TeamUpdate): Team | undefined {
     const setClauses: string[] = [];
     const params: Record<string, unknown> = { id };
@@ -1019,6 +1054,10 @@ export class FleetDatabase {
     if (fields.headless !== undefined) {
       setClauses.push('headless = @headless');
       params.headless = fields.headless ? 1 : 0;
+    }
+    if (fields.blockedByJson !== undefined) {
+      setClauses.push('blocked_by_json = @blockedByJson');
+      params.blockedByJson = fields.blockedByJson;
     }
     if (fields.totalInputTokens !== undefined) {
       setClauses.push('total_input_tokens = @totalInputTokens');
@@ -1837,6 +1876,7 @@ export class FleetDatabase {
       totalCacheCreationTokens: (row.total_cache_creation_tokens as number | undefined) ?? 0,
       totalCacheReadTokens: (row.total_cache_read_tokens as number | undefined) ?? 0,
       totalCostUsd: (row.total_cost_usd as number | undefined) ?? 0,
+      blockedByJson: (row.blocked_by_json as string | null) ?? null,
       launchedAt: utcify(row.launched_at as string | null),
       stoppedAt: utcify(row.stopped_at as string | null),
       lastEventAt: utcify(row.last_event_at as string | null),

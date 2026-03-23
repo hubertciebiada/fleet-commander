@@ -69,8 +69,9 @@ export class TeamService {
     prompt?: string;
     headless?: boolean;
     force?: boolean;
+    queue?: boolean;
   }): Promise<unknown> {
-    const { projectId, issueNumber, issueTitle, prompt, headless, force } = params;
+    const { projectId, issueNumber, issueTitle, prompt, headless, force, queue } = params;
 
     if (!projectId || typeof projectId !== 'number' || projectId < 1) {
       throw validationError('projectId is required and must be a positive integer');
@@ -87,6 +88,16 @@ export class TeamService {
         const blockerNumbers = depInfo.blockedBy
           .filter((b) => b.state === 'open')
           .map((b) => b.number);
+
+        // Queue mode: queue the team with blocker metadata instead of rejecting
+        if (queue) {
+          githubPoller.trackBlockedIssue(projectId, issueNumber, blockerNumbers);
+          const manager = getTeamManager();
+          return await manager.queueTeamWithBlockers(
+            projectId, issueNumber, blockerNumbers, issueTitle, headless, prompt,
+          );
+        }
+
         githubPoller.trackBlockedIssue(projectId, issueNumber, blockerNumbers);
 
         throw new ServiceError(
@@ -97,6 +108,7 @@ export class TeamService {
       }
     }
 
+    // If queue was requested but no dependencies exist, just launch normally
     const manager = getTeamManager();
     return await manager.launch(projectId, issueNumber, issueTitle, prompt, headless, force);
   }

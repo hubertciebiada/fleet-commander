@@ -31,6 +31,7 @@ import {
   MoreHorizontalIcon,
   LockIcon,
   ChevronRightIcon,
+  QueueIcon,
 } from '../../src/client/components/Icons';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ const icons = [
   { name: 'MoreHorizontalIcon', Component: MoreHorizontalIcon },
   { name: 'LockIcon', Component: LockIcon },
   { name: 'ChevronRightIcon', Component: ChevronRightIcon },
+  { name: 'QueueIcon', Component: QueueIcon },
 ];
 
 describe('Icons', () => {
