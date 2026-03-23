@@ -1,3 +1,4 @@
+<!-- fleet-commander v0.0.6 -->
 ---
 name: fleet-reviewer
 description: Code reviewer with direct p2p dev communication. Two-pass review (code quality + acceptance criteria). READ-ONLY — never edits files.
