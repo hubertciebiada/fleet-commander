@@ -53,6 +53,7 @@
     "test:client": "vitest run --config vitest.client.config.ts",
     "test:watch": "vitest",
     "test:e2e": "bash tests/e2e/smoke-test.sh",
+    "capture-screenshots": "npx tsx scripts/capture-screenshots.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json",
     "prepack": "npm run build",
     "prepublishOnly": "echo 'Tests already run in CI — skipping'"
@@ -88,6 +89,7 @@
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "vite": "^6.2.3",
+    "playwright": "^1.52.0",
     "vitest": "^3.2.4"
   }
 }
