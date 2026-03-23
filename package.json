@@ -1,6 +1,6 @@
 {
   "name": "fleet-commander",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Web dashboard for orchestrating Claude Code agent teams",
   "type": "module",
   "main": "dist/server/index.js",
@@ -15,7 +15,8 @@
     "scripts",
     "templates",
     "prompts",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20.0.0"
@@ -29,6 +30,16 @@
     "url": "https://github.com/hciebiada"
   },
   "license": "MIT",
+  "keywords": [
+    "fleet-commander",
+    "claude-code",
+    "agent-orchestration",
+    "developer-tools"
+  ],
+  "homepage": "https://github.com/hubertciebiada/fleet-commander",
+  "bugs": {
+    "url": "https://github.com/hubertciebiada/fleet-commander/issues"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -43,7 +54,7 @@
     "test:watch": "vitest",
     "test:e2e": "bash tests/e2e/smoke-test.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json",
-    "prepare": "npm run build",
+    "prepack": "npm run build",
     "prepublishOnly": "npm test"
   },
   "dependencies": {
@@ -55,7 +66,6 @@
     "dagre": "^0.8.5",
     "fastify": "^5.3.3",
     "react-force-graph-2d": "^1.29.1",
-    "react-router-dom": "^7.13.1",
     "recharts": "^3.8.0"
   },
   "devDependencies": {
@@ -72,6 +82,7 @@
     "postcss": "^8.5.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-router-dom": "^7.13.1",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
