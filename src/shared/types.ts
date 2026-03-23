@@ -75,6 +75,16 @@ export interface InstallHooksStatus extends InstallCategoryStatus {
   found: number;
 }
 
+/** GitHub repository settings (auto-merge, branch protection) */
+export interface RepoSettings {
+  autoMergeEnabled: boolean;
+  defaultBranch: string;
+  branchProtection?: {
+    enabled: boolean;
+    requiredChecks: string[];
+  };
+}
+
 /** Detailed install status for the artifacts deployed by install.sh */
 export interface InstallStatus {
   hooks: InstallHooksStatus;
@@ -82,6 +92,7 @@ export interface InstallStatus {
   agents: InstallCategoryStatus;
   guides?: InstallCategoryStatus;
   settings: InstallFileStatus;
+  repoSettings?: RepoSettings;
 }
 
 /** Project with team count for list view */

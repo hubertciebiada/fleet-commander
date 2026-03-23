@@ -15,7 +15,7 @@ import { getIssueFetcher } from './issue-fetcher.js';
 import { sseBroker } from './sse-broker.js';
 import { installHooks, uninstallHooks } from '../utils/hook-installer.js';
 import config from '../config.js';
-import type { ProjectStatus, InstallStatus, InstallFileStatus } from '../../shared/types.js';
+import type { ProjectStatus, InstallStatus, InstallFileStatus, RepoSettings } from '../../shared/types.js';
 import { ServiceError, validationError, notFoundError, conflictError } from './service-error.js';
 import { getCleanupPreview as _getCleanupPreview, executeCleanup as _executeCleanup } from './cleanup.js';
 import type { CleanupPreview, CleanupResult } from '../../shared/types.js';
@@ -79,14 +79,71 @@ function fileHasCrlf(filePath: string): boolean {
 }
 
 /**
+ * Check GitHub repository settings (auto-merge, branch protection) via `gh api`.
+ * Returns undefined if githubRepo is not provided or the `gh` CLI call fails.
+ *
+ * @param githubRepo - GitHub repo slug (e.g. "owner/repo"), or null/undefined
+ * @returns RepoSettings or undefined on failure
+ */
+export function checkRepoSettings(githubRepo: string | null | undefined): RepoSettings | undefined {
+  if (!githubRepo) return undefined;
+
+  try {
+    const repoJson = execSync(
+      `gh api repos/${githubRepo} --jq "{allow_auto_merge, default_branch}"`,
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 10000 },
+    ).trim();
+
+    const repoData = JSON.parse(repoJson) as {
+      allow_auto_merge?: boolean;
+      default_branch?: string;
+    };
+
+    const defaultBranch = repoData.default_branch ?? 'main';
+    const result: RepoSettings = {
+      autoMergeEnabled: repoData.allow_auto_merge ?? false,
+      defaultBranch,
+    };
+
+    // Branch protection may not be configured — 404 is expected
+    try {
+      const protectionJson = execSync(
+        `gh api repos/${githubRepo}/branches/${defaultBranch}/protection --jq "{required_status_checks}"`,
+        { encoding: 'utf-8', stdio: 'pipe', timeout: 10000 },
+      ).trim();
+
+      const protectionData = JSON.parse(protectionJson) as {
+        required_status_checks?: {
+          contexts?: string[];
+        } | null;
+      };
+
+      result.branchProtection = {
+        enabled: true,
+        requiredChecks: protectionData.required_status_checks?.contexts ?? [],
+      };
+    } catch {
+      // Branch protection not configured or not accessible — that's fine
+      result.branchProtection = { enabled: false, requiredChecks: [] };
+    }
+
+    return result;
+  } catch {
+    // gh CLI unavailable or repo not accessible
+    return undefined;
+  }
+}
+
+/**
  * Check the install status of artifacts deployed by install.sh:
  * hooks directory and workflow prompt.
  * Returns detailed file-level breakdown for tooltip display.
  *
  * @param repoPath - Absolute path to the target repository
- * @returns InstallStatus with hooks, prompt, agents, guides, and settings info
+ * @param githubRepo - Optional GitHub repo slug for repo settings check
+ * @returns InstallStatus with hooks, prompt, agents, guides, settings, and repo settings info
  */
-export function checkInstallStatus(repoPath: string): InstallStatus {
+export function checkInstallStatus(repoPath: string, githubRepo?: string | null): InstallStatus {
   const hookNames = [
     'send_event.sh',
     'on_session_start.sh',
@@ -165,6 +222,7 @@ export function checkInstallStatus(repoPath: string): InstallStatus {
       files: guideFiles,
     },
     settings: settingsFile,
+    repoSettings: checkRepoSettings(githubRepo),
   };
 }
 
@@ -209,7 +267,7 @@ export class ProjectService {
 
     return filtered.map((p) => ({
       ...p,
-      installStatus: checkInstallStatus(p.repoPath),
+      installStatus: checkInstallStatus(p.repoPath, p.githubRepo),
     }));
   }
 
@@ -439,8 +497,8 @@ export class ProjectService {
 
     const result = installHooks(project.repoPath, _minimalLogger);
 
-    // Check what actually landed on disk
-    const status = checkInstallStatus(project.repoPath);
+    // Check what actually landed on disk (include repo settings for UI)
+    const status = checkInstallStatus(project.repoPath, project.githubRepo);
     const allInstalled = status.hooks.installed && status.prompt.installed;
     db.updateProject(project.id, { hooksInstalled: allInstalled });
 

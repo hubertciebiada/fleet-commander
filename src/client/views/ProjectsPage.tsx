@@ -5,7 +5,7 @@ import { AddProjectDialog } from '../components/AddProjectDialog';
 import { CleanupModal } from '../components/CleanupModal';
 import { OverflowMenu } from '../components/OverflowMenu';
 import { ChevronRightIcon, PencilIcon } from '../components/Icons';
-import type { ProjectSummary, ProjectStatus, ProjectGroup } from '../../shared/types';
+import type { ProjectSummary, ProjectStatus, ProjectGroup, RepoSettings } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
 // Status badge colors
@@ -126,6 +126,9 @@ function InstallHealthDetail({ project }: { project: ProjectSummary }) {
     },
   ];
 
+  // GitHub repo settings (auto-merge, branch protection)
+  const repoSettings: RepoSettings | undefined = s.repoSettings;
+
   return (
     <div className="flex items-center gap-3 text-xs flex-wrap">
       {detailedCategories.map((cat) => {
@@ -190,6 +193,51 @@ function InstallHealthDetail({ project }: { project: ProjectSummary }) {
           </div>
         );
       })}
+      {/* GitHub repo settings badge */}
+      {repoSettings && (
+        <div className="relative group shrink-0">
+          <span
+            className="cursor-default"
+            style={{ color: repoSettings.autoMergeEnabled ? '#3FB950' : '#D29922' }}
+          >
+            {repoSettings.autoMergeEnabled ? '\u2713' : '\u26A0'} github
+          </span>
+          {/* Tooltip on hover */}
+          <div className="hidden group-hover:block absolute z-10 bottom-full right-0 mb-1 p-2 rounded bg-[#1C2128] border border-[#30363D] shadow-lg text-xs min-w-52">
+            <div className="font-medium mb-1 text-[#C9D1D9]">
+              GitHub Repo Settings
+            </div>
+            <div className="flex items-center gap-1.5 py-0.5">
+              <span style={{ color: repoSettings.autoMergeEnabled ? '#3FB950' : '#D29922' }}>
+                {repoSettings.autoMergeEnabled ? '\u2713' : '\u26A0'}
+              </span>
+              <span className="text-[#8B949E]">
+                {repoSettings.autoMergeEnabled
+                  ? 'Auto-merge enabled'
+                  : 'Auto-merge disabled \u2014 required for gh pr merge --auto'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 py-0.5">
+              <span style={{ color: '#8B949E' }}>{'\u2022'}</span>
+              <span className="text-[#8B949E]">
+                Default branch: {repoSettings.defaultBranch}
+              </span>
+            </div>
+            {repoSettings.branchProtection && (
+              <div className="flex items-center gap-1.5 py-0.5">
+                <span style={{ color: repoSettings.branchProtection.enabled ? '#3FB950' : '#8B949E' }}>
+                  {repoSettings.branchProtection.enabled ? '\u2713' : '\u2022'}
+                </span>
+                <span className="text-[#8B949E]">
+                  {repoSettings.branchProtection.enabled
+                    ? `Branch protection (${repoSettings.branchProtection.requiredChecks.length} required check${repoSettings.branchProtection.requiredChecks.length !== 1 ? 's' : ''})`
+                    : 'No branch protection'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
