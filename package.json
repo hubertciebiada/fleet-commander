@@ -1,10 +1,11 @@
 {
   "name": "fleet-commander-ai",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Web dashboard for orchestrating Claude Code agent teams",
   "type": "module",
   "main": "dist/server/index.js",
   "bin": {
+    "fleet-commander-ai": "./bin/fleet-commander.js",
     "fleet-commander": "./bin/fleet-commander.js",
     "fleet-commander-mcp": "./bin/fleet-commander-mcp.js"
   },
