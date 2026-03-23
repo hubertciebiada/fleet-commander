@@ -69,8 +69,8 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
         // Non-JSON message — still invoke callback with raw data
         onEventRef.current?.('message', event.data);
       }
-      // Throttle lastEvent updates — skip high-frequency events and limit to once per second
-      if (eventType !== 'team_output' && eventType !== 'heartbeat' && eventType !== 'team_thinking_start' && eventType !== 'team_thinking_stop') {
+      // Throttle lastEvent updates — skip high-frequency output events, limit to once per second
+      if (eventType !== 'team_output' && eventType !== 'team_thinking_start' && eventType !== 'team_thinking_stop') {
         const now = Date.now();
         if (now - lastEventTimeRef.current > 1000) {
           lastEventTimeRef.current = now;
