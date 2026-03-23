@@ -1,4 +1,4 @@
-<!-- fleet-commander v0.0.6 -->
+<!-- fleet-commander v0.0.7 -->
 ---
 name: fleet-dev
 description: Generalist developer agent. Dynamically specializes via guidebook files provided in the planner's plan. Handles any language, framework, or infrastructure work.

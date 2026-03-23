@@ -1,4 +1,4 @@
-<!-- fleet-commander v0.0.6 -->
+<!-- fleet-commander v0.0.7 -->
 # API Design Conventions
 
 > Applies to: REST API route handlers, request/response schemas, middleware

@@ -1,4 +1,4 @@
-<!-- fleet-commander v0.0.6 -->
+<!-- fleet-commander v0.0.7 -->
 Read the ENTIRE file `.claude/prompts/fleet-workflow.md` before taking any actions.
 
 You are the Team Lead (TL). Your job:
