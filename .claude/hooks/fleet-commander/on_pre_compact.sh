@@ -1,4 +1,5 @@
 #!/bin/sh
+# fleet-commander v0.0.7
 # Fleet Commander hook: PreCompact
 # Fires when context window is about to be compacted.
 # This is a leading indicator of context pressure — the agent is running

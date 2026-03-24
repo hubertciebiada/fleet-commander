@@ -112,26 +112,7 @@
           }
         ]
       }
-    ],
-    "StopFailure": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_stop_failure.sh"
-          }
-        ]
-      }
-    ],
-    "TeammateIdle": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_teammate_idle.sh"
-          }
-        ]
-      }
     ]
-  }
+  },
+  "_fleetCommanderVersion": "0.0.7"
 }
