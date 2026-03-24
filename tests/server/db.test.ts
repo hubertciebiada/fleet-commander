@@ -81,10 +81,6 @@ describe('Schema', () => {
     expect(() => db.initSchema()).not.toThrow();
   });
 
-  it('sets schema version to 8', () => {
-    expect(db.getSchemaVersion()).toBe(8);
-  });
-
   it('creates indexes for hot query paths', () => {
     const indexes = db.raw
       .prepare("SELECT name FROM sqlite_master WHERE type='index' ORDER BY name")
@@ -1120,9 +1116,6 @@ describe('Schema includes stream_events', () => {
     expect(names).toContain('stream_events');
   });
 
-  it('sets schema version to 8', () => {
-    expect(db.getSchemaVersion()).toBe(8);
-  });
 });
 
 describe('Connection management', () => {

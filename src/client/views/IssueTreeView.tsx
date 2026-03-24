@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import React from 'react';
 import { useApi } from '../hooks/useApi';
 import { useSSE } from '../hooks/useSSE';
 import { usePrioritization, sortTreeByPriority } from '../hooks/usePrioritization';
