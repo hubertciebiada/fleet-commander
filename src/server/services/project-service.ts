@@ -948,6 +948,25 @@ export class ProjectService {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
+      // Push to remote — if push fails, report error but keep the commit
+      try {
+        execSync('git push', {
+          cwd: repoPath,
+          encoding: 'utf-8',
+          timeout: 30_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (pushErr: unknown) {
+        const pushMessage = pushErr instanceof Error ? pushErr.message : String(pushErr);
+        invalidateInstallStatusCache(repoPath);
+        sseBroker.broadcast('project_updated', {
+          project_id: projectId,
+          name: project.name,
+          status: project.status,
+        });
+        return { ok: true, error: `Committed but push failed: ${pushMessage}` };
+      }
+
       // Invalidate the install status cache so the next check picks up the change
       invalidateInstallStatusCache(repoPath);
 

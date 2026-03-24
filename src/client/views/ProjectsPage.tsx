@@ -544,12 +544,19 @@ function ProjectCard({
           <button
             onClick={async (e) => {
               e.stopPropagation();
+              const isAmber = project.installStatus?.gitCommitStatus?.health === 'amber';
+              const msg = isAmber
+                ? 'This will update and commit+push .claude/ files to the default branch. Continue?'
+                : 'This will commit and push .claude/ files to the default branch. Continue?';
+              if (!window.confirm(msg)) return;
               setCommitting(true);
               setCommitResult(null);
               try {
-                const isAmber = project.installStatus?.gitCommitStatus?.health === 'amber';
                 const result = await onCommitClaudeFiles(project.id, { reinstall: isAmber });
                 setCommitResult(result);
+                if (result.ok && !result.error) {
+                  setTimeout(() => setCommitResult(null), 5000);
+                }
               } catch (err: unknown) {
                 setCommitResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
               } finally {
@@ -576,13 +583,17 @@ function ProjectCard({
       {commitResult && (
         <div
           className={`mx-4 mb-2 px-3 py-1.5 rounded text-xs ${
-            commitResult.ok
+            commitResult.ok && !commitResult.error
               ? 'border border-[#3FB950]/30 bg-[#3FB950]/10 text-[#3FB950]'
-              : 'border border-[#F85149]/30 bg-[#F85149]/10 text-[#F85149]'
+              : commitResult.ok && commitResult.error
+                ? 'border border-[#D29922]/30 bg-[#D29922]/10 text-[#D29922]'
+                : 'border border-[#F85149]/30 bg-[#F85149]/10 text-[#F85149]'
           }`}
         >
           {commitResult.ok
-            ? (commitResult.message ?? '.claude/ files committed successfully')
+            ? (commitResult.error
+              ? commitResult.error
+              : (commitResult.message ?? '.claude/ files committed and pushed successfully'))
             : `Commit failed: ${commitResult.error}`}
         </div>
       )}
