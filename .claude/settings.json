@@ -5,6 +5,7 @@
   "enabledPlugins": {
     "security-guidance@claude-plugins-official": true
   },
+  "_fleetCommanderVersion": "0.0.9",
   "hooks": {
     "SessionStart": [
       {
@@ -116,6 +117,5 @@
         ]
       }
     ]
-  },
-  "_fleetCommanderVersion": "0.0.9"
+  }
 }
