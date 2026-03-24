@@ -377,16 +377,33 @@ export function checkGitCommitStatus(repoPath: string): GitCommitStatus | undefi
     let health: GitCommitHealth;
     let message: string;
 
-    if (!allCommitted) {
+    if (!allCommitted && !anyOutdated) {
+      // Files genuinely not committed (not a version upgrade scenario)
       health = 'red';
       const missingCount = fileStatuses.filter((f) => !f.committed).length + missingHooks.length;
       message = `${missingCount} .claude/ file${missingCount === 1 ? '' : 's'} not committed to ${shortBranch}`;
-    } else if (anyOutdated) {
+    } else if (!allCommitted && anyOutdated) {
+      // Some files missing + some outdated = likely a version upgrade
+      // Missing files are new in this FC version, not user error
       health = 'amber';
+      const outdatedVersion = fileStatuses.find(
+        (f) => f.committed && f.committedVersion && f.committedVersion !== currentVersion,
+      )?.committedVersion;
+      message = outdatedVersion
+        ? `Outdated (v${outdatedVersion} → v${currentVersion}) — reinstall and commit to update`
+        : `Committed to ${shortBranch} but some files outdated — reinstall and commit to update`;
+    } else if (anyOutdated) {
+      // All files committed but some have older version stamps
+      health = 'amber';
+      const outdatedVersion = fileStatuses.find(
+        (f) => f.committed && f.committedVersion && f.committedVersion !== currentVersion,
+      )?.committedVersion;
       const outdatedCount = fileStatuses.filter(
         (f) => f.committed && f.committedVersion && f.committedVersion !== currentVersion,
       ).length;
-      message = `Committed to ${shortBranch} but ${outdatedCount} file${outdatedCount === 1 ? '' : 's'} outdated`;
+      message = outdatedVersion
+        ? `Outdated (v${outdatedVersion} → v${currentVersion}) — reinstall and commit to update`
+        : `Committed to ${shortBranch} but ${outdatedCount} file${outdatedCount === 1 ? '' : 's'} outdated`;
     } else {
       health = 'green';
       message = `All .claude/ files committed to ${shortBranch}`;
