@@ -96,6 +96,8 @@ export class TeamManager {
   private thinkingStartTimes: Map<number, number> = new Map();
   /** Content block index of the active thinking block per team */
   private thinkingBlockIndex: Map<number, number> = new Map();
+  /** Timestamp of last meaningful stdout stream event per team (hook fallback) */
+  private lastStreamAt: Map<number, number> = new Map();
 
   // -------------------------------------------------------------------------
   // syncWithOrigin — fetch + pull before creating a worktree
@@ -445,6 +447,7 @@ export class TeamManager {
     this.parsedEvents.delete(teamId);
     this.agentMaps.delete(teamId);
     this.tokenCounters.delete(teamId);
+    this.lastStreamAt.delete(teamId);
 
     // Re-read to get the latest status (process exit handler may have already updated it)
     const stopTeam = db.getTeam(teamId);
@@ -693,6 +696,7 @@ export class TeamManager {
     this.parsedEvents.clear();
     this.tokenCounters.clear();
     this.agentMaps.clear();
+    this.lastStreamAt.clear();
   }
 
   // -------------------------------------------------------------------------
@@ -1285,6 +1289,35 @@ export class TeamManager {
     }
 
     return [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Stdout activity tracking (hook fallback for #446)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Return the timestamp of the last meaningful stdout stream event for a team.
+   * Used by stuck-detector as a fallback when hook events are missing.
+   */
+  getLastStreamAt(teamId: number): number | undefined {
+    return this.lastStreamAt.get(teamId);
+  }
+
+  /**
+   * Sync stdout activity timestamps to the DB's last_event_at column.
+   * Called periodically by stuck-detector before evaluating teams.
+   * Only updates when stdout activity is more recent than the existing value.
+   */
+  syncStreamActivityToDb(): void {
+    const db = getDatabase();
+    for (const [teamId, lastTs] of this.lastStreamAt) {
+      const team = db.getTeam(teamId);
+      if (!team || ['done', 'failed'].includes(team.status)) continue;
+      const lastEventMs = team.lastEventAt ? new Date(team.lastEventAt).getTime() : 0;
+      if (lastTs > lastEventMs) {
+        db.updateTeam(teamId, { lastEventAt: new Date(lastTs).toISOString() });
+      }
+    }
   }
 
   /**
@@ -1992,6 +2025,36 @@ export class TeamManager {
                 team_id: teamId,
                 event: timestampedEvent,
               }, teamId);
+            }
+
+            // Track stdout activity for hook fallback (#446)
+            if (['assistant', 'tool_use', 'tool_result', 'system'].includes(event.type)) {
+              this.lastStreamAt.set(teamId, Date.now());
+
+              // Fallback: transition launching→running from stdout when hooks don't fire
+              try {
+                const db = getDatabase();
+                const team = db.getTeam(teamId);
+                if (team && team.status === 'launching') {
+                  db.insertTransition({
+                    teamId,
+                    fromStatus: 'launching',
+                    toStatus: 'running',
+                    trigger: 'system',
+                    reason: 'Stdout stream event received (hook fallback)',
+                  });
+                  db.updateTeam(teamId, { status: 'running', lastEventAt: new Date().toISOString() });
+                  sseBroker.broadcast('team_status_changed', {
+                    team_id: teamId,
+                    status: 'running',
+                    previous_status: 'launching',
+                    reason: 'Stdout stream event received (hook fallback)',
+                  });
+                  console.log(`[TeamManager] Team ${teamId} transitioned launching→running via stdout fallback`);
+                }
+              } catch (err) {
+                console.error(`[TeamManager] Stdout fallback transition failed for team ${teamId}:`, err);
+              }
             }
           } catch {
             // Not valid JSON — raw text output (e.g. startup messages)

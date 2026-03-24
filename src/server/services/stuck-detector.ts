@@ -56,8 +56,19 @@ class StuckDetector {
    */
   check(): void {
     const db = getDatabase();
+
+    // Sync stdout activity to DB before evaluating teams (#446)
+    // This ensures last_event_at reflects both hook events AND stdout activity
+    try {
+      const manager = getTeamManager();
+      manager.syncStreamActivityToDb();
+    } catch {
+      // TeamManager may not be initialized yet
+    }
+
     const activeTeams = db.getActiveTeams();
     const now = Date.now();
+    const idleThresholdMs = config.idleThresholdMin * 60_000;
 
     for (const team of activeTeams) {
       // --- Launch timeout detection ----------------------------------------
@@ -68,7 +79,20 @@ class StuckDetector {
         const launchedTime = new Date(team.launchedAt).getTime();
         const launchMinutes = (now - launchedTime) / 60_000;
 
+        // Check stdout activity before timing out — team may be alive without hooks
         if (launchMinutes > config.launchTimeoutMin) {
+          try {
+            const manager = getTeamManager();
+            const lastStream = manager.getLastStreamAt(team.id);
+            if (lastStream && (now - lastStream) < idleThresholdMs) {
+              console.log(
+                `[StuckDetector] Team ${team.id} has stdout activity (${Math.round((now - lastStream) / 1000)}s ago), skipping launch timeout`
+              );
+              continue;
+            }
+          } catch {
+            // TeamManager not available — proceed with timeout
+          }
           db.insertTransition({
             teamId: team.id,
             fromStatus: 'launching',
