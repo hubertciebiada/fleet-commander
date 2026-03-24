@@ -1,3 +1,4 @@
+<!-- fleet-commander v0.0.8 -->
 # Python Conventions
 
 > Applies to: `*.py`, `pyproject.toml`, `requirements.txt`, `setup.cfg`
