@@ -387,12 +387,12 @@ function ProjectCard({
   onEditPrompt: (id: number) => void;
   onGroupChange: (projectId: number, groupId: number | null) => void;
   fetchRepoSettings: (projectId: number) => Promise<RepoSettings | null>;
-  onCommitClaudeFiles: (projectId: number) => Promise<{ ok: boolean; error?: string }>;
+  onCommitClaudeFiles: (projectId: number, options?: { reinstall?: boolean }) => Promise<{ ok: boolean; error?: string; message?: string }>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [repoSettings, setRepoSettings] = useState<RepoSettings | null | undefined>(undefined);
   const [committing, setCommitting] = useState(false);
-  const [commitResult, setCommitResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [commitResult, setCommitResult] = useState<{ ok: boolean; error?: string; message?: string } | null>(null);
   const [repoSettingsLoaded, setRepoSettingsLoaded] = useState(false);
   const limitEdit = useInlineEdit<number>(project.maxActiveTeams);
   const modelEdit = useInlineEdit<string>(project.model ?? '');
@@ -548,7 +548,8 @@ function ProjectCard({
               setCommitting(true);
               setCommitResult(null);
               try {
-                const result = await onCommitClaudeFiles(project.id);
+                const isAmber = project.installStatus?.gitCommitStatus?.health === 'amber';
+                const result = await onCommitClaudeFiles(project.id, { reinstall: isAmber });
                 setCommitResult(result);
               } catch (err: unknown) {
                 setCommitResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -582,7 +583,7 @@ function ProjectCard({
           }`}
         >
           {commitResult.ok
-            ? '.claude/ files committed successfully'
+            ? (commitResult.message ?? '.claude/ files committed successfully')
             : `Commit failed: ${commitResult.error}`}
         </div>
       )}
@@ -1097,11 +1098,11 @@ export function ProjectsPage() {
   );
 
   const handleCommitClaudeFiles = useCallback(
-    async (projectId: number): Promise<{ ok: boolean; error?: string }> => {
+    async (projectId: number, options?: { reinstall?: boolean }): Promise<{ ok: boolean; error?: string; message?: string }> => {
       try {
-        const result = await api.post<{ ok: boolean; error?: string }>(
+        const result = await api.post<{ ok: boolean; error?: string; message?: string }>(
           `projects/${projectId}/commit-claude-files`,
-          {},
+          { reinstall: options?.reinstall },
         );
         // Refresh projects to update install status (and git commit status)
         await fetchProjects();
