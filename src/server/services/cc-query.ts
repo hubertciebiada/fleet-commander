@@ -6,11 +6,8 @@
 // Uses a concurrency queue (max 1 at a time) to avoid overloading CC.
 // =============================================================================
 
-import { spawn } from 'child_process';
-import os from 'os';
 import config from '../config.js';
-import { resolveClaudePath } from '../utils/resolve-claude-path.js';
-import { findGitBash } from '../utils/find-git-bash.js';
+import { spawnQuery } from '../utils/cc-spawn.js';
 import type {
   CCQueryResult,
   PrioritizedIssue,
@@ -120,170 +117,114 @@ export class CCQueryService {
     return lastResult!;
   }
 
-  private _executeImpl<T>(opts: ExecuteOptions<T>): Promise<CCQueryResult<T>> {
-    return new Promise<CCQueryResult<T>>((resolve) => {
-      const start = Date.now();
-      const claudePath = resolveClaudePath();
+  private async _executeImpl<T>(opts: ExecuteOptions<T>): Promise<CCQueryResult<T>> {
+    const effectiveTimeout = opts.timeoutMs ?? config.ccQueryTimeoutMs;
 
-      const args = [
-        '-p', opts.prompt,
-        '--output-format', 'json',
-        '--no-session-persistence',
-        '--max-turns', String(config.ccQueryMaxTurns),
-        '--model', config.ccQueryModel,
-        '--tools', '',
-        '--strict-mcp-config',
-        '--disable-slash-commands',
-        '--json-schema', JSON.stringify(opts.jsonSchema),
-      ];
+    const result = await spawnQuery({
+      mode: 'query',
+      prompt: opts.prompt,
+      jsonSchema: opts.jsonSchema,
+      timeoutMs: effectiveTimeout,
+    });
 
-      const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
-      const gitBash = findGitBash();
-      if (gitBash) {
-        spawnEnv['CLAUDE_CODE_GIT_BASH_PATH'] = gitBash;
+    const { stdout, stderr, durationMs } = result;
+
+    // Spawn error (e.g. ENOENT — claude not found)
+    if (result.spawnError) {
+      return {
+        success: false,
+        costUsd: 0,
+        durationMs,
+        error: `Failed to spawn CC: ${result.spawnError.message}`,
+      };
+    }
+
+    if (result.timedOut) {
+      return {
+        success: false,
+        costUsd: 0,
+        durationMs,
+        error: `Query timed out after ${effectiveTimeout}ms`,
+      };
+    }
+
+    if (!result.exitedOk) {
+      return {
+        success: false,
+        costUsd: 0,
+        durationMs,
+        error: `CC exited with code ${result.exitCode}: ${stderr.trim().substring(0, 500)}`,
+      };
+    }
+
+    // Defense-in-depth: strip non-JSON prefix lines before parsing.
+    // CC may emit warnings or debug text before the JSON payload.
+    const jsonStart = stdout.indexOf('{');
+    const cleanStdout = jsonStart >= 0 ? stdout.substring(jsonStart) : stdout;
+
+    // Parse the JSON output from CC
+    try {
+      const parsed = JSON.parse(cleanStdout);
+      // CC --output-format json returns total_cost_usd (not cost_usd)
+      const costUsd = parsed.total_cost_usd ?? 0;
+
+      // Prefer structured_output (populated when --json-schema is used),
+      // fall back to parsing result text for backward compatibility
+      let data: T | undefined;
+      if (parsed.structured_output != null) {
+        data = parsed.structured_output as T;
+      } else if (typeof parsed.result === 'string' && parsed.result) {
+        try {
+          data = JSON.parse(parsed.result) as T;
+        } catch {
+          // result is plain text, not JSON
+        }
       }
 
-      const child = spawn(claudePath, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        cwd: os.tmpdir(),
-        windowsHide: true,
-        env: spawnEnv,
-      });
+      const resultText = parsed.result ?? '';
+      const textValue = typeof resultText === 'string' ? resultText : JSON.stringify(resultText);
 
-      let stdout = '';
-      let stderr = '';
-      let timedOut = false;
-      const effectiveTimeout = opts.timeoutMs ?? config.ccQueryTimeoutMs;
-
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        try {
-          if (process.platform === 'win32') {
-            // Use taskkill for reliable Windows process tree kill
-            spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
-              stdio: 'pipe',
-              windowsHide: true,
-            });
-          } else {
-            child.kill('SIGKILL');
-          }
-        } catch {
-          // Best effort
-        }
-      }, effectiveTimeout);
-
-      child.stdout?.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString();
-      });
-
-      child.stderr?.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
-
-      child.on('close', (code) => {
-        clearTimeout(timeout);
-        const durationMs = Date.now() - start;
-
-        if (timedOut) {
-          resolve({
-            success: false,
-            costUsd: 0,
-            durationMs,
-            error: `Query timed out after ${effectiveTimeout}ms`,
-          });
-          return;
-        }
-
-        if (code !== 0) {
-          resolve({
-            success: false,
-            costUsd: 0,
-            durationMs,
-            error: `CC exited with code ${code}: ${stderr.trim().substring(0, 500)}`,
-          });
-          return;
-        }
-
-        // Defense-in-depth: strip non-JSON prefix lines before parsing.
-        // CC may emit warnings or debug text before the JSON payload.
-        const jsonStart = stdout.indexOf('{');
-        const cleanStdout = jsonStart >= 0 ? stdout.substring(jsonStart) : stdout;
-
-        // Parse the JSON output from CC
-        try {
-          const parsed = JSON.parse(cleanStdout);
-          // CC --output-format json returns total_cost_usd (not cost_usd)
-          const costUsd = parsed.total_cost_usd ?? 0;
-
-          // Prefer structured_output (populated when --json-schema is used),
-          // fall back to parsing result text for backward compatibility
-          let data: T | undefined;
-          if (parsed.structured_output != null) {
-            data = parsed.structured_output as T;
-          } else if (typeof parsed.result === 'string' && parsed.result) {
-            try {
-              data = JSON.parse(parsed.result) as T;
-            } catch {
-              // result is plain text, not JSON
-            }
-          }
-
-          const resultText = parsed.result ?? '';
-          const textValue = typeof resultText === 'string' ? resultText : JSON.stringify(resultText);
-
-          if (data === undefined) {
-            // Include diagnostic details: subtype, stop_reason, and raw stdout snippet
-            const subtype = parsed.subtype ?? 'unknown';
-            const stopReason = parsed.stop_reason ?? 'unknown';
-            console.warn(
-              `[CCQuery] CC exited 0 but returned no structured data.`,
-              `subtype=${subtype} stop_reason=${stopReason}`,
-              `stdout (first 200): ${stdout.substring(0, 200)}`,
-              stderr ? `stderr: ${stderr.substring(0, 500)}` : '',
-            );
-            resolve({
-              success: false,
-              text: textValue,
-              costUsd: typeof costUsd === 'number' ? costUsd : 0,
-              durationMs: parsed.duration_ms ?? durationMs,
-              error: `CC returned no structured data (subtype=${subtype}, stop_reason=${stopReason}, stdout=${stdout.substring(0, 200)})`,
-            });
-          } else {
-            resolve({
-              success: true,
-              data,
-              text: textValue,
-              costUsd: typeof costUsd === 'number' ? costUsd : 0,
-              durationMs: parsed.duration_ms ?? durationMs,
-            });
-          }
-        } catch {
-          // stdout was not valid JSON — return as text with diagnostic snippet
-          console.warn(
-            `[CCQuery] CC exited 0 but stdout was not valid JSON.`,
-            `stdout (first 200): ${stdout.substring(0, 200)}`,
-            stderr ? `stderr: ${stderr.substring(0, 500)}` : '',
-          );
-          resolve({
-            success: false,
-            text: stdout.trim(),
-            costUsd: 0,
-            durationMs,
-            error: `CC returned no structured data (stdout=${stdout.substring(0, 200)})`,
-          });
-        }
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timeout);
-        resolve({
+      if (data === undefined) {
+        // Include diagnostic details: subtype, stop_reason, and raw stdout snippet
+        const subtype = parsed.subtype ?? 'unknown';
+        const stopReason = parsed.stop_reason ?? 'unknown';
+        console.warn(
+          `[CCQuery] CC exited 0 but returned no structured data.`,
+          `subtype=${subtype} stop_reason=${stopReason}`,
+          `stdout (first 200): ${stdout.substring(0, 200)}`,
+          stderr ? `stderr: ${stderr.substring(0, 500)}` : '',
+        );
+        return {
           success: false,
-          costUsd: 0,
-          durationMs: Date.now() - start,
-          error: `Failed to spawn CC: ${err.message}`,
-        });
-      });
-    });
+          text: textValue,
+          costUsd: typeof costUsd === 'number' ? costUsd : 0,
+          durationMs: parsed.duration_ms ?? durationMs,
+          error: `CC returned no structured data (subtype=${subtype}, stop_reason=${stopReason}, stdout=${stdout.substring(0, 200)})`,
+        };
+      } else {
+        return {
+          success: true,
+          data,
+          text: textValue,
+          costUsd: typeof costUsd === 'number' ? costUsd : 0,
+          durationMs: parsed.duration_ms ?? durationMs,
+        };
+      }
+    } catch {
+      // stdout was not valid JSON — return as text with diagnostic snippet
+      console.warn(
+        `[CCQuery] CC exited 0 but stdout was not valid JSON.`,
+        `stdout (first 200): ${stdout.substring(0, 200)}`,
+        stderr ? `stderr: ${stderr.substring(0, 500)}` : '',
+      );
+      return {
+        success: false,
+        text: stdout.trim(),
+        costUsd: 0,
+        durationMs,
+        error: `CC returned no structured data (stdout=${stdout.substring(0, 200)})`,
+      };
+    }
   }
 
   // -------------------------------------------------------------------------

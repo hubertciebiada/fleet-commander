@@ -8,7 +8,7 @@
 // repo, and worktree naming from the project record in the database.
 // =============================================================================
 
-import { spawn, execSync, exec as execCallback, ChildProcess } from 'child_process';
+import { execSync, exec as execCallback, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
@@ -17,8 +17,7 @@ import config from '../config.js';
 import { getDatabase } from '../db.js';
 import { sseBroker } from './sse-broker.js';
 import type { StreamEvent } from './sse-broker.js';
-import { findGitBash } from '../utils/find-git-bash.js';
-import { resolveClaudePath } from '../utils/resolve-claude-path.js';
+import { spawnHeadless, spawnInteractive } from '../utils/cc-spawn.js';
 import type { Team, Project } from '../../shared/types.js';
 import { getUsageZone } from './usage-tracker.js';
 import { resolveMessage } from '../utils/resolve-message.js';
@@ -342,18 +341,34 @@ export class TeamManager {
     }
 
     // ── Headless mode (default): spawn in background, capture output ──
-    const args = this.buildHeadlessClaudeArgs(worktreeName, {
+    const child = spawnHeadless({
+      mode: 'headless',
+      worktreeName,
+      cwd: project.repoPath,
       model: project.model,
+      resume: false,
+      fleetContext: { teamId: worktreeName, projectId, githubRepo: project.githubRepo ?? '' },
     });
 
-    const spawnEnv = this.buildSpawnEnv(project, worktreeName, projectId);
-    const claudePath = resolveClaudePath();
-    console.log(`[TeamManager] Spawning: ${claudePath} ${args.join(' ')} (headless=${isHeadless})`);
-
-    const child = this.spawnAndValidate(claudePath, args, project.repoPath, spawnEnv, team.id);
-    if (!child) {
+    const pid = child.pid;
+    if (pid === undefined) {
+      console.error(`[TeamManager] ERROR: spawn failed for team ${team.id}: no PID returned`);
+      db.insertTransition({
+        teamId: team.id,
+        fromStatus: 'launching',
+        toStatus: 'failed',
+        trigger: 'system',
+        reason: 'Spawn failed: no PID returned',
+      });
+      db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
+      this.broadcastSnapshot();
       throw new Error('Failed to spawn Claude Code process — no PID returned');
     }
+
+    console.log(`[TeamManager] Process spawned: PID ${pid} (headless=${isHeadless})`);
+    db.updateTeam(team.id, { pid });
+    this.broadcastSnapshot();
+    this.childProcesses.set(team.id, child);
 
     this.setupStdinAndOutput(team.id, child, resolvedPrompt);
     this.attachProcessHandlers(team.id, child);
@@ -515,12 +530,6 @@ export class TeamManager {
       throw new Error(`Worktree ${team.worktreeName} no longer exists at ${worktreeAbsPath}`);
     }
 
-    // Build args with --resume (headless mode — resume always uses stream-json)
-    const args = this.buildHeadlessClaudeArgs(team.worktreeName, {
-      resume: true,
-      model: project.model,
-    });
-
     // Update status to launching
     db.insertTransition({
       teamId,
@@ -535,14 +544,35 @@ export class TeamManager {
       stoppedAt: null,
     });
 
-    const spawnEnv = this.buildSpawnEnv(project, team.worktreeName, project.id);
-    const claudePath = resolveClaudePath();
-    console.log(`[TeamManager] Resume spawning: ${claudePath} ${args.join(' ')}`);
+    // Resume: headless mode with --resume flag (always stream-json)
+    const child = spawnHeadless({
+      mode: 'headless',
+      worktreeName: team.worktreeName,
+      cwd: project.repoPath,
+      model: project.model,
+      resume: true,
+      fleetContext: { teamId: team.worktreeName, projectId: project.id, githubRepo: project.githubRepo ?? '' },
+    });
 
-    const child = this.spawnAndValidate(claudePath, args, project.repoPath, spawnEnv, teamId);
-    if (!child) {
+    const pid = child.pid;
+    if (pid === undefined) {
+      console.error(`[TeamManager] ERROR: spawn failed for team ${teamId}: no PID returned`);
+      db.insertTransition({
+        teamId,
+        fromStatus: 'launching',
+        toStatus: 'failed',
+        trigger: 'system',
+        reason: 'Spawn failed: no PID returned',
+      });
+      db.updateTeam(teamId, { status: 'failed', stoppedAt: new Date().toISOString() });
+      this.broadcastSnapshot();
       throw new Error('Failed to spawn Claude Code process — no PID returned');
     }
+
+    console.log(`[TeamManager] Resume process spawned: PID ${pid}`);
+    db.updateTeam(teamId, { pid });
+    this.broadcastSnapshot();
+    this.childProcesses.set(teamId, child);
 
     // Resume: no initial prompt — just set up stdin and output capture
     this.setupStdinAndOutput(teamId, child);
@@ -1176,16 +1206,34 @@ export class TeamManager {
     }
 
     // ── Headless mode (default): spawn in background, capture output ──
-    const args = this.buildHeadlessClaudeArgs(team.worktreeName, {
+    const child = spawnHeadless({
+      mode: 'headless',
+      worktreeName: team.worktreeName,
+      cwd: project.repoPath,
       model: project.model,
+      resume: false,
+      fleetContext: { teamId: team.worktreeName, projectId, githubRepo: project.githubRepo ?? '' },
     });
 
-    const spawnEnv = this.buildSpawnEnv(project, team.worktreeName, projectId);
-    const claudePath = resolveClaudePath();
-    console.log(`[TeamManager] Spawning dequeued team ${team.id}: ${claudePath} ${args.join(' ')} (headless=${isHeadless})`);
+    const pid = child.pid;
+    if (pid === undefined) {
+      console.error(`[TeamManager] ERROR: spawn failed for dequeued team ${team.id}: no PID returned`);
+      db.insertTransition({
+        teamId: team.id,
+        fromStatus: 'launching',
+        toStatus: 'failed',
+        trigger: 'system',
+        reason: 'Spawn failed: no PID returned',
+      });
+      db.updateTeam(team.id, { status: 'failed', stoppedAt: new Date().toISOString() });
+      this.broadcastSnapshot();
+      return;
+    }
 
-    const child = this.spawnAndValidate(claudePath, args, project.repoPath, spawnEnv, team.id);
-    if (!child) return;
+    console.log(`[TeamManager] Dequeued team ${team.id} spawned: PID ${pid} (headless=${isHeadless})`);
+    db.updateTeam(team.id, { pid });
+    this.broadcastSnapshot();
+    this.childProcesses.set(team.id, child);
 
     this.setupStdinAndOutput(team.id, child, resolvedPrompt);
     this.attachProcessHandlers(team.id, child);
@@ -1499,124 +1547,10 @@ export class TeamManager {
     return results;
   }
 
-  // -------------------------------------------------------------------------
-  // Shared spawn/lifecycle helpers (extracted from launch/resume/launchQueued)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Build the spawn environment for a Claude Code process.
-   * Inherits the server's env and adds fleet/git-bash vars.
-   * This is the SINGLE source of CC env vars for BOTH headless and interactive modes.
-   */
-  private buildSpawnEnv(
-    project: Project,
-    worktreeName: string,
-    projectId: number,
-  ): Record<string, string | undefined> {
-    const env: Record<string, string | undefined> = {
-      ...process.env,
-      FLEET_TEAM_ID: worktreeName,
-      FLEET_PROJECT_ID: String(projectId),
-      FLEET_GITHUB_REPO: project.githubRepo ?? '',
-    };
-    // Only set agent teams env var when enabled; explicitly clear it otherwise
-    // so it's not inherited from process.env
-    if (config.enableAgentTeams) {
-      env['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'] = '1';
-    } else {
-      env['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'] = undefined;
-    }
-    const gitBash = findGitBash();
-    if (gitBash) {
-      env['CLAUDE_CODE_GIT_BASH_PATH'] = gitBash;
-      console.log(`[TeamManager] CLAUDE_CODE_GIT_BASH_PATH=${gitBash}`);
-    }
-    console.log(`[TeamManager] Spawn env: FLEET_TEAM_ID=${worktreeName}, FLEET_PROJECT_ID=${projectId}, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=${config.enableAgentTeams ? '1' : 'disabled'}`);
-    return env;
-  }
-
-  /**
-   * Build the base Claude CLI args shared by BOTH headless and interactive modes.
-   * @param worktreeName — worktree name for --worktree flag
-   * @param options.resume — add --resume flag (for resume flow)
-   * @param options.model — optional model override from project
-   * @param options.prompt — positional prompt arg (interactive mode only)
-   */
-  private buildBaseClaudeArgs(
-    worktreeName: string,
-    options?: {
-      resume?: boolean;
-      model?: string | null;
-      prompt?: string;
-    },
-  ): string[] {
-    const args: string[] = [];
-    if (options?.resume) {
-      args.push('--resume');
-    }
-    args.push('--worktree', worktreeName);
-
-    if (config.skipPermissions) {
-      args.push('--dangerously-skip-permissions');
-    }
-
-    if (options?.model) {
-      args.push('--model', options.model);
-    }
-
-    if (options?.prompt) {
-      args.push(options.prompt);
-    }
-
-    return args;
-  }
-
-  /**
-   * Build Claude CLI args for headless (stream-json) mode.
-   * Calls buildBaseClaudeArgs() and appends stream-json + verbose flags.
-   */
-  private buildHeadlessClaudeArgs(
-    worktreeName: string,
-    options?: {
-      resume?: boolean;
-      model?: string | null;
-    },
-  ): string[] {
-    const args = this.buildBaseClaudeArgs(worktreeName, options);
-    args.push('--input-format', 'stream-json');
-    args.push('--output-format', 'stream-json');
-    args.push('--verbose');
-    args.push('--include-partial-messages');
-    return args;
-  }
-
-  /**
-   * Build the `set VAR=value` portion of the innerCommand for interactive
-   * mode on Windows. Iterates over buildSpawnEnv() output to generate
-   * set commands dynamically, ensuring all env vars are passed.
-   *
-   * Only includes fleet/CC-specific vars (prefixed FLEET_, CLAUDE_CODE_)
-   * to keep the command string manageable and avoid leaking unrelated env.
-   */
-  private buildInteractiveEnvSetCommands(
-    spawnEnv: Record<string, string | undefined>,
-  ): string {
-    const prefixes = ['FLEET_', 'CLAUDE_CODE_'];
-    const setCmds: string[] = [];
-    for (const [key, value] of Object.entries(spawnEnv)) {
-      if (value !== undefined && prefixes.some(p => key.startsWith(p))) {
-        setCmds.push(`set ${key}=${value}`);
-      }
-    }
-    return setCmds.join(' && ');
-  }
-
   /**
    * Launch a Claude Code process in interactive mode (Windows terminal).
-   * Extracted from the duplicated logic in launch() and launchQueued().
-   *
-   * Opens a new terminal window (wt.exe or cmd.exe) with the Claude Code
-   * CLI and all required env vars from buildSpawnEnv().
+   * Delegates to the unified cc-spawn module which writes a temp .cmd
+   * launcher file, eliminating cmd.exe quoting issues with prompt text.
    */
   private async launchInteractive(
     team: Team,
@@ -1626,50 +1560,15 @@ export class TeamManager {
   ): Promise<void> {
     const db = getDatabase();
 
-    const args = this.buildBaseClaudeArgs(team.worktreeName, {
+    await spawnInteractive({
+      mode: 'interactive',
+      worktreeName: team.worktreeName,
+      cwd: worktreeAbsPath,
       model: project.model,
       prompt,
+      windowTitle: `Team ${team.worktreeName}`,
+      fleetContext: { teamId: team.worktreeName, projectId: team.projectId!, githubRepo: project.githubRepo ?? '' },
     });
-
-    const spawnEnv = this.buildSpawnEnv(project, team.worktreeName, team.projectId!);
-    const claudePath = resolveClaudePath();
-    const fullCmd = `${claudePath} ${args.join(' ')}`;
-    const windowTitle = `Team ${team.worktreeName}`;
-
-    // Build env set commands dynamically from buildSpawnEnv()
-    const envSetCmds = this.buildInteractiveEnvSetCommands(spawnEnv);
-    const innerCommand = `cd /d "${worktreeAbsPath}" && ${envSetCmds} && ${fullCmd}`;
-
-    const termPref = config.terminalCmd;
-    let useWindowsTerminal = false;
-
-    if (termPref === 'wt') {
-      useWindowsTerminal = true;
-    } else if (termPref === 'auto') {
-      try {
-        await execAsync('where wt.exe', { timeout: 3000 });
-        useWindowsTerminal = true;
-      } catch {
-        useWindowsTerminal = false;
-      }
-    }
-
-    let startCommand: string;
-    if (useWindowsTerminal) {
-      startCommand = `wt.exe new-tab --title "${windowTitle}" cmd.exe /k "${innerCommand}"`;
-    } else {
-      startCommand = `start "${windowTitle}" cmd.exe /k "${innerCommand}"`;
-    }
-
-    console.log(`[TeamManager] Interactive spawn (terminal=${useWindowsTerminal ? 'wt' : 'cmd'}): ${startCommand}`);
-
-    const interactiveChild = spawn(startCommand, [], {
-      env: spawnEnv,
-      shell: true,
-      detached: true,
-      stdio: 'ignore',
-    });
-    interactiveChild.unref();
 
     console.log(`[TeamManager] Interactive window opened for team ${team.id} (worktree: ${team.worktreeName})`);
 
@@ -1688,50 +1587,6 @@ export class TeamManager {
       { team_id: team.id, issue_number: team.issueNumber, project_id: team.projectId! },
       team.id,
     );
-  }
-
-  /**
-   * Spawn a Claude Code process and validate it got a PID.
-   * On failure, transitions team to 'failed' and broadcasts snapshot.
-   * Returns the child process, or null if spawn failed.
-   */
-  private spawnAndValidate(
-    claudePath: string,
-    args: string[],
-    cwd: string,
-    env: Record<string, string | undefined>,
-    teamId: number,
-  ): ChildProcess | null {
-    const db = getDatabase();
-
-    const child = spawn(claudePath, args, {
-      cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: false,
-    });
-
-    const pid = child.pid;
-    if (pid === undefined) {
-      console.error(`[TeamManager] ERROR: spawn failed for team ${teamId}: no PID returned`);
-      db.insertTransition({
-        teamId,
-        fromStatus: 'launching',
-        toStatus: 'failed',
-        trigger: 'system',
-        reason: 'Spawn failed: no PID returned',
-      });
-      db.updateTeam(teamId, { status: 'failed', stoppedAt: new Date().toISOString() });
-      this.broadcastSnapshot();
-      return null;
-    }
-
-    console.log(`[TeamManager] Process spawned: PID ${pid}`);
-    db.updateTeam(teamId, { pid });
-    this.broadcastSnapshot();
-    this.childProcesses.set(teamId, child);
-
-    return child;
   }
 
   /**
