@@ -67,7 +67,6 @@ fleet-commander/
         FleetGrid.tsx       # Team table
         TeamRow.tsx         # Single team row
         TeamDetail.tsx      # Slide-over panel: output stream, events, commands
-        TeamOutput.tsx      # CC stdout stream display
         TeamTimeline.tsx    # Gantt-style timeline
         LaunchDialog.tsx    # Issue selection and team launch
         AddProjectDialog.tsx # New project form
@@ -75,7 +74,6 @@ fleet-commander/
         PRDetail.tsx        # PR popover with CI checks
         CIChecks.tsx        # CI check list
         CommandInput.tsx    # Send message to running agent
-        EventTimeline.tsx   # Event history list
         StatusBadge.tsx     # Team status indicator
         StatusBar.tsx       # Bottom status bar
         TopBar.tsx          # Top navigation bar

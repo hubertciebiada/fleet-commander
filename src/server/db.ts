@@ -720,20 +720,6 @@ export class FleetDatabase {
     }
   }
 
-  /**
-   * Get the current schema version.
-   */
-  getSchemaVersion(): number {
-    try {
-      const row = this.db.prepare(
-        'SELECT MAX(version) AS version FROM schema_version'
-      ).get() as { version: number } | undefined;
-      return row?.version ?? 0;
-    } catch {
-      return 0;
-    }
-  }
-
   // -------------------------------------------------------------------------
   // Projects
   // -------------------------------------------------------------------------
