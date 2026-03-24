@@ -1,4 +1,4 @@
-<!-- fleet-commander v0.0.7 -->
+<!-- fleet-commander v0.0.8 -->
 # SQL & Database Conventions
 
 > Applies to: `*.sql`, migration files, ORM model definitions, database access code
