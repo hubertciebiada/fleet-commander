@@ -1,17 +1,12 @@
 {
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
   "enabledPlugins": {
     "security-guidance@claude-plugins-official": true
   },
   "hooks": {
     "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_session_start.sh"
-          }
-        ]
-      },
       {
         "hooks": [
           {
@@ -26,28 +21,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_session_end.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "bash .claude/hooks/fleet-commander/run-hook.sh session_end on_session_end.sh"
           }
         ]
       }
     ],
     "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_stop.sh"
-          }
-        ]
-      },
       {
         "hooks": [
           {
@@ -62,28 +41,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_stop_failure.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "bash .claude/hooks/fleet-commander/run-hook.sh stop_failure on_stop_failure.sh"
           }
         ]
       }
     ],
     "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_subagent_start.sh"
-          }
-        ]
-      },
       {
         "hooks": [
           {
@@ -98,28 +61,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_subagent_stop.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "bash .claude/hooks/fleet-commander/run-hook.sh subagent_stop on_subagent_stop.sh"
           }
         ]
       }
     ],
     "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_notification.sh"
-          }
-        ]
-      },
       {
         "hooks": [
           {
@@ -134,28 +81,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_pre_compact.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "bash .claude/hooks/fleet-commander/run-hook.sh pre_compact on_pre_compact.sh"
           }
         ]
       }
     ],
     "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_post_tool_use.sh"
-          }
-        ]
-      },
       {
         "hooks": [
           {
@@ -170,28 +101,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_teammate_idle.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "bash .claude/hooks/fleet-commander/run-hook.sh teammate_idle on_teammate_idle.sh"
           }
         ]
       }
     ],
     "PostToolUseFailure": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/on_tool_error.sh"
-          }
-        ]
-      },
       {
         "hooks": [
           {
