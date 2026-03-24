@@ -108,12 +108,21 @@ PAYLOAD="${PAYLOAD}}"
 # ── Fire and forget ───────────────────────────────────────────────
 # curl with 2-second timeout. Errors are silenced completely.
 # The hook MUST NOT block Claude Code or cause visible failures.
+_LOG="$(cd "$(dirname "$0")" && pwd)/../../../../hooks.log"
 if command -v curl >/dev/null 2>&1; then
     curl -s -S --max-time 2 --connect-timeout 1 \
         -X POST \
         -H "Content-Type: application/json" \
         -d "$PAYLOAD" \
         "$FLEET_URL" >/dev/null 2>&1
+    CURL_RESULT=$?
+    if [ "$CURL_RESULT" -eq 0 ]; then
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | SEND  | $EVENT_TYPE | $TEAM_NAME | curl=ok" >> "$_LOG" 2>/dev/null || true
+    else
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | SEND  | $EVENT_TYPE | $TEAM_NAME | curl=fail($CURL_RESULT)" >> "$_LOG" 2>/dev/null || true
+    fi
+else
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | SEND  | $EVENT_TYPE | $TEAM_NAME | curl=missing" >> "$_LOG" 2>/dev/null || true
 fi
 
 # Always exit 0 — hooks must never fail

@@ -83,6 +83,26 @@ async function main() {
     DEFAULT_MESSAGE_TEMPLATES.map((t) => ({ id: t.id, template: t.template }))
   );
 
+  // Rotate hooks.log if > 10MB (prevents unbounded growth)
+  // Check all registered project paths for hooks.log files
+  try {
+    const projects = db.getProjects();
+    for (const project of projects) {
+      const hooksLog = path.join(project.repoPath, 'hooks.log');
+      try {
+        const stats = fs.statSync(hooksLog);
+        if (stats.size > 10 * 1024 * 1024) {
+          fs.truncateSync(hooksLog, 0);
+          server.log.info(`Truncated oversized hooks.log (${(stats.size / 1024 / 1024).toFixed(1)}MB) at ${hooksLog}`);
+        }
+      } catch {
+        // File doesn't exist or can't be read — fine
+      }
+    }
+  } catch {
+    // DB not ready or other error — skip rotation
+  }
+
   // Recover state from before restart (reconcile PIDs, detect orphan worktrees)
   await recoverOnStartup();
 
