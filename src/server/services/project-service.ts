@@ -866,13 +866,17 @@ export class ProjectService {
   /**
    * Commit .claude/ files to the current branch of the project repository.
    * If `.claude` is in `.gitignore`, removes it first.
-   * Runs: `git add .claude/` + `git commit -m "..."`.
+   * Runs: `git add -f .claude/` + `git commit -m "..."`.
    *
    * @param projectId - The project ID
+   * @param options - Optional: reinstall hooks before committing (amber path)
    * @returns { ok: true } on success, { ok: false, error: string } on failure
    * @throws ServiceError with code NOT_FOUND if project doesn't exist
    */
-  commitClaudeFiles(projectId: number): { ok: boolean; error?: string } {
+  commitClaudeFiles(
+    projectId: number,
+    options?: { reinstall?: boolean },
+  ): { ok: boolean; error?: string; message?: string } {
     const db = getDatabase();
     const project = db.getProject(projectId);
     if (!project) {
@@ -880,8 +884,15 @@ export class ProjectService {
     }
 
     const repoPath = project.repoPath;
+    const reinstall = options?.reinstall ?? false;
 
     try {
+      // For the amber (update) path, reinstall hooks first so on-disk files
+      // are updated to the current version before staging
+      if (reinstall) {
+        installHooks(repoPath, _minimalLogger);
+      }
+
       // Check if .claude is in .gitignore — remove it if so
       const gitignorePath = path.join(repoPath, '.gitignore');
       if (fs.existsSync(gitignorePath)) {
@@ -903,16 +914,34 @@ export class ProjectService {
         }
       }
 
-      // Stage .claude/ directory
-      execSync('git add .claude/', {
+      // Stage .claude/ directory — use -f to force-add regardless of gitignore rules
+      execSync('git add -f .claude/', {
         cwd: repoPath,
         encoding: 'utf-8',
         timeout: 10_000,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      // Commit
-      execSync('git commit -m "Add Fleet Commander hooks and agents"', {
+      // Check if anything was actually staged
+      try {
+        execSync('git diff --cached --quiet', {
+          cwd: repoPath,
+          encoding: 'utf-8',
+          timeout: 5_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        // Exit code 0 means nothing staged — files already up to date
+        invalidateInstallStatusCache(repoPath);
+        return { ok: true, message: 'Nothing to commit — files already up to date' };
+      } catch {
+        // Exit code 1 means there are staged changes — proceed with commit
+      }
+
+      // Commit with appropriate message
+      const commitMessage = reinstall
+        ? 'Update Fleet Commander hooks and agents'
+        : 'Add Fleet Commander hooks and agents';
+      execSync(`git commit -m "${commitMessage}"`, {
         cwd: repoPath,
         encoding: 'utf-8',
         timeout: 10_000,

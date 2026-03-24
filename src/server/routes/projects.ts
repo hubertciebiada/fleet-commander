@@ -294,7 +294,7 @@ const projectsRoutes: FastifyPluginCallback = (
   fastify.post(
     '/api/projects/:id/commit-claude-files',
     async (
-      request: FastifyRequest<{ Params: ProjectIdParams }>,
+      request: FastifyRequest<{ Params: ProjectIdParams; Body: { reinstall?: boolean } }>,
       reply: FastifyReply,
     ) => {
       try {
@@ -306,8 +306,11 @@ const projectsRoutes: FastifyPluginCallback = (
           });
         }
 
+        const body = (request.body ?? {}) as { reinstall?: boolean };
         const service = getProjectService();
-        const result = service.commitClaudeFiles(projectId);
+        const result = service.commitClaudeFiles(projectId, {
+          reinstall: body.reinstall,
+        });
         return reply.code(200).send(result);
       } catch (err: unknown) {
         if (err instanceof ServiceError) {
