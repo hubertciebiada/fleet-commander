@@ -1,0 +1,1 @@
+Clarification: the banner that should auto-dismiss after successful Fix is the RED warning banner showing files not committed to main. After successful commit+push invalidate install status cache and re-fetch project status so the red banner disappears without page reload.
