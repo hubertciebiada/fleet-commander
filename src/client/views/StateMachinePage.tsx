@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
-import dagre from 'dagre';
+import dagre from '@dagrejs/dagre';
 import { useApi } from '../hooks/useApi';
 import { ZapIcon, SettingsIcon, RefreshCwIcon, UserIcon, ClockIcon } from '../components/Icons';
 import type { StateMachineTransition, StateMachineState } from '../../shared/state-machine';
