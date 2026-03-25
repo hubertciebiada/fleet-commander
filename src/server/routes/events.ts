@@ -156,7 +156,11 @@ const eventsRoutes: FastifyPluginCallback = (
             message: err.message,
           });
         }
-        request.log.error(err, 'Unexpected error processing event');
+        const body = request.body as Record<string, unknown> | undefined;
+        request.log.error(
+          { err, event: body?.event, team: body?.team },
+          'Event processing failed',
+        );
         return reply.code(500).send({
           error: 'Internal Server Error',
           message: 'Failed to process event',
