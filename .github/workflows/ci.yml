@@ -39,9 +39,11 @@ jobs:
         run: npm run build
 
       - name: Test (server)
-        run: npx vitest run --project server
+        run: npm run test:server
 
       - name: Test (client)
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           FAILED=0
           for f in tests/client/*.test.{ts,tsx}; do

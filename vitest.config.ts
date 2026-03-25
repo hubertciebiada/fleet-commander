@@ -13,6 +13,8 @@ export default defineConfig({
           environment: 'jsdom',
           include: ['tests/client/**/*.test.{ts,tsx}'],
           setupFiles: ['tests/client/setup.ts'],
+          pool: 'forks',
+          fileParallelism: false,
         },
       },
       {
