@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useApi } from '../hooks/useApi';
-import type { ProjectSummary, Team, TeamStatus } from '../../shared/types';
+import type { ProjectSummary, Team, TeamStatus, InstallStatus } from '../../shared/types';
 import { TERMINAL_STATUSES } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +47,61 @@ function flattenIssueTree(nodes: IssueTreeNode[]): IssueItem[] {
   };
   walk(nodes);
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Project readiness check (client-side, mirrors server logic)
+// ---------------------------------------------------------------------------
+
+type ProjectHealth = 'ready' | 'warn' | 'blocked';
+
+interface ClientProjectReadiness {
+  health: ProjectHealth;
+  warnings: string[];
+  errors: string[];
+}
+
+/** Compute readiness from an InstallStatus. Returns 'blocked' if critical
+ *  artifacts are missing, 'warn' if files are outdated, 'ready' otherwise. */
+function computeProjectReadiness(status: InstallStatus | undefined): ClientProjectReadiness {
+  if (!status) {
+    // No install status available — treat as blocked (unknown state)
+    return { health: 'blocked', warnings: [], errors: ['Install status unavailable'] };
+  }
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!status.hooks.installed) {
+    errors.push(`Hooks not installed (${status.hooks.found}/${status.hooks.total})`);
+  }
+  if (!status.prompt.installed) {
+    errors.push('Prompt file not installed');
+  }
+  if (!status.agents.installed) {
+    errors.push('Agent files not installed');
+  }
+  if (status.gitCommitStatus?.gitignored) {
+    errors.push('.claude/ is in .gitignore');
+  }
+  if (
+    status.gitCommitStatus?.health === 'red' &&
+    !status.gitCommitStatus.gitignored
+  ) {
+    errors.push('Files not committed to default branch');
+  }
+
+  if (status.outdatedCount > 0) {
+    warnings.push(`${status.outdatedCount} file(s) outdated`);
+  }
+  if (status.gitCommitStatus?.health === 'amber') {
+    warnings.push('Committed files are outdated');
+  }
+
+  const health: ProjectHealth =
+    errors.length > 0 ? 'blocked' : warnings.length > 0 ? 'warn' : 'ready';
+
+  return { health, warnings, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -520,6 +575,24 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
     );
   }, [issues, issueSearch]);
 
+  // --- Project readiness map (computed from install status) ---
+  const projectReadiness = useMemo(() => {
+    const map = new Map<number, ClientProjectReadiness>();
+    for (const p of projects) {
+      map.set(p.id, computeProjectReadiness(p.installStatus));
+    }
+    return map;
+  }, [projects]);
+
+  // Readiness of the currently selected project
+  const selectedReadiness = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return projectReadiness.get(parseInt(selectedProjectId, 10)) ?? null;
+  }, [selectedProjectId, projectReadiness]);
+
+  // Whether the selected project is blocked (cannot launch)
+  const selectedProjectBlocked = selectedReadiness?.health === 'blocked';
+
   // --- Select an issue from the picker ---
   const handleSelectIssue = useCallback((issue: IssueItem) => {
     setIssueNumber(String(issue.number));
@@ -703,16 +776,50 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                       disabled={loading}
                     >
                       <option value="">Select a project...</option>
-                      {projects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
+                      {projects.map((p) => {
+                        const r = projectReadiness.get(p.id);
+                        const blocked = r?.health === 'blocked';
+                        const suffix = blocked
+                          ? ' (not ready \u2014 fix on Projects page)'
+                          : r?.health === 'warn'
+                            ? ' (warnings)'
+                            : '';
+                        return (
+                          <option key={p.id} value={p.id} disabled={blocked}>
+                            {p.name}{suffix}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                 ) : (
                   <div className="px-3 py-2 rounded border border-[#D29922]/30 bg-[#D29922]/10 text-[#D29922] text-sm">
                     Add a project first
+                  </div>
+                )}
+
+                {/* Project health banner — blocked */}
+                {selectedReadiness?.health === 'blocked' && (
+                  <div className="px-3 py-2 rounded border border-[#F85149]/30 bg-[#F85149]/10 text-[#F85149] text-sm">
+                    <p className="font-medium">Project not ready for launch</p>
+                    <ul className="mt-1 list-disc list-inside text-xs">
+                      {selectedReadiness.errors.map((e, i) => (
+                        <li key={i}>{e}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-1 text-xs opacity-80">Fix these issues on the Projects page before launching.</p>
+                  </div>
+                )}
+
+                {/* Project health banner — warnings */}
+                {selectedReadiness?.health === 'warn' && (
+                  <div className="px-3 py-2 rounded border border-[#D29922]/30 bg-[#D29922]/10 text-[#D29922] text-sm">
+                    <p className="font-medium">Project has warnings</p>
+                    <ul className="mt-1 list-disc list-inside text-xs">
+                      {selectedReadiness.warnings.map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 
@@ -977,7 +1084,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                 <>
                   <button
                     onClick={() => batchMode ? handleLaunchBatch() : void handleLaunch()}
-                    disabled={loading || projects.length === 0}
+                    disabled={loading || projects.length === 0 || selectedProjectBlocked}
                     className="px-4 py-1.5 text-sm font-medium rounded border border-dark-accent/40 text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {loading
@@ -989,7 +1096,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                   {zone === 'red' && !batchMode && (
                     <button
                       onClick={() => void handleLaunch(true)}
-                      disabled={loading || projects.length === 0}
+                      disabled={loading || projects.length === 0 || selectedProjectBlocked}
                       className="px-4 py-1.5 text-sm font-medium rounded border border-[#F85149]/40 text-[#F85149] bg-[#F85149]/10 hover:bg-[#F85149]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       title="Force launch ignoring red zone usage limits"
                     >

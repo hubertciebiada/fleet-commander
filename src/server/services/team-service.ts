@@ -16,7 +16,8 @@ import { sseBroker } from './sse-broker.js';
 import config from '../config.js';
 import type { TeamPhase, IssueDependencyInfo } from '../../shared/types.js';
 import { buildTimeline } from '../utils/build-timeline.js';
-import { ServiceError, validationError, notFoundError, conflictError } from './service-error.js';
+import { ServiceError, validationError, notFoundError, conflictError, projectNotReadyError } from './service-error.js';
+import { getProjectService } from './project-service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,6 +82,17 @@ export class TeamService {
       throw validationError('issueNumber is required and must be a positive integer');
     }
 
+    // Project readiness check -- block launch if install health checks fail
+    if (!force) {
+      const projectService = getProjectService();
+      const readiness = projectService.getProjectReadiness(projectId);
+      if (!readiness.ready) {
+        throw projectNotReadyError(
+          `Project is not ready for launch: ${readiness.errors.join('; ')}`,
+        );
+      }
+    }
+
     // Dependency check -- block launch if unresolved dependencies exist
     if (!force) {
       const depInfo = await checkDependencies(projectId, issueNumber);
@@ -143,6 +155,15 @@ export class TeamService {
       if (!issue.number || typeof issue.number !== 'number' || issue.number < 1) {
         throw validationError(`Invalid issue number: ${JSON.stringify(issue)}`);
       }
+    }
+
+    // Project readiness check -- block batch launch if install health checks fail
+    const projectService = getProjectService();
+    const readiness = projectService.getProjectReadiness(projectId);
+    if (!readiness.ready) {
+      throw projectNotReadyError(
+        `Project is not ready for launch: ${readiness.errors.join('; ')}`,
+      );
     }
 
     // Dependency check for batch launch

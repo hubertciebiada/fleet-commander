@@ -16,7 +16,7 @@ import { installHooks, uninstallHooks } from '../utils/hook-installer.js';
 import config from '../config.js';
 import { execGitAsync, execGHAsync, execGHResult } from '../utils/exec-gh.js';
 import { execSync } from 'child_process';
-import type { ProjectStatus, InstallStatus, InstallFileStatus, RepoSettings, GitCommitStatus, GitCommitFileStatus, GitCommitHealth } from '../../shared/types.js';
+import type { ProjectStatus, InstallStatus, InstallFileStatus, RepoSettings, GitCommitStatus, GitCommitFileStatus, GitCommitHealth, ProjectReadiness } from '../../shared/types.js';
 import { ServiceError, validationError, notFoundError, conflictError } from './service-error.js';
 import { getPackageVersion } from '../utils/version.js';
 import { getHookFiles as getManifestHookFiles, getAgentFiles as getManifestAgentFiles, getGuideFiles as getManifestGuideFiles, getWorkflowFile } from '../utils/fc-manifest.js';
@@ -608,6 +608,78 @@ export class ProjectService {
       }
       return { ...p, installStatus };
     });
+  }
+
+  /**
+   * Evaluate a project's readiness for launching teams.
+   * Checks install status (hooks, prompt, agents) and git commit status.
+   *
+   * @param projectId - The project ID
+   * @returns ProjectReadiness with ready flag, warnings, and errors
+   * @throws ServiceError with code NOT_FOUND if project doesn't exist
+   */
+  getProjectReadiness(projectId: number): ProjectReadiness {
+    const db = getDatabase();
+    const project = db.getProject(projectId);
+    if (!project) {
+      throw notFoundError(`Project ${projectId} not found`);
+    }
+
+    const status = checkInstallStatus(project.repoPath);
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Blocking: hooks not installed
+    if (!status.hooks.installed) {
+      errors.push(
+        `Hooks not installed (${status.hooks.found}/${status.hooks.total} found)`,
+      );
+    }
+
+    // Blocking: prompt file not installed
+    if (!status.prompt.installed) {
+      errors.push('Prompt file not installed');
+    }
+
+    // Blocking: agent files not installed
+    if (!status.agents.installed) {
+      errors.push('Agent files not installed');
+    }
+
+    // Blocking: .claude/ in .gitignore
+    if (status.gitCommitStatus?.gitignored) {
+      errors.push('.claude/ is in .gitignore — files will not be available on branches');
+    }
+
+    // Blocking: git commit health is red (files not committed)
+    if (
+      status.gitCommitStatus?.health === 'red' &&
+      !status.gitCommitStatus.gitignored // already covered above
+    ) {
+      errors.push(
+        `Git commit check failed: ${status.gitCommitStatus.message}`,
+      );
+    }
+
+    // Warning: outdated files
+    if (status.outdatedCount > 0) {
+      warnings.push(
+        `${status.outdatedCount} installed file(s) are outdated — consider reinstalling`,
+      );
+    }
+
+    // Warning: git commit health is amber (outdated on branch)
+    if (status.gitCommitStatus?.health === 'amber') {
+      warnings.push(
+        `Git commit check: ${status.gitCommitStatus.message}`,
+      );
+    }
+
+    return {
+      ready: errors.length === 0,
+      warnings,
+      errors,
+    };
   }
 
   /**

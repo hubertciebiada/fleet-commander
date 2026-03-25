@@ -92,6 +92,13 @@ const teamsRoutes: FastifyPluginCallback = (
         return reply.code(201).send(team);
       } catch (err: unknown) {
         if (err instanceof ServiceError) {
+          if (err.code === 'PROJECT_NOT_READY') {
+            return reply.code(400).send({
+              error: 'Project Not Ready',
+              message: err.message,
+              hint: 'Fix the project on the Projects page before launching.',
+            });
+          }
           if (err.code === 'BLOCKED_BY_DEPENDENCIES') {
             return reply.code(409).send({
               error: 'Blocked by Dependencies',
@@ -131,6 +138,13 @@ const teamsRoutes: FastifyPluginCallback = (
         return reply.code(201).send(result);
       } catch (err: unknown) {
         if (err instanceof ServiceError) {
+          if (err.code === 'PROJECT_NOT_READY') {
+            return reply.code(400).send({
+              error: 'Project Not Ready',
+              message: err.message,
+              hint: 'Fix the project on the Projects page before launching.',
+            });
+          }
           return reply.code(err.statusCode).send({ error: err.code, message: err.message });
         }
         const message = err instanceof Error ? err.message : String(err);

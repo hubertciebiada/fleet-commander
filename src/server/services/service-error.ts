@@ -49,6 +49,11 @@ export function conflictError(message: string): ServiceError {
   return new ServiceError(message, 'CONFLICT', 409);
 }
 
+/** 400 Bad Request — project not ready for launch (install health check failed) */
+export function projectNotReadyError(message: string): ServiceError {
+  return new ServiceError(message, 'PROJECT_NOT_READY', 400);
+}
+
 /** 502 Bad Gateway — external tool/CLI failures */
 export function externalError(message: string, details?: string): ServiceError {
   return new ServiceError(message, 'EXTERNAL_ERROR', 502, details);
