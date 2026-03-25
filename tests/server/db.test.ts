@@ -996,6 +996,37 @@ describe('Agent Messages CRUD', () => {
     expect(messages2[0].recipient).toBe('dev-py');
   });
 
+  it('getAgentMessages excludes content column', () => {
+    db.insertAgentMessage({
+      teamId: 1,
+      eventId: 1,
+      sender: 'coordinator',
+      recipient: 'dev-ts',
+      summary: 'Task assigned',
+      content: 'Full message content that should not appear in list queries',
+    });
+
+    const messages = db.getAgentMessages(1);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBeNull();
+    expect(messages[0].summary).toBe('Task assigned');
+  });
+
+  it('getAgentMessageSummary returns correct lastSummary with window function', () => {
+    db.insertAgentMessage({ teamId: 1, eventId: 1, sender: 'coordinator', recipient: 'dev-ts', summary: 'First task' });
+    db.insertAgentMessage({ teamId: 1, eventId: 1, sender: 'coordinator', recipient: 'dev-ts', summary: 'Second task' });
+    db.insertAgentMessage({ teamId: 1, eventId: 1, sender: 'coordinator', recipient: 'dev-ts', summary: 'Third task' });
+
+    const summary = db.getAgentMessageSummary(1);
+    expect(summary).toHaveLength(1);
+
+    const edge = summary[0];
+    expect(edge.sender).toBe('coordinator');
+    expect(edge.recipient).toBe('dev-ts');
+    expect(edge.count).toBe(3);
+    expect(edge.lastSummary).toBe('Third task');
+  });
+
   it('agent message timestamps end with Z', () => {
     const msg = db.insertAgentMessage({
       teamId: 1,
