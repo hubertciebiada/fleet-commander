@@ -25,10 +25,10 @@ vi.mock('../../src/client/hooks/useApi', () => ({
   useApi: () => mockApi,
 }));
 
-// Mock dagre since it is not installed in the test environment.
+// Mock @dagrejs/dagre since it is not installed in the test environment.
 // We build a minimal in-memory graph that satisfies the dagre API surface
 // used by computeLayout in StateMachinePage.
-vi.mock('dagre', () => {
+vi.mock('@dagrejs/dagre', () => {
   class MockGraph {
     private _nodes: Map<string, Record<string, unknown>> = new Map();
     private _edges: Array<{ v: string; w: string; name?: string; label: Record<string, unknown> }> = [];
