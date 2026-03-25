@@ -137,6 +137,16 @@ export interface InstallStatus {
   gitCommitStatus?: GitCommitStatus;
 }
 
+/** Result of a project readiness check for launching teams */
+export interface ProjectReadiness {
+  /** Whether the project is ready for team launches */
+  ready: boolean;
+  /** Non-blocking issues (e.g. outdated files) — launch is allowed */
+  warnings: string[];
+  /** Blocking issues (e.g. hooks not installed) — launch is denied */
+  errors: string[];
+}
+
 /** Project with team count for list view */
 export interface ProjectSummary extends Project {
   teamCount: number;

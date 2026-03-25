@@ -42,6 +42,21 @@ function makeProjects() {
       maxActiveTeams: 5,
       activeTeamCount: 1,
       queuedTeamCount: 0,
+      installStatus: {
+        hooks: { installed: true, total: 10, found: 10, files: [] },
+        prompt: { installed: true, files: [] },
+        agents: { installed: true, files: [] },
+        settings: { name: 'settings.json', exists: true },
+        outdatedCount: 0,
+        currentVersion: '0.0.9',
+        gitCommitStatus: {
+          health: 'green',
+          gitignored: false,
+          defaultBranch: 'main',
+          files: [],
+          message: 'All files committed',
+        },
+      },
     },
   ];
 }
