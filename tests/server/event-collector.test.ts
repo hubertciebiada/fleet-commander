@@ -26,12 +26,47 @@ import {
 function createMockDb(overrides?: Partial<EventCollectorDb>): EventCollectorDb {
   let nextEventId = 1;
   let nextMsgId = 1;
+
+  const insertEvent = vi.fn().mockImplementation(() => ({ id: nextEventId++ }));
+  const updateTeam = vi.fn();
+  const insertTransition = vi.fn();
+  const insertAgentMessage = vi.fn().mockImplementation(() => ({ id: nextMsgId++ }));
+
+  // processEventTransaction delegates to individual mocks so existing
+  // assertions on insertEvent, updateTeam, etc. continue to pass.
+  const processEventTransaction = vi.fn().mockImplementation(
+    (ops: {
+      transition?: { teamId: number; fromStatus: string; toStatus: string; trigger: string; reason: string };
+      statusUpdate?: { teamId: number; fields: Record<string, unknown> };
+      heartbeatUpdate: { teamId: number; lastEventAt: string };
+      eventInsert: { teamId: number; sessionId: string | null; agentName: string | null; eventType: string; toolName?: string | null; payload: string };
+      agentMessages?: Array<{ teamId: number; sender: string; recipient: string; summary?: string | null; content?: string | null; sessionId?: string | null }>;
+    }) => {
+      if (ops.transition) {
+        insertTransition(ops.transition);
+      }
+      if (ops.statusUpdate) {
+        updateTeam(ops.statusUpdate.teamId, ops.statusUpdate.fields);
+      }
+      updateTeam(ops.heartbeatUpdate.teamId, { lastEventAt: ops.heartbeatUpdate.lastEventAt });
+      const result = insertEvent(ops.eventInsert);
+      const eventId = result.id;
+      if (ops.agentMessages) {
+        for (const msg of ops.agentMessages) {
+          insertAgentMessage({ ...msg, eventId });
+        }
+      }
+      return { eventId };
+    },
+  );
+
   return {
     getTeamByWorktree: vi.fn().mockReturnValue({ id: 1, status: 'running', phase: 'implementing' }),
-    insertEvent: vi.fn().mockImplementation(() => ({ id: nextEventId++ })),
-    updateTeam: vi.fn(),
-    insertTransition: vi.fn(),
-    insertAgentMessage: vi.fn().mockImplementation(() => ({ id: nextMsgId++ })),
+    insertEvent,
+    updateTeam,
+    insertTransition,
+    insertAgentMessage,
+    processEventTransaction,
     ...overrides,
   };
 }
@@ -1872,5 +1907,228 @@ describe('Agent name normalization in event processing', () => {
         recipient: 'reviewer', // fleet- prefix stripped
       }),
     );
+  });
+});
+
+// =============================================================================
+// Transaction atomicity (Issue #492)
+// =============================================================================
+
+describe('Transaction atomicity', () => {
+  it('calls processEventTransaction with all operations for a state-transitioning event', () => {
+    const db = createMockDb({
+      getTeamByWorktree: vi.fn().mockReturnValue({ id: 1, status: 'idle', phase: 'implementing' }),
+    });
+    const sse = createMockSse();
+    const payload = makePayload({ event: 'session_start' });
+
+    processEvent(payload, db, sse);
+
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+    const ops = (db.processEventTransaction as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+    // Transition should be populated
+    expect(ops.transition).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        fromStatus: 'idle',
+        toStatus: 'running',
+        trigger: 'hook',
+      }),
+    );
+
+    // Status update should be populated
+    expect(ops.statusUpdate).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        fields: { status: 'running' },
+      }),
+    );
+
+    // Heartbeat always required
+    expect(ops.heartbeatUpdate).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        lastEventAt: expect.any(String),
+      }),
+    );
+
+    // Event insert always required
+    expect(ops.eventInsert).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        eventType: 'SessionStart',
+      }),
+    );
+  });
+
+  it('calls processEventTransaction without transition for a running team event', () => {
+    const db = createMockDb({
+      getTeamByWorktree: vi.fn().mockReturnValue({ id: 1, status: 'running', phase: 'implementing' }),
+    });
+    const sse = createMockSse();
+    const payload = makePayload({ event: 'tool_use' });
+
+    processEvent(payload, db, sse);
+
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+    const ops = (db.processEventTransaction as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+    // No transition or status update for already-running team
+    expect(ops.transition).toBeUndefined();
+    expect(ops.statusUpdate).toBeUndefined();
+
+    // Heartbeat and event insert always present
+    expect(ops.heartbeatUpdate).toBeDefined();
+    expect(ops.eventInsert).toBeDefined();
+  });
+
+  it('logs error and re-throws when processEventTransaction fails', () => {
+    const txError = new Error('SQLITE_BUSY: database is locked');
+    const db = createMockDb({
+      processEventTransaction: vi.fn().mockImplementation(() => {
+        throw txError;
+      }),
+    });
+    const sse = createMockSse();
+    const payload = makePayload({ event: 'session_start' });
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => processEvent(payload, db, sse)).toThrow('SQLITE_BUSY');
+
+      // Verify console.error was called with team/event context
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('team=kea-100'),
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('event=session_start'),
+      );
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it('still calls db.updateTeam directly for throttled tool_use heartbeat', () => {
+    const db = createMockDb();
+    const sse = createMockSse();
+
+    // First tool_use goes through the transaction
+    processEvent(makePayload({ event: 'tool_use' }), db, sse);
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+
+    // Second tool_use within throttle window — should NOT call processEventTransaction
+    const result = processEvent(makePayload({ event: 'tool_use' }), db, sse);
+    expect(result.processed).toBe(false);
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1); // still 1
+
+    // But updateTeam should have been called directly for the heartbeat
+    const directUpdateCalls = (db.updateTeam as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: unknown[]) => {
+        // These are direct calls (not via processEventTransaction delegation)
+        // The delegated calls from processEventTransaction also show up here,
+        // but the throttled path adds an extra direct call with lastEventAt
+        return (call[1] as Record<string, unknown>).lastEventAt !== undefined;
+      },
+    );
+    // At least 2: one delegated from transaction + one direct from throttled path
+    expect(directUpdateCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('wraps terminal-state event inserts in a transaction (no transition)', () => {
+    const db = createMockDb({
+      getTeamByWorktree: vi.fn().mockReturnValue({ id: 1, status: 'done', phase: 'done' }),
+    });
+    const sse = createMockSse();
+    const payload = makePayload({ event: 'notification' });
+
+    processEvent(payload, db, sse);
+
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+    const ops = (db.processEventTransaction as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(ops.transition).toBeUndefined();
+    expect(ops.statusUpdate).toBeUndefined();
+    expect(ops.eventInsert.eventType).toBe('Notification');
+  });
+});
+
+// =============================================================================
+// Agent messages in transaction (Issue #492)
+// =============================================================================
+
+describe('Agent messages in transaction', () => {
+  it('includes SubagentStart spawn message in transaction agentMessages', () => {
+    const db = createMockDb();
+    const sse = createMockSse();
+
+    processEvent(
+      makePayload({ event: 'subagent_start', teammate_name: 'fleet-dev', agent_type: 'coordinator' }),
+      db,
+      sse,
+    );
+
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+    const ops = (db.processEventTransaction as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+    expect(ops.agentMessages).toBeDefined();
+    expect(ops.agentMessages).toHaveLength(1);
+    expect(ops.agentMessages[0]).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        sender: 'team-lead',
+        recipient: 'dev',
+        summary: 'spawned agent',
+      }),
+    );
+  });
+
+  it('includes SendMessage routing in transaction agentMessages', () => {
+    const db = createMockDb();
+    const sse = createMockSse();
+
+    processEvent(
+      makePayload({
+        event: 'tool_use',
+        tool_name: 'SendMessage',
+        agent_type: 'coordinator',
+        msg_to: 'dev-typescript',
+        msg_summary: 'Implement the fix',
+        message: 'Full content',
+        session_id: 'sess-abc',
+      }),
+      db,
+      sse,
+    );
+
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+    const ops = (db.processEventTransaction as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+    expect(ops.agentMessages).toBeDefined();
+    expect(ops.agentMessages).toHaveLength(1);
+    expect(ops.agentMessages[0]).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        sender: 'coordinator',
+        recipient: 'dev-typescript',
+        summary: 'Implement the fix',
+        content: 'Full content',
+        sessionId: 'sess-abc',
+      }),
+    );
+  });
+
+  it('does not include agentMessages when neither SubagentStart nor SendMessage', () => {
+    const db = createMockDb();
+    const sse = createMockSse();
+
+    processEvent(
+      makePayload({ event: 'tool_use', tool_name: 'Bash', agent_type: 'coordinator' }),
+      db,
+      sse,
+    );
+
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+    const ops = (db.processEventTransaction as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(ops.agentMessages).toBeUndefined();
   });
 });

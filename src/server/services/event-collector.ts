@@ -81,6 +81,13 @@ export interface EventCollectorDb {
     content?: string | null;
     sessionId?: string | null;
   }): { id: number };
+  processEventTransaction(ops: {
+    transition?: { teamId: number; fromStatus: TeamStatus; toStatus: TeamStatus; trigger: string; reason: string };
+    statusUpdate?: { teamId: number; fields: Record<string, unknown> };
+    heartbeatUpdate: { teamId: number; lastEventAt: string };
+    eventInsert: { teamId: number; sessionId: string | null; agentName: string | null; eventType: string; toolName?: string | null; payload: string };
+    agentMessages?: Array<{ teamId: number; sender: string; recipient: string; summary?: string | null; content?: string | null; sessionId?: string | null }>;
+  }): { eventId: number };
 }
 
 /** SSE broker interface for broadcasting events */
@@ -212,82 +219,76 @@ export function processEvent(
   // debugging, but all transition logic is skipped.
   const isTerminal = TERMINAL_STATUSES.has(team.status);
 
-  // ── State transition: idle/stuck -> running on activity events ─────
-  // Most events from an idle or stuck team prove it is alive and doing
-  // work. However, dormancy-indicating events (stop, session_end) mean
-  // the agent finished its turn or the session terminated — they must
-  // NOT reset the idle/stuck status because the agent is not actively
-  // working. Those events still update lastEventAt (line 206) so the
-  // stuck detector has accurate timing data.
-  //
-  // This MUST happen before the throttle check so that even
-  // deduplicated tool_use events trigger the recovery transition.
+  // ── Collect transition data (without writing to DB yet) ──────────
+  // The actual DB writes happen inside a single transaction below.
+  // SSE broadcasts are collected and emitted AFTER the transaction commits.
+  let transitionData: { teamId: number; fromStatus: TeamStatus; toStatus: TeamStatus; trigger: string; reason: string } | undefined;
+  let statusUpdateData: { teamId: number; fields: Record<string, unknown> } | undefined;
+  let previousStatus: TeamStatus | undefined;
+
   const DORMANCY_EVENTS = new Set(['stop', 'stop_failure', 'session_end']);
   const eventNameLower = payload.event.toLowerCase();
 
+  // ── State transition: idle/stuck -> running on activity events ─────
   if (!isTerminal && (team.status === 'idle' || team.status === 'stuck') && !DORMANCY_EVENTS.has(eventNameLower)) {
-    // Re-read from DB to avoid stale state (another service may have transitioned the team)
     const freshTeam = db.getTeamByWorktree(payload.team);
     if (freshTeam && (freshTeam.status === 'idle' || freshTeam.status === 'stuck') && !TERMINAL_STATUSES.has(freshTeam.status)) {
-      db.insertTransition({
+      transitionData = {
         teamId,
         fromStatus: freshTeam.status,
         toStatus: 'running',
         trigger: 'hook',
         reason: `Activity resumed (${payload.event} event received)`,
-      });
-      db.updateTeam(teamId, {
-        status: 'running',
-      });
-      sse.broadcast('team_status_changed', {
-        team_id: teamId,
-        status: 'running',
-        previous_status: freshTeam.status,
-      }, teamId);
+      };
+      statusUpdateData = { teamId, fields: { status: 'running' } };
+      previousStatus = freshTeam.status;
     }
   }
 
   // ── State transition: launching -> running only on session_start/subagent_start
-  // Other events during launching may be noise; wait for an actual session start.
   if (!isTerminal && team.status === 'launching') {
     const evt = payload.event.toLowerCase();
     if (evt === 'session_start' || evt === 'subagent_start') {
-      // Re-read from DB to avoid stale state (launch timeout may have fired)
       const freshTeam = db.getTeamByWorktree(payload.team);
       if (freshTeam && freshTeam.status === 'launching') {
-        db.insertTransition({
+        transitionData = {
           teamId,
           fromStatus: 'launching',
           toStatus: 'running',
           trigger: 'hook',
           reason: `First ${evt} event received`,
-        });
-        db.updateTeam(teamId, {
-          status: 'running',
-        });
-        sse.broadcast('team_status_changed', {
-          team_id: teamId,
-          status: 'running',
-          previous_status: 'launching',
-        }, teamId);
+        };
+        statusUpdateData = { teamId, fields: { status: 'running' } };
+        previousStatus = 'launching';
       }
     }
   }
 
-  // ── Always update last_event_at (heartbeat) ──────────────────────
-  // Stuck detection depends on last_event_at being fresh.
-  // Even throttled/deduplicated events must update this timestamp
-  // so the stuck detector doesn't falsely flag active teams.
-  db.updateTeam(teamId, { lastEventAt: nowIso });
-
   // ── Throttle tool_use events ─────────────────────────────────────
+  // Throttled events still need a heartbeat update and any transition
+  // that was determined above. For throttled events, execute the
+  // transition (if any) directly and update heartbeat, then exit early.
   if (payload.event.toLowerCase() === 'tool_use') {
     const teamKey = payload.team;
     const lastTime = lastToolUseByTeam.get(teamKey) || 0;
 
     if (now - lastTime < TOOL_USE_THROTTLE_MS) {
-      // Deduplicated: don't insert into DB or broadcast SSE.
-      // Return 200 with processed: false (not an error, just deduped).
+      // Deduplicated: still apply any transition + heartbeat, but skip
+      // event insert and SSE broadcast.
+      if (transitionData) {
+        db.insertTransition(transitionData);
+      }
+      if (statusUpdateData) {
+        db.updateTeam(statusUpdateData.teamId, statusUpdateData.fields);
+      }
+      db.updateTeam(teamId, { lastEventAt: nowIso });
+      if (previousStatus !== undefined) {
+        sse.broadcast('team_status_changed', {
+          team_id: teamId,
+          status: 'running',
+          previous_status: previousStatus,
+        }, teamId);
+      }
       return { event_id: null, team_id: teamId, processed: false };
     }
 
@@ -304,22 +305,69 @@ export function processEvent(
   const eventType = normalizeEventType(payload.event);
 
   // ── Normalize agent name ────────────────────────────────────────
-  // Strip "fleet-" prefix and map empty agent_type to "team-lead"
-  // so roster names and message sender/recipient names match.
   const agentName = normalizeAgentName(payload.agent_type);
 
-  // ── Insert event into database ───────────────────────────────────
-  const inserted = db.insertEvent({
-    teamId,
-    sessionId: payload.session_id || null,
-    agentName,
-    eventType,
-    toolName: payload.tool_name || null,
-    payload: JSON.stringify(payload),
-  });
-  const eventId = inserted.id;
+  // ── Collect agent messages to include in the transaction ─────────
+  const agentMessages: Array<{ teamId: number; sender: string; recipient: string; summary?: string | null; content?: string | null; sessionId?: string | null }> = [];
+  const evtLower = payload.event.toLowerCase();
 
-  // ── Broadcast via SSE ────────────────────────────────────────────
+  if (evtLower === 'subagent_start') {
+    const subagentName = payload.teammate_name || payload.agent_type || 'unknown';
+    const senderName = normalizeAgentName(null); // TL spawns subagents
+    const recipientName = normalizeAgentName(subagentName);
+    agentMessages.push({
+      teamId,
+      sender: senderName,
+      recipient: recipientName,
+      summary: 'spawned agent',
+      content: null,
+      sessionId: payload.session_id || null,
+    });
+  }
+
+  if (payload.tool_name === 'SendMessage' && payload.msg_to) {
+    agentMessages.push({
+      teamId,
+      sender: normalizeAgentName(payload.agent_type),
+      recipient: normalizeAgentName(payload.msg_to),
+      summary: payload.msg_summary || null,
+      content: payload.message || null,
+      sessionId: payload.session_id || null,
+    });
+  }
+
+  // ── Execute all DB writes in a single transaction ────────────────
+  let eventId: number;
+  try {
+    const result = db.processEventTransaction({
+      transition: transitionData,
+      statusUpdate: statusUpdateData,
+      heartbeatUpdate: { teamId, lastEventAt: nowIso },
+      eventInsert: {
+        teamId,
+        sessionId: payload.session_id || null,
+        agentName,
+        eventType,
+        toolName: payload.tool_name || null,
+        payload: JSON.stringify(payload),
+      },
+      agentMessages: agentMessages.length > 0 ? agentMessages : undefined,
+    });
+    eventId = result.eventId;
+  } catch (err) {
+    console.error(`[EventCollector] Transaction failed for team=${payload.team} event=${payload.event}: ${err}`);
+    throw err;
+  }
+
+  // ── Broadcast via SSE (after transaction commits) ────────────────
+  if (previousStatus !== undefined) {
+    sse.broadcast('team_status_changed', {
+      team_id: teamId,
+      status: 'running',
+      previous_status: previousStatus,
+    }, teamId);
+  }
+
   sse.broadcast('team_event', {
     event_id: eventId,
     team_id: teamId,
@@ -334,30 +382,10 @@ export function processEvent(
   // Track SubagentStart/SubagentStop pairs. If a subagent stops very
   // quickly (< 2 min) with minimal events (< 5), it likely crashed.
   // Send an advisory message to the TL so they can decide to respawn.
-  const evtLower = payload.event.toLowerCase();
-
   if (evtLower === 'subagent_start') {
     const subagentName = payload.teammate_name || payload.agent_type || 'unknown';
     const trackerKey = `${payload.team}:${subagentName}`;
     subagentTrackers.set(trackerKey, { startTime: now, eventCount: 0 });
-
-    // Record spawn as a real agent message (TL -> subagent) so the CommGraph
-    // shows data-driven edges instead of synthetic spawn lines.
-    try {
-      const senderName = normalizeAgentName(null); // TL spawns subagents
-      const recipientName = normalizeAgentName(subagentName);
-      db.insertAgentMessage({
-        teamId,
-        eventId,
-        sender: senderName,
-        recipient: recipientName,
-        summary: 'spawned agent',
-        content: null,
-        sessionId: payload.session_id || null,
-      });
-    } catch {
-      // Non-critical — silently ignore insert failures
-    }
   }
 
   // Increment event count for any tracked subagent on this team
@@ -392,25 +420,6 @@ export function processEvent(
 
       // Clean up tracker regardless of crash detection
       subagentTrackers.delete(trackerKey);
-    }
-  }
-
-  // ── Capture inter-agent message routing ───────────────────────
-  // When a SendMessage tool call is received with a msg_to field,
-  // record the message in the agent_messages table for routing visibility.
-  if (payload.tool_name === 'SendMessage' && payload.msg_to) {
-    try {
-      db.insertAgentMessage({
-        teamId,
-        eventId,
-        sender: normalizeAgentName(payload.agent_type),
-        recipient: normalizeAgentName(payload.msg_to),
-        summary: payload.msg_summary || null,
-        content: payload.message || null,
-        sessionId: payload.session_id || null,
-      });
-    } catch {
-      // Non-critical — silently ignore insert failures
     }
   }
 

@@ -1201,6 +1201,99 @@ export class FleetDatabase {
     return this.mapEventRow(row);
   }
 
+  /**
+   * Atomically execute all DB writes for a single event processing cycle.
+   *
+   * Wraps transition insert, status update, heartbeat update, event insert,
+   * and agent message inserts in a single better-sqlite3 transaction so that
+   * a failure in any write rolls back all of them — preventing partial state
+   * (e.g., transition recorded but event lost).
+   *
+   * Retries once on SQLITE_BUSY after the configured busy_timeout has
+   * already been exhausted (defense-in-depth).
+   */
+  processEventTransaction(ops: {
+    transition?: { teamId: number; fromStatus: TeamStatus; toStatus: TeamStatus; trigger: string; reason: string };
+    statusUpdate?: { teamId: number; fields: TeamUpdate };
+    heartbeatUpdate: { teamId: number; lastEventAt: string };
+    eventInsert: EventInsert;
+    agentMessages?: Array<Omit<AgentMessageInsert, 'eventId'>>;
+  }): { eventId: number } {
+    const runTransaction = this.db.transaction((txOps: typeof ops) => {
+      // 1. Insert transition record (if transitioning)
+      if (txOps.transition) {
+        this.db.prepare(
+          'INSERT INTO team_transitions (team_id, from_status, to_status, trigger, reason) VALUES (?, ?, ?, ?, ?)'
+        ).run(
+          txOps.transition.teamId,
+          txOps.transition.fromStatus,
+          txOps.transition.toStatus,
+          txOps.transition.trigger,
+          txOps.transition.reason,
+        );
+      }
+
+      // 2. Update team status (if transitioning)
+      if (txOps.statusUpdate) {
+        this.updateTeam(txOps.statusUpdate.teamId, txOps.statusUpdate.fields);
+      }
+
+      // 3. Update heartbeat (lastEventAt) — always required
+      this.updateTeam(txOps.heartbeatUpdate.teamId, { lastEventAt: txOps.heartbeatUpdate.lastEventAt });
+
+      // 4. Insert event — always required
+      const eventInfo = this.db.prepare(`
+        INSERT INTO events (team_id, session_id, agent_name, event_type, tool_name, payload)
+        VALUES (@teamId, @sessionId, @agentName, @eventType, @toolName, @payload)
+      `).run({
+        teamId: txOps.eventInsert.teamId,
+        sessionId: txOps.eventInsert.sessionId ?? null,
+        agentName: txOps.eventInsert.agentName ?? null,
+        eventType: txOps.eventInsert.eventType,
+        toolName: txOps.eventInsert.toolName ?? null,
+        payload: txOps.eventInsert.payload ?? null,
+      });
+      const eventId = Number(eventInfo.lastInsertRowid);
+
+      // 5. Insert agent messages (if any), filling in the eventId
+      if (txOps.agentMessages && txOps.agentMessages.length > 0) {
+        const msgStmt = this.db.prepare(`
+          INSERT INTO agent_messages (team_id, event_id, sender, recipient, summary, content, session_id)
+          VALUES (@teamId, @eventId, @sender, @recipient, @summary, @content, @sessionId)
+        `);
+        for (const msg of txOps.agentMessages) {
+          msgStmt.run({
+            teamId: msg.teamId,
+            eventId,
+            sender: msg.sender,
+            recipient: msg.recipient,
+            summary: msg.summary ?? null,
+            content: msg.content ?? null,
+            sessionId: msg.sessionId ?? null,
+          });
+        }
+      }
+
+      return { eventId };
+    });
+
+    // Execute with single BUSY retry
+    try {
+      return runTransaction(ops);
+    } catch (err: unknown) {
+      const sqliteErr = err as { code?: string };
+      if (sqliteErr.code === 'SQLITE_BUSY') {
+        // Synchronous spin-wait for 100ms then retry once
+        const start = Date.now();
+        while (Date.now() - start < 100) {
+          // spin
+        }
+        return runTransaction(ops);
+      }
+      throw err;
+    }
+  }
+
   getEventsByTeam(teamId: number, limit?: number, offset?: number): Event[] {
     let sql = 'SELECT * FROM events WHERE team_id = ? ORDER BY id DESC';
     const params: unknown[] = [teamId];
