@@ -140,8 +140,11 @@ fleet-commander/
 npm run dev          # Dev server + Vite HMR
 npm run build        # Production build (tsc + vite)
 npm start            # Production server (node dist/server/index.js)
-npm test             # All tests (vitest)
-npm run test:client  # Client tests only
+npm test             # Server tests only (default, lightweight)
+npm run test:server  # Server tests only (explicit alias)
+npm run test:client  # Client tests only (jsdom, sequential, 4GB heap)
+npm run test:all     # Server + client tests combined (4GB heap)
+npm run test:watch   # Watch mode (all projects)
 npm run test:e2e     # End-to-end smoke test
 npm run launch       # Full launch: install + build + open browser
 ```
