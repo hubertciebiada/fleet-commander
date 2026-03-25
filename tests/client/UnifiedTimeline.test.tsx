@@ -1,9 +1,12 @@
 // =============================================================================
-// Fleet Commander — UnifiedTimeline Expand/Collapse Tests
+// Fleet Commander — UnifiedTimeline Tests
+// =============================================================================
+// Tests for expand/collapse, error entries, polling behavior (60s fallback),
+// and SSE-driven real-time appending of stream and hook events.
 // =============================================================================
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import type { TimelineEntry, StreamTimelineEntry, HookTimelineEntry } from '../../src/shared/types';
 
@@ -29,6 +32,19 @@ const mockApi = {
 
 vi.mock('../../src/client/hooks/useApi', () => ({
   useApi: () => mockApi,
+}));
+
+// ---------------------------------------------------------------------------
+// Mock useSSE — capture the onEvent callback for simulating SSE events
+// ---------------------------------------------------------------------------
+
+let capturedOnEvent: ((type: string, data: unknown) => void) | undefined;
+
+vi.mock('../../src/client/hooks/useSSE', () => ({
+  useSSE: (options: { onEvent?: (type: string, data: unknown) => void }) => {
+    capturedOnEvent = options.onEvent;
+    return { connected: true, lastEvent: null, lastEventTeamId: null };
+  },
 }));
 
 // Import after mocks are set up
@@ -69,6 +85,20 @@ function makeToolUseEntryNoInput(
   };
 }
 
+function makeStreamEntry(
+  streamType: string,
+  overrides: Partial<StreamTimelineEntry> = {},
+): StreamTimelineEntry {
+  return {
+    id: `stream-${Math.random().toString(36).slice(2)}`,
+    source: 'stream',
+    timestamp: '2026-03-20T10:00:00.000Z',
+    teamId: 1,
+    streamType,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helper to find the expandable badge (role="button" with aria-expanded)
 // ---------------------------------------------------------------------------
@@ -84,7 +114,7 @@ function getExpandedBadge() {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Tests — tool detail expand/collapse
 // ---------------------------------------------------------------------------
 
 describe('UnifiedTimeline — tool detail expand/collapse', () => {
@@ -419,7 +449,7 @@ describe('UnifiedTimeline — error entry collapse/expand', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Polling behavior tests — terminal state + exponential backoff
+// Polling behavior tests — terminal state + 60-second fixed interval
 // ---------------------------------------------------------------------------
 
 describe('UnifiedTimeline — polling behavior', () => {
@@ -445,7 +475,7 @@ describe('UnifiedTimeline — polling behavior', () => {
     expect(initialCalls).toBe(1); // Just the initial fetch
 
     // Advance time well past any polling interval
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(120000);
 
     // No additional calls should have been made
     expect(mockGet.mock.calls.length).toBe(initialCalls);
@@ -461,57 +491,232 @@ describe('UnifiedTimeline — polling behavior', () => {
     expect(initialCalls).toBe(1); // Just the initial fetch
 
     // Advance time well past any polling interval
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(120000);
 
     // No additional calls should have been made
     expect(mockGet.mock.calls.length).toBe(initialCalls);
   });
 
-  it('polls with increasing delay (exponential backoff)', async () => {
+  it('polls at fixed 60-second intervals for running teams', async () => {
     render(<UnifiedTimeline teamId={1} teamStatus="running" />);
 
     // Initial fetch fires immediately
     await vi.advanceTimersByTimeAsync(0);
     expect(mockGet.mock.calls.length).toBe(1);
 
-    // After 2s: first backoff poll
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(mockGet.mock.calls.length).toBe(2);
-
-    // After another 4s: second backoff poll (delay doubled to 4s)
-    await vi.advanceTimersByTimeAsync(4000);
-    expect(mockGet.mock.calls.length).toBe(3);
-
-    // After another 8s: third backoff poll (delay doubled to 8s)
-    await vi.advanceTimersByTimeAsync(8000);
-    expect(mockGet.mock.calls.length).toBe(4);
-  });
-
-  it('caps backoff delay at 30 seconds', async () => {
-    render(<UnifiedTimeline teamId={1} teamStatus="running" />);
-
-    // Initial fetch
-    await vi.advanceTimersByTimeAsync(0);
+    // Before 60s — no additional poll
+    await vi.advanceTimersByTimeAsync(59999);
     expect(mockGet.mock.calls.length).toBe(1);
 
-    // Run through backoff stages: 2s, 4s, 8s, 16s = 30s total, 4 polls
-    await vi.advanceTimersByTimeAsync(2000); // 2s delay
+    // At 60s — fallback poll fires
+    await vi.advanceTimersByTimeAsync(1);
     expect(mockGet.mock.calls.length).toBe(2);
 
-    await vi.advanceTimersByTimeAsync(4000); // 4s delay
+    // At 120s — another fallback poll fires (fixed interval, not backoff)
+    await vi.advanceTimersByTimeAsync(60000);
     expect(mockGet.mock.calls.length).toBe(3);
+  });
+});
 
-    await vi.advanceTimersByTimeAsync(8000); // 8s delay
-    expect(mockGet.mock.calls.length).toBe(4);
+// ---------------------------------------------------------------------------
+// SSE-driven real-time updates
+// ---------------------------------------------------------------------------
 
-    await vi.advanceTimersByTimeAsync(16000); // 16s delay
-    expect(mockGet.mock.calls.length).toBe(5);
+describe('UnifiedTimeline — SSE-driven updates', () => {
+  beforeEach(() => {
+    mockEntries = [];
+    capturedOnEvent = undefined;
+    mockGet.mockReset();
+    mockGet.mockImplementation(() => Promise.resolve(mockEntries));
+  });
 
-    // Next should be capped at 30s (not 32s)
-    await vi.advanceTimersByTimeAsync(29999); // Just under 30s — should not fire
-    expect(mockGet.mock.calls.length).toBe(5);
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
-    await vi.advanceTimersByTimeAsync(1); // Completes 30s — should fire
-    expect(mockGet.mock.calls.length).toBe(6);
+  it('appends a stream entry via team_output SSE event', async () => {
+    // Start with one initial entry so the timeline renders
+    mockEntries = [
+      makeStreamEntry('assistant', {
+        id: 'stream-0',
+        message: { content: [{ type: 'text', text: 'Hello from TL' }] },
+      }),
+    ];
+    render(<UnifiedTimeline teamId={1} teamStatus="running" />);
+
+    // Wait for initial fetch to render
+    await waitFor(() => {
+      expect(screen.getByText('Hello from TL')).toBeInTheDocument();
+    });
+
+    // Simulate an SSE team_output event with a tool_use payload
+    expect(capturedOnEvent).toBeDefined();
+    act(() => {
+      capturedOnEvent!('team_output', {
+        team_id: 1,
+        event: {
+          type: 'tool_use',
+          timestamp: '2026-03-20T10:01:00.000Z',
+          tool: { name: 'Bash', input: { command: 'echo hello' } },
+        },
+      });
+    });
+
+    // The new entry should appear in the timeline
+    await waitFor(() => {
+      expect(screen.getByText('Bash')).toBeInTheDocument();
+    });
+  });
+
+  it('appends a hook entry via team_event SSE event', async () => {
+    // Start with one initial entry so the timeline renders
+    mockEntries = [
+      makeStreamEntry('assistant', {
+        id: 'stream-0',
+        message: { content: [{ type: 'text', text: 'Hello from TL' }] },
+      }),
+    ];
+    render(<UnifiedTimeline teamId={1} teamStatus="running" />);
+
+    // Wait for initial fetch to render
+    await waitFor(() => {
+      expect(screen.getByText('Hello from TL')).toBeInTheDocument();
+    });
+
+    // Simulate an SSE team_event (hook event)
+    expect(capturedOnEvent).toBeDefined();
+    act(() => {
+      capturedOnEvent!('team_event', {
+        team_id: 1,
+        event_type: 'SessionStart',
+        event_id: 42,
+        timestamp: '2026-03-20T10:01:00.000Z',
+        agent_name: 'team-lead',
+      });
+    });
+
+    // The hook entry should appear
+    await waitFor(() => {
+      expect(screen.getByText('SessionStart')).toBeInTheDocument();
+    });
+  });
+
+  it('ignores SSE events for different team_id', async () => {
+    mockEntries = [
+      makeStreamEntry('assistant', {
+        id: 'stream-0',
+        message: { content: [{ type: 'text', text: 'Hello from TL' }] },
+      }),
+    ];
+    render(<UnifiedTimeline teamId={1} teamStatus="running" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Hello from TL')).toBeInTheDocument();
+    });
+
+    // Send SSE event for a DIFFERENT team
+    act(() => {
+      capturedOnEvent!('team_output', {
+        team_id: 999,
+        event: {
+          type: 'tool_use',
+          timestamp: '2026-03-20T10:01:00.000Z',
+          tool: { name: 'Bash', input: { command: 'echo wrong team' } },
+        },
+      });
+    });
+
+    // Bash entry should NOT appear
+    expect(screen.queryByText('Bash')).not.toBeInTheDocument();
+  });
+
+  it('deduplicates entries with same ID via APPEND_HOOK', async () => {
+    // Initial fetch returns one hook entry
+    const hookEntry = makeErrorHookEntry('ToolUse', undefined, { id: 'event-100', eventType: 'ToolUse', toolName: 'Bash' });
+    mockEntries = [hookEntry];
+    render(<UnifiedTimeline teamId={1} teamStatus="running" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ToolUse')).toBeInTheDocument();
+    });
+
+    // Simulate an SSE team_event with the SAME event_id (so id='event-100')
+    act(() => {
+      capturedOnEvent!('team_event', {
+        team_id: 1,
+        event_type: 'ToolUse',
+        event_id: 100,
+        timestamp: '2026-03-20T10:01:00.000Z',
+        tool_name: 'Bash',
+      });
+    });
+
+    // Should still show exactly one ToolUse entry (deduped by ID)
+    const toolUseElements = screen.getAllByText('ToolUse');
+    expect(toolUseElements.length).toBe(1);
+  });
+
+  it('filters out noise stream types from SSE events', async () => {
+    mockEntries = [
+      makeStreamEntry('assistant', {
+        id: 'stream-0',
+        message: { content: [{ type: 'text', text: 'Hello from TL' }] },
+      }),
+    ];
+    render(<UnifiedTimeline teamId={1} teamStatus="running" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Hello from TL')).toBeInTheDocument();
+    });
+
+    // Send noise stream types — these should be silently dropped
+    act(() => {
+      capturedOnEvent!('team_output', {
+        team_id: 1,
+        event: { type: 'content_block_delta', timestamp: '2026-03-20T10:01:00.000Z' },
+      });
+      capturedOnEvent!('team_output', {
+        team_id: 1,
+        event: { type: 'stream_event', timestamp: '2026-03-20T10:01:01.000Z' },
+      });
+    });
+
+    // The noise types should not produce any visible new entries
+    // Component should still render cleanly with only the initial entry
+    expect(screen.getByText('Hello from TL')).toBeInTheDocument();
+  });
+
+  it('extracts tool_use blocks from assistant SSE events', async () => {
+    mockEntries = [];
+    render(<UnifiedTimeline teamId={1} teamStatus="running" />);
+
+    await waitFor(() => {
+      // Component should show empty state initially
+      expect(screen.getByText(/No events yet/)).toBeInTheDocument();
+    });
+
+    // Send an assistant event that contains a tool_use content block
+    act(() => {
+      capturedOnEvent!('team_output', {
+        team_id: 1,
+        event: {
+          type: 'assistant',
+          timestamp: '2026-03-20T10:01:00.000Z',
+          message: {
+            content: [
+              { type: 'text', text: 'Let me check that file.' },
+              { type: 'tool_use', name: 'Read', input: { file_path: '/src/main.ts' } },
+            ],
+          },
+          agentName: 'team-lead',
+        },
+      });
+    });
+
+    // Should render both the text content and the extracted tool_use entry
+    await waitFor(() => {
+      expect(screen.getByText('Let me check that file.')).toBeInTheDocument();
+      expect(screen.getByText('Read')).toBeInTheDocument();
+    });
   });
 });
