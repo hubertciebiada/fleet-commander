@@ -1,8 +1,8 @@
 <!-- fleet-commander v0.0.9 -->
 <!-- Fleet Commander workflow template. Installed by Fleet Commander into your project. -->
-<!-- Placeholders fleet-commander, fleet-commander, main, {{ISSUE_NUMBER}} are replaced during installation. -->
+<!-- Placeholders {{PROJECT_NAME}}, {{project_slug}}, {{BASE_BRANCH}}, {{ISSUE_NUMBER}} are replaced during installation. -->
 
-# Diamond Workflow — fleet-commander
+# Diamond Workflow — {{PROJECT_NAME}}
 
 ## About Fleet Commander
 
@@ -18,22 +18,22 @@ Fleet Commander (FC) is the orchestration layer that manages your team. Key fact
 
 You are running inside a **git worktree**, not the main repository checkout. This has critical implications:
 
-- **NEVER run `git checkout main`** — the base branch is already checked out in the main worktree. Attempting to check it out here will fail with "already used by worktree."
-- **Use `git fetch origin main` and reference `origin/main`** whenever you need the latest base branch state. Do not try to switch to it.
-- **Your branch is your branch.** Create it, work on it, push it. Never switch away from it to main.
-- This applies to ALL agents (planner, dev, reviewer) — none of them should ever attempt to checkout main.
+- **NEVER run `git checkout {{BASE_BRANCH}}`** — the base branch is already checked out in the main worktree. Attempting to check it out here will fail with "already used by worktree."
+- **Use `git fetch origin {{BASE_BRANCH}}` and reference `origin/{{BASE_BRANCH}}`** whenever you need the latest base branch state. Do not try to switch to it.
+- **Your branch is your branch.** Create it, work on it, push it. Never switch away from it to {{BASE_BRANCH}}.
+- This applies to ALL agents (planner, dev, reviewer) — none of them should ever attempt to checkout {{BASE_BRANCH}}.
 
 ## Entry Point
 
 ```
-User: claude --worktree fleet-commander-{N}
+User: claude --worktree {{project_slug}}-{N}
 (prompt is sent via stdin from Fleet Commander's prompt file)
 ```
 
 **Role of TL (main agent = You):**
 1. Read this workflow and understand the team structure
 2. **Phase 0: Spawn `fleet-planner` only** — planner analyzes the issue and produces a plan
-3. **Wait for planner's plan** — it arrives via `SendMessage` from the planner
+3. **Read the planner's plan** — after planner completes, read `plan.md` from the worktree root
 4. **Phase 1: Spawn `fleet-dev` with the plan context** — dev starts implementing immediately
 5. **Wait for dev to report "ready for review"** — dev sends a message when implementation is complete
 6. **Phase 2: Spawn `fleet-reviewer`** — reviewer starts reviewing immediately
@@ -47,7 +47,7 @@ User: claude --worktree fleet-commander-{N}
 
 | Agent | subagent_type | name | Role | Spawn |
 |-------|---------------|------|------|-------|
-| **Planner** | `fleet-planner` | `planner` | Analyzes issue + codebase, produces structured plan with guidebook paths. Sends plan to TL. Stays alive for p2p questions from dev and reviewer. | Phase 0 (immediate) |
+| **Planner** | `fleet-planner` | `planner` | Analyzes issue + codebase, produces structured plan with guidebook paths. Writes plan to `plan.md`. Stays alive for p2p questions from dev and reviewer. | Phase 0 (immediate) |
 | **Dev** | `fleet-dev` | `dev` | Receives planner's plan at spawn, implements code, writes tests, pushes commits. Communicates with reviewer directly during review. Can ask planner questions via p2p. | Phase 1 (after plan) |
 | **Reviewer** | `fleet-reviewer` | `reviewer` | Spawned after dev reports ready. Two-pass code review. Sends feedback directly to dev. Reports final verdict to TL. Can ask planner questions via p2p. | Phase 2 (after dev ready) |
 
@@ -58,7 +58,7 @@ All agents use `model: inherit` — they run on the same model as the TL.
 ### Agent Lifecycle
 
 - **Agents are spawned sequentially** as each phase completes. This gives each agent the context it needs to start working immediately.
-- **Planner** is spawned first (Phase 0). It analyzes the issue, produces the plan, sends it to TL, and **stays alive** — available for p2p questions from dev and reviewer throughout the workflow.
+- **Planner** is spawned first (Phase 0). It analyzes the issue, produces the plan, writes it to `plan.md`, and **stays alive** — available for p2p questions from dev and reviewer throughout the workflow.
 - **Dev** is spawned after the plan arrives (Phase 1). The TL includes the planner's plan in the dev's task prompt, so dev can start implementing immediately — no waiting.
 - **Reviewer** is spawned after dev reports ready (Phase 2). The TL includes the branch name and context in the reviewer's task prompt, so reviewer can start reviewing immediately — no waiting.
 - Once spawned, **agents stay alive** until the team is done. Planner persists as a knowledge resource. Dev persists through review rounds and CI fixes. Reviewer persists through all review rounds.
@@ -108,7 +108,7 @@ stateDiagram-v2
 1. **TL spawns `fleet-planner`** with the issue number and project context.
 2. TL enters the Active Monitoring Loop (see below) while waiting for the plan.
 3. Planner analyzes the issue, explores the codebase, discovers guidebooks, and produces a structured plan.
-4. Planner sends the plan to TL via `SendMessage`. Planner stays alive for p2p questions from dev and reviewer.
+4. Planner writes the plan to `plan.md` in the worktree root. Planner stays alive for p2p questions from dev and reviewer.
 
 ---
 
@@ -149,9 +149,10 @@ If `TaskList` shows an agent is no longer running:
 ## Phase 1 — Analysis
 
 1. Planner (spawned in Phase 0) reads the issue, explores the codebase, discovers guidebooks, and produces a structured plan
-2. **Planner sends the plan to TL via `SendMessage`**
-3. TL validates the plan has all required fields (see format below)
-4. TL evaluates the plan:
+2. **Planner writes the plan to `plan.md` in the worktree root**
+3. TL reads `plan.md` from the worktree root using the Read tool, then deletes it (`rm plan.md`) to keep the worktree clean
+4. TL validates the plan has all required fields (see format below)
+5. TL evaluates the plan:
    - `BLOCKED=yes` → state Blocked, comment on issue, STOP
    - `BLOCKED=no` → proceed to Phase 2 (spawn dev with the plan)
    - Missing required fields → ask Planner to redo with specific gaps identified
@@ -210,7 +211,7 @@ If the Planner is unresponsive for >5 minutes or produces an unusable plan:
 ```
 ISSUE: #{N} {title}
 BRANCH: {feat|fix|test}/{N}-{short-desc}
-BASE: main
+BASE: {{BASE_BRANCH}}
 
 PLAN:
 {paste the full planner's plan here}
@@ -264,7 +265,7 @@ For mixed-type issues (e.g., C# backend + TypeScript frontend):
 ```
 ISSUE: #{N} {title}
 BRANCH: {branch_name}
-BASE: main
+BASE: {{BASE_BRANCH}}
 
 GUIDEBOOKS (read these to verify compliance):
 {list of guidebook paths from the plan}
@@ -311,14 +312,14 @@ After reviewer sends APPROVE to TL:
 
 1. **Branch freshness check** (MANDATORY):
    ```bash
-   git stash --include-untracked && git fetch origin main && git rebase origin/main && git stash pop && git push --force-with-lease
+   git stash --include-untracked && git fetch origin {{BASE_BRANCH}} && git rebase origin/{{BASE_BRANCH}} && git stash pop && git push --force-with-lease
    ```
    The `git stash --include-untracked` is required because the CC runtime may leave unstaged changes (e.g., `.claude/settings.json`) that block rebase.
    If rebase fails (conflicts) → state Blocked.
 
 2. **TL creates PR**:
    ```bash
-   gh pr create --base main --title "Issue #{N}: {description}" --body "Closes #{N}"
+   gh pr create --base {{BASE_BRANCH}} --title "Issue #{N}: {description}" --body "Closes #{N}"
    ```
 
 3. **Set auto-merge immediately** (mandatory, no exceptions):
@@ -429,7 +430,7 @@ If the same issue bounces back and forth between dev and reviewer:
 
 ### Rebase Conflict
 
-1. If `git stash --include-untracked && git rebase origin/main` fails with conflicts → state Blocked
+1. If `git stash --include-untracked && git rebase origin/{{BASE_BRANCH}}` fails with conflicts → state Blocked
 2. Comment on issue explaining the conflict
 3. STOP — do not attempt manual conflict resolution across worktrees
 
@@ -463,7 +464,7 @@ Atomic commits — each commit should be a logical unit.
 
 - **One issue at a time** — atomic changes only
 - **CI must be green** — PR CANNOT be merged with red CI
-- **Branch from main** — NEVER commit directly to main
+- **Branch from {{BASE_BRANCH}}** — NEVER commit directly to {{BASE_BRANCH}}
 - **TL creates the PR** — dev pushes code, TL creates the PR and sets auto-merge
 - **P2P for review** — dev and reviewer talk directly, TL does not relay
 - **Idle = normal** — agents waiting for messages are expected to be idle
@@ -481,9 +482,9 @@ Atomic commits — each commit should be a logical unit.
 | TL implements code while dev is active | Let dev do the implementation |
 | TL overrides reviewer without reading feedback | Read feedback, arbitrate only after 3 rounds |
 | Dev pushes without local tests | Build + tests locally BEFORE reporting ready |
-| Dev pushes without rebase | ALWAYS stash + rebase on main before push |
+| Dev pushes without rebase | ALWAYS stash + rebase on {{BASE_BRANCH}} before push |
 | Respawning agents endlessly | Max 5 total spawns — then TL takes over or reports BLOCKED |
-| Checking out main in a worktree | NEVER checkout main — use `origin/main` as reference |
+| Checking out {{BASE_BRANCH}} in a worktree | NEVER checkout {{BASE_BRANCH}} — use `origin/{{BASE_BRANCH}}` as reference |
 | Dev creates the PR | TL creates the PR after APPROVE |
 | Spawning a coordinator / 4th agent | Diamond team is exactly 3 agents: planner, dev, reviewer |
 | Spawning all 3 agents at once before analysis is done | Spawn sequentially: planner first, then dev with plan, then reviewer after dev ready |
@@ -491,12 +492,13 @@ Atomic commits — each commit should be a logical unit.
 | Respawning agent after 2 min idle | Idle is normal — only act at 5min stuck threshold |
 | TL monitors CI manually | FC handles CI monitoring and sends updates via stdin |
 | TL goes idle after spawning agents without monitoring | TL runs active monitoring loop between phases |
+| Planner uses SendMessage to deliver plan | Planner writes plan.md file — TL reads it directly |
 
 ## Decision Summary
 
 ```
 Phase 0: TL → spawn planner only
-Phase 1: Planner analyzes → sends plan to TL → planner stays alive for p2p questions
+Phase 1: Planner analyzes → writes plan.md → TL reads plan.md → planner stays alive for p2p questions
          TL validates plan → spawns dev WITH the plan context
 Phase 2: Dev implements immediately (has plan) → reports "ready for review" to TL
          TL spawns reviewer WITH branch context
