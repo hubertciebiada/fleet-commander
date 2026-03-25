@@ -9,7 +9,7 @@ interface FleetGridProps {
   onSelectTeam: (id: number) => void;
 }
 
-const COLUMNS = ['Status', 'Project', 'Issue', 'Model', 'Duration', 'Activity', 'Tokens', 'PR', 'Actions'] as const;
+const COLUMNS = ['Status', 'Project', 'Issue', 'Model', 'Duration', 'Activity', 'Cost', 'PR', 'Actions'] as const;
 
 export function FleetGrid({ teams, selectedTeamId, onSelectTeam }: FleetGridProps) {
   const { isThinking } = useThinking();

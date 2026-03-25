@@ -165,16 +165,32 @@ describe('TeamRow', () => {
     expect(cells[5].textContent).toContain('\u2014');
   });
 
-  it('shows token count when tokens are present', () => {
-    renderRow(fullTeam({ totalInputTokens: 50000, totalOutputTokens: 25000 }));
-    expect(screen.getByText('75K')).toBeInTheDocument();
+  it('shows cost when tokens are present', () => {
+    renderRow(fullTeam({ totalInputTokens: 50000, totalOutputTokens: 25000, totalCostUsd: 3.57 }));
+    expect(screen.getByText('$3.57')).toBeInTheDocument();
   });
 
-  it('shows em-dash for tokens when total is 0', () => {
-    renderRow(fullTeam({ totalInputTokens: 0, totalOutputTokens: 0 }));
-    // The tokens cell should contain an em-dash
-    const tokenCells = screen.getAllByText('\u2014');
-    expect(tokenCells.length).toBeGreaterThan(0);
+  it('shows em-dash for cost when no tokens recorded', () => {
+    renderRow(fullTeam({ totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0 }));
+    const dashCells = screen.getAllByText('\u2014');
+    expect(dashCells.length).toBeGreaterThan(0);
+  });
+
+  it('shows "<$0.01" when cost is below one cent', () => {
+    renderRow(fullTeam({ totalInputTokens: 100, totalOutputTokens: 50, totalCostUsd: 0.005 }));
+    expect(screen.getByText('<$0.01')).toBeInTheDocument();
+  });
+
+  it('shows token breakdown in tooltip on cost cell', () => {
+    renderRow(fullTeam({
+      totalInputTokens: 125000,
+      totalOutputTokens: 50000,
+      totalCacheCreationTokens: 20000,
+      totalCacheReadTokens: 10000,
+      totalCostUsd: 3.57,
+    }));
+    const costEl = screen.getByText('$3.57');
+    expect(costEl).toHaveAttribute('title', 'Input: 125K, Output: 50K, Cache: 30K');
   });
 
   it('shows thinking indicator when isThinking is true', () => {

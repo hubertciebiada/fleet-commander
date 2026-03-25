@@ -30,6 +30,12 @@ function formatTokens(count: number): string {
   return (count / 1_000_000).toFixed(1) + 'M';
 }
 
+/** Format a USD cost to a compact string (e.g. "$3.57") */
+function formatCost(usd: number): string {
+  if (usd < 0.01) return '<$0.01';
+  return '$' + usd.toFixed(2);
+}
+
 // ---------------------------------------------------------------------------
 // Props & equality comparator
 // ---------------------------------------------------------------------------
@@ -63,6 +69,7 @@ function areTeamRowPropsEqual(prev: TeamRowProps, next: TeamRowProps): boolean {
     a.totalOutputTokens === b.totalOutputTokens &&
     a.totalCacheCreationTokens === b.totalCacheCreationTokens &&
     a.totalCacheReadTokens === b.totalCacheReadTokens &&
+    a.totalCostUsd === b.totalCostUsd &&
     a.durationMin === b.durationMin &&
     a.model === b.model &&
     a.issueTitle === b.issueTitle &&
@@ -193,14 +200,14 @@ export const TeamRow = memo(function TeamRow({ team, selected, isThinking: teamI
         )}
       </td>
 
-      {/* Tokens */}
+      {/* Cost */}
       <td className="px-4 whitespace-nowrap">
         {(team.totalInputTokens + team.totalOutputTokens) > 0 ? (
           <span
             className="text-sm text-dark-muted"
             title={`Input: ${formatTokens(team.totalInputTokens)}, Output: ${formatTokens(team.totalOutputTokens)}, Cache: ${formatTokens(team.totalCacheCreationTokens + team.totalCacheReadTokens)}`}
           >
-            {formatTokens(team.totalInputTokens + team.totalOutputTokens)}
+            {formatCost(team.totalCostUsd)}
           </span>
         ) : (
           <span className="text-sm text-dark-muted">{'\u2014'}</span>
