@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 import { useApi } from '../hooks/useApi';
+import { useSSE } from '../hooks/useSSE';
 import type { TimelineEntry, StreamTimelineEntry, HookTimelineEntry, TeamMember, TeamStatus } from '../../shared/types';
 import { TERMINAL_STATUSES } from '../../shared/types';
 import { agentColor } from '../utils/constants';
@@ -226,6 +227,167 @@ function getToolDetail(entry: StreamTimelineEntry): string | null {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// SSE event → timeline entry converters
+// ---------------------------------------------------------------------------
+
+/** Shape of an SSE StreamEvent payload (from team_output events) */
+interface SSEStreamEvent {
+  type: string;
+  timestamp?: string;
+  subtype?: string;
+  message?: { content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }> };
+  tool?: { name?: string; input?: unknown };
+  agentName?: string;
+  description?: string;
+  lastToolName?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Convert an SSE team_output StreamEvent into one or more StreamTimelineEntry objects.
+ * Also extracts tool_use content blocks from assistant events (mirrors build-timeline.ts logic).
+ */
+function streamEventToEntries(
+  teamId: number,
+  event: SSEStreamEvent,
+  seqId: number,
+): StreamTimelineEntry[] {
+  const timestamp = event.timestamp ?? new Date().toISOString();
+  const base: StreamTimelineEntry = {
+    id: `sse-stream-${seqId}`,
+    source: 'stream',
+    timestamp,
+    teamId,
+    streamType: event.type,
+    subtype: event.subtype,
+    message: event.message,
+    tool: event.tool,
+    ...(event.agentName ? { agentName: event.agentName } : {}),
+    ...(event.description ? { description: event.description } : {}),
+    ...(event.lastToolName ? { lastToolName: event.lastToolName } : {}),
+  };
+
+  const entries: StreamTimelineEntry[] = [base];
+
+  // Extract tool_use content blocks from assistant events
+  if (event.type === 'assistant' && event.message?.content) {
+    for (let j = 0; j < event.message.content.length; j++) {
+      const block = event.message.content[j];
+      if (block.type === 'tool_use' && block.name) {
+        entries.push({
+          id: `sse-stream-${seqId}-tool-${j}`,
+          source: 'stream',
+          timestamp,
+          teamId,
+          streamType: 'tool_use',
+          tool: { name: block.name, input: block.input },
+          ...(event.agentName ? { agentName: event.agentName } : {}),
+        });
+      }
+    }
+  }
+
+  return entries;
+}
+
+/** Shape of an SSE team_event payload */
+interface SSEHookPayload {
+  team_id: number;
+  event_type: string;
+  event_id: number;
+  session_id?: string | null;
+  agent_name?: string | null;
+  tool_name?: string | null;
+  timestamp?: string;
+}
+
+/**
+ * Convert an SSE team_event payload into a HookTimelineEntry.
+ */
+function hookPayloadToEntry(teamId: number, payload: SSEHookPayload): HookTimelineEntry {
+  return {
+    id: `event-${payload.event_id}`,
+    source: 'hook',
+    timestamp: payload.timestamp ?? new Date().toISOString(),
+    teamId,
+    eventType: payload.event_type,
+    toolName: payload.tool_name ?? undefined,
+    agentName: payload.agent_name ?? undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Timeline state reducer
+// ---------------------------------------------------------------------------
+
+/** High-frequency noise types that should be filtered from SSE events */
+const NOISE_STREAM_TYPES = new Set([
+  'stream_event',
+  'content_block_start',
+  'content_block_delta',
+  'content_block_stop',
+]);
+
+/** Maximum number of entries before trimming oldest */
+const MAX_ENTRIES = 600;
+/** Number of entries to trim when cap is exceeded */
+const TRIM_COUNT = 100;
+
+interface TimelineState {
+  entries: TimelineEntry[];
+  idSet: Set<string>;
+}
+
+type TimelineAction =
+  | { type: 'INIT'; entries: TimelineEntry[] }
+  | { type: 'APPEND_STREAM'; entries: StreamTimelineEntry[] }
+  | { type: 'APPEND_HOOK'; entry: HookTimelineEntry }
+  | { type: 'SYNC'; entries: TimelineEntry[] };
+
+function timelineReducer(state: TimelineState, action: TimelineAction): TimelineState {
+  switch (action.type) {
+    case 'INIT': {
+      const idSet = new Set(action.entries.map((e) => e.id));
+      return { entries: action.entries, idSet };
+    }
+    case 'APPEND_STREAM': {
+      const newEntries = action.entries.filter((e) => !state.idSet.has(e.id));
+      if (newEntries.length === 0) return state;
+      const idSet = new Set(state.idSet);
+      for (const e of newEntries) idSet.add(e.id);
+      let entries = [...state.entries, ...newEntries];
+      // Memory cap: trim oldest entries if over limit
+      if (entries.length > MAX_ENTRIES) {
+        const trimmed = entries.slice(TRIM_COUNT);
+        const trimmedIdSet = new Set(trimmed.map((e) => e.id));
+        return { entries: trimmed, idSet: trimmedIdSet };
+      }
+      return { entries, idSet };
+    }
+    case 'APPEND_HOOK': {
+      if (state.idSet.has(action.entry.id)) return state;
+      const idSet = new Set(state.idSet);
+      idSet.add(action.entry.id);
+      let entries = [...state.entries, action.entry];
+      // Memory cap: trim oldest entries if over limit
+      if (entries.length > MAX_ENTRIES) {
+        const trimmed = entries.slice(TRIM_COUNT);
+        const trimmedIdSet = new Set(trimmed.map((e) => e.id));
+        return { entries: trimmed, idSet: trimmedIdSet };
+      }
+      return { entries, idSet };
+    }
+    case 'SYNC': {
+      // Full replacement on sync (fallback poll) — like INIT but called periodically
+      const idSet = new Set(action.entries.map((e) => e.id));
+      return { entries: action.entries, idSet };
+    }
+  }
+}
+
+const INITIAL_TIMELINE_STATE: TimelineState = { entries: [], idSet: new Set() };
 
 // ---------------------------------------------------------------------------
 // Sub-components for each entry type
@@ -482,6 +644,9 @@ function getEntryAgentName(entry: TimelineEntry): string | undefined {
   return entry.agentName;
 }
 
+/** Fallback poll interval (60 seconds) — only used as safety net alongside SSE */
+const FALLBACK_POLL_MS = 60_000;
+
 export function UnifiedTimeline({
   teamId,
   teamStatus,
@@ -491,13 +656,17 @@ export function UnifiedTimeline({
   onAgentFiltersChange,
 }: UnifiedTimelineProps) {
   const api = useApi();
-  const [entries, setEntries] = useState<TimelineEntry[]>([]);
+  const [state, dispatch] = useReducer(timelineReducer, INITIAL_TIMELINE_STATE);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
-  const pollDelayRef = useRef(2000);
+
+  // Refs to avoid stale closures in SSE callback
+  const teamIdRef = useRef(teamId);
+  teamIdRef.current = teamId;
+  const sseSeqRef = useRef(0);
 
   // Detect if user has scrolled up — disable auto-scroll in that case
   const handleScroll = useCallback(() => {
@@ -508,39 +677,61 @@ export function UnifiedTimeline({
     stickToBottomRef.current = atBottom;
   }, []);
 
-  // Poll for timeline data with exponential backoff (2s -> 4s -> 8s -> 16s -> 30s max)
+  // Initial fetch + 60-second fallback poll for non-terminal teams
   useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
 
-    // Reset backoff whenever the effect re-runs (e.g. teamStatus change)
-    pollDelayRef.current = 2000;
+    // Reset SSE sequence counter on teamId change
+    sseSeqRef.current = 0;
 
-    async function poll() {
+    async function fetchTimeline(isInit: boolean) {
       if (cancelled) return;
       try {
         const data = await api.get<TimelineEntry[]>(`teams/${teamId}/timeline?limit=500`);
         if (!cancelled) {
-          setEntries(data);
+          dispatch({ type: isInit ? 'INIT' : 'SYNC', entries: data });
         }
       } catch {
-        // Ignore polling errors
-      }
-      // Schedule next poll only if not cancelled and not terminal
-      if (!cancelled && !TERMINAL_STATUSES.has(teamStatus as TeamStatus)) {
-        timer = setTimeout(poll, pollDelayRef.current);
-        pollDelayRef.current = Math.min(pollDelayRef.current * 2, 30000);
+        // Ignore fetch errors
       }
     }
 
     // Initial fetch
-    poll();
+    fetchTimeline(true);
+
+    // 60-second fallback poll for non-terminal teams
+    if (!TERMINAL_STATUSES.has(teamStatus as TeamStatus)) {
+      timer = setInterval(() => fetchTimeline(false), FALLBACK_POLL_MS);
+    }
 
     return () => {
       cancelled = true;
-      if (timer !== null) clearTimeout(timer);
+      if (timer !== null) clearInterval(timer);
     };
   }, [api, teamId, teamStatus]);
+
+  // Subscribe to SSE for real-time updates
+  const handleSSEEvent = useCallback((type: string, data: unknown) => {
+    if (type === 'team_output') {
+      const payload = data as { team_id: number; event: SSEStreamEvent };
+      if (payload.team_id !== teamIdRef.current) return;
+      // Skip noise types
+      if (NOISE_STREAM_TYPES.has(payload.event.type)) return;
+      const seq = sseSeqRef.current++;
+      const entries = streamEventToEntries(teamIdRef.current, payload.event, seq);
+      dispatch({ type: 'APPEND_STREAM', entries });
+    } else if (type === 'team_event') {
+      const payload = data as SSEHookPayload;
+      if (payload.team_id !== teamIdRef.current) return;
+      const entry = hookPayloadToEntry(teamIdRef.current, payload);
+      dispatch({ type: 'APPEND_HOOK', entry });
+    }
+  }, []);
+
+  useSSE({ onEvent: handleSSEEvent });
+
+  const { entries } = state;
 
   // Filter entries by active agent filters
   const filteredEntries = useMemo(() => {
