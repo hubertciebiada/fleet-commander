@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSelection, useConnection, useThinking } from '../context/FleetContext';
 import { useApi } from '../hooks/useApi';
+import { useTeamDetailData } from '../hooks/useTeamDetailData';
 import { StatusBadge } from './StatusBadge';
 import { CIChecks } from './CIChecks';
 import { UnifiedTimeline } from './UnifiedTimeline';
 import { CommandInput } from './CommandInput';
 import { CommGraph } from './CommGraph';
-import type { TeamDetail as TeamDetailType, TeamTransition, TeamMember, MessageEdge } from '../../shared/types';
 import { STATUS_COLORS } from '../utils/constants';
 
 // ---------------------------------------------------------------------------
@@ -32,22 +32,19 @@ export function TeamDetail() {
   const { lastEvent, lastEventTeamId } = useConnection();
   const { isThinking } = useThinking();
   const api = useApi();
-  const [detail, setDetail] = useState<TeamDetailType | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // Parallelized data fetching with caching (extracted hook)
+  const { detail, transitions, roster, messageEdges, loading, error, refreshDetail } =
+    useTeamDetailData(selectedTeamId, lastEvent, lastEventTeamId);
+
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
   const [quickActionSent, setQuickActionSent] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [transitions, setTransitions] = useState<TeamTransition[]>([]);
-  const [roster, setRoster] = useState<TeamMember[]>([]);
   const [activeTab, setActiveTab] = useState<'session-log' | 'team'>('session-log');
-  const [messageEdges, setMessageEdges] = useState<MessageEdge[]>([]);
   const [metadataCollapsed, setMetadataCollapsed] = useState(false);
   const [agentFilters, setAgentFilters] = useState<Set<string>>(new Set());
   const templateCacheRef = useRef<{ data: Array<{ id: string; template: string; enabled: boolean }>; fetchedAt: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedTeamIdRef = useRef(selectedTeamId);
 
   const isOpen = selectedTeamId !== null;
@@ -56,87 +53,6 @@ export function TeamDetail() {
   useEffect(() => {
     selectedTeamIdRef.current = selectedTeamId;
   }, [selectedTeamId]);
-
-  // Fetch transitions when selectedTeamId changes or detail refreshes
-  useEffect(() => {
-    if (selectedTeamId == null) {
-      setTransitions([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchTransitions() {
-      try {
-        const data = await api.get<TeamTransition[]>(`teams/${selectedTeamId}/transitions`);
-        if (!cancelled) {
-          setTransitions(data);
-        }
-      } catch {
-        // Non-critical — transitions are informational
-      }
-    }
-
-    fetchTransitions();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTeamId, refreshKey, api]);
-
-  // Fetch roster when selectedTeamId changes or detail refreshes
-  useEffect(() => {
-    if (selectedTeamId == null) {
-      setRoster([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchRoster() {
-      try {
-        const data = await api.get<TeamMember[]>(`teams/${selectedTeamId}/roster`);
-        if (!cancelled) {
-          setRoster(data);
-        }
-      } catch {
-        // Non-critical — roster is informational
-      }
-    }
-
-    fetchRoster();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTeamId, refreshKey, api]);
-
-  // Fetch message edges when selectedTeamId changes or detail refreshes
-  useEffect(() => {
-    if (selectedTeamId == null) {
-      setMessageEdges([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchEdges() {
-      try {
-        const data = await api.get<MessageEdge[]>(`teams/${selectedTeamId}/messages/summary`);
-        if (!cancelled) {
-          setMessageEdges(data);
-        }
-      } catch {
-        // Non-critical — comm graph is informational
-      }
-    }
-
-    fetchEdges();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTeamId, refreshKey, api]);
 
   // Reset active tab, metadata collapse state, and agent filters when team changes
   useEffect(() => {
@@ -153,81 +69,6 @@ export function TeamDetail() {
       setMetadataCollapsed(true);
     }
   }, [detail?.status]);
-
-  // Fetch team detail when selectedTeamId changes
-  useEffect(() => {
-    if (selectedTeamId == null) {
-      setDetail(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchDetail() {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await api.get<TeamDetailType>(`teams/${selectedTeamId}`);
-        if (!cancelled) {
-          setDetail(data);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load team detail');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    fetchDetail();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTeamId, api]);
-
-  // Refresh detail on SSE updates (when lastEvent changes and panel is open)
-  // Debounced to 2 seconds to avoid hammering the REST API on rapid SSE events.
-  // Only refresh when the SSE event pertains to the selected team — events from
-  // other teams (or non-team events like usage_updated, project_*) are skipped.
-  useEffect(() => {
-    if (selectedTeamId == null || !lastEvent) return;
-
-    // Skip refresh when the SSE event is for a different team.
-    // lastEventTeamId === null means a non-team event (e.g. usage_updated,
-    // project_*, snapshot) which does not affect team detail — skip those too.
-    if (lastEventTeamId !== selectedTeamId) return;
-
-    // Clear any pending debounce timer
-    if (refreshTimerRef.current) {
-      clearTimeout(refreshTimerRef.current);
-    }
-
-    const teamIdAtSchedule = selectedTeamId;
-
-    refreshTimerRef.current = setTimeout(async () => {
-      try {
-        const data = await api.get<TeamDetailType>(`teams/${teamIdAtSchedule}`);
-        // Guard against stale response if panel switched teams
-        if (selectedTeamIdRef.current === teamIdAtSchedule) {
-          setDetail(data);
-          setRefreshKey((k) => k + 1);
-        }
-      } catch {
-        // Silently ignore refresh errors — stale data is acceptable
-      }
-    }, 2000);
-
-    return () => {
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
-      }
-    };
-  }, [lastEvent, lastEventTeamId, selectedTeamId, api]);
 
   // Close panel handler
   const handleClose = useCallback(() => {
@@ -259,23 +100,18 @@ export function TeamDetail() {
   const handleAction = useCallback(
     async (action: 'stop' | 'resume' | 'restart') => {
       if (!selectedTeamId || actionLoading) return;
-      const teamId = selectedTeamId;
       setActionLoading(action);
       try {
-        await api.post(`teams/${teamId}/${action}`);
-        if (selectedTeamIdRef.current !== teamId) return;
-        // Refresh detail after action
-        const data = await api.get<TeamDetailType>(`teams/${teamId}`);
-        if (selectedTeamIdRef.current !== teamId) return;
-        setDetail(data);
-        setRefreshKey((k) => k + 1);
+        await api.post(`teams/${selectedTeamId}/${action}`);
+        // Refresh detail (and stale caches) after action
+        refreshDetail();
       } catch {
         // Action errors are transient; SSE will update the real state
       } finally {
         setActionLoading(null);
       }
     },
-    [selectedTeamId, actionLoading, api],
+    [selectedTeamId, actionLoading, api, refreshDetail],
   );
 
   // Quick action handler — send a pre-defined message template to the team
