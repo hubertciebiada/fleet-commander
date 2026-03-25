@@ -43,7 +43,7 @@ describe('FleetGrid', () => {
     expect(screen.getByText('Model')).toBeInTheDocument();
     expect(screen.getByText('Duration')).toBeInTheDocument();
     expect(screen.getByText('Activity')).toBeInTheDocument();
-    expect(screen.getByText('Tokens')).toBeInTheDocument();
+    expect(screen.getByText('Cost')).toBeInTheDocument();
     expect(screen.getByText('PR')).toBeInTheDocument();
     expect(screen.getByText('Actions')).toBeInTheDocument();
   });
