@@ -9,3 +9,4 @@ fleet.db-wal
 *.png
 !docs/diagrams/*.png
 !docs/screenshots/*.png
+plan.md

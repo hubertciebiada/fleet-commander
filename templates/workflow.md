@@ -33,7 +33,7 @@ User: claude --worktree {{project_slug}}-{N}
 **Role of TL (main agent = You):**
 1. Read this workflow and understand the team structure
 2. **Phase 0: Spawn `fleet-planner` only** — planner analyzes the issue and produces a plan
-3. **Wait for planner's plan** — it arrives via `SendMessage` from the planner
+3. **Read the planner's plan** — after planner completes, read `plan.md` from the worktree root
 4. **Phase 1: Spawn `fleet-dev` with the plan context** — dev starts implementing immediately
 5. **Wait for dev to report "ready for review"** — dev sends a message when implementation is complete
 6. **Phase 2: Spawn `fleet-reviewer`** — reviewer starts reviewing immediately
@@ -47,7 +47,7 @@ User: claude --worktree {{project_slug}}-{N}
 
 | Agent | subagent_type | name | Role | Spawn |
 |-------|---------------|------|------|-------|
-| **Planner** | `fleet-planner` | `planner` | Analyzes issue + codebase, produces structured plan with guidebook paths. Sends plan to TL. Stays alive for p2p questions from dev and reviewer. | Phase 0 (immediate) |
+| **Planner** | `fleet-planner` | `planner` | Analyzes issue + codebase, produces structured plan with guidebook paths. Writes plan to `plan.md`. Stays alive for p2p questions from dev and reviewer. | Phase 0 (immediate) |
 | **Dev** | `fleet-dev` | `dev` | Receives planner's plan at spawn, implements code, writes tests, pushes commits. Communicates with reviewer directly during review. Can ask planner questions via p2p. | Phase 1 (after plan) |
 | **Reviewer** | `fleet-reviewer` | `reviewer` | Spawned after dev reports ready. Two-pass code review. Sends feedback directly to dev. Reports final verdict to TL. Can ask planner questions via p2p. | Phase 2 (after dev ready) |
 
@@ -58,7 +58,7 @@ All agents use `model: inherit` — they run on the same model as the TL.
 ### Agent Lifecycle
 
 - **Agents are spawned sequentially** as each phase completes. This gives each agent the context it needs to start working immediately.
-- **Planner** is spawned first (Phase 0). It analyzes the issue, produces the plan, sends it to TL, and **stays alive** — available for p2p questions from dev and reviewer throughout the workflow.
+- **Planner** is spawned first (Phase 0). It analyzes the issue, produces the plan, writes it to `plan.md`, and **stays alive** — available for p2p questions from dev and reviewer throughout the workflow.
 - **Dev** is spawned after the plan arrives (Phase 1). The TL includes the planner's plan in the dev's task prompt, so dev can start implementing immediately — no waiting.
 - **Reviewer** is spawned after dev reports ready (Phase 2). The TL includes the branch name and context in the reviewer's task prompt, so reviewer can start reviewing immediately — no waiting.
 - Once spawned, **agents stay alive** until the team is done. Planner persists as a knowledge resource. Dev persists through review rounds and CI fixes. Reviewer persists through all review rounds.
@@ -108,7 +108,7 @@ stateDiagram-v2
 1. **TL spawns `fleet-planner`** with the issue number and project context.
 2. TL enters the Active Monitoring Loop (see below) while waiting for the plan.
 3. Planner analyzes the issue, explores the codebase, discovers guidebooks, and produces a structured plan.
-4. Planner sends the plan to TL via `SendMessage`. Planner stays alive for p2p questions from dev and reviewer.
+4. Planner writes the plan to `plan.md` in the worktree root. Planner stays alive for p2p questions from dev and reviewer.
 
 ---
 
@@ -149,9 +149,10 @@ If `TaskList` shows an agent is no longer running:
 ## Phase 1 — Analysis
 
 1. Planner (spawned in Phase 0) reads the issue, explores the codebase, discovers guidebooks, and produces a structured plan
-2. **Planner sends the plan to TL via `SendMessage`**
-3. TL validates the plan has all required fields (see format below)
-4. TL evaluates the plan:
+2. **Planner writes the plan to `plan.md` in the worktree root**
+3. TL reads `plan.md` from the worktree root using the Read tool, then deletes it (`rm plan.md`) to keep the worktree clean
+4. TL validates the plan has all required fields (see format below)
+5. TL evaluates the plan:
    - `BLOCKED=yes` → state Blocked, comment on issue, STOP
    - `BLOCKED=no` → proceed to Phase 2 (spawn dev with the plan)
    - Missing required fields → ask Planner to redo with specific gaps identified
@@ -491,12 +492,13 @@ Atomic commits — each commit should be a logical unit.
 | Respawning agent after 2 min idle | Idle is normal — only act at 5min stuck threshold |
 | TL monitors CI manually | FC handles CI monitoring and sends updates via stdin |
 | TL goes idle after spawning agents without monitoring | TL runs active monitoring loop between phases |
+| Planner uses SendMessage to deliver plan | Planner writes plan.md file — TL reads it directly |
 
 ## Decision Summary
 
 ```
 Phase 0: TL → spawn planner only
-Phase 1: Planner analyzes → sends plan to TL → planner stays alive for p2p questions
+Phase 1: Planner analyzes → writes plan.md → TL reads plan.md → planner stays alive for p2p questions
          TL validates plan → spawns dev WITH the plan context
 Phase 2: Dev implements immediately (has plan) → reports "ready for review" to TL
          TL spawns reviewer WITH branch context
