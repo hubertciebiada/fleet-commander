@@ -19,6 +19,20 @@ if [ -f "$FC_ROOT/package.json" ]; then
   FC_VERSION="$(node -e "try{console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')).version||'unknown')}catch{console.log('unknown')}" "$FC_ROOT/package.json")"
 fi
 
+# ── Validate that all install-time placeholders were replaced ────
+# {{ISSUE_NUMBER}} is intentionally left — it is resolved at runtime by team-manager.
+validate_placeholders() {
+  local file="$1"
+  local label="$2"
+  local unreplaced
+  unreplaced=$(grep -oE '\{\{[A-Za-z_]+\}\}' "$file" | grep -v '{{ISSUE_NUMBER}}' | sort -u || true)
+  if [ -n "$unreplaced" ]; then
+    echo "ERROR: Unreplaced placeholders found in $label:"
+    echo "$unreplaced"
+    exit 1
+  fi
+}
+
 # ── Ensure prompts directory and default prompt exist ──────────────
 mkdir -p "$FC_ROOT/prompts"
 if [ ! -f "$FC_ROOT/prompts/default-prompt.md" ]; then
@@ -124,7 +138,13 @@ if [ -f "$SETTINGS" ]; then
     }
 
     existing._fleetCommanderVersion = process.argv[3];
-    fs.writeFileSync(process.argv[1], JSON.stringify(existing, null, 2) + '\n');
+    const tmpPath = process.argv[1] + '.tmp';
+    try {
+      fs.writeFileSync(tmpPath, JSON.stringify(existing, null, 2) + '\n');
+      fs.renameSync(tmpPath, process.argv[1]);
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
   " "$SETTINGS" "$EXAMPLE" "$FC_VERSION"
   echo "  Merged hook entries into existing settings.json (v${FC_VERSION})"
 else
@@ -134,7 +154,13 @@ else
     const fs = require('fs');
     const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf-8'));
     data._fleetCommanderVersion = process.argv[2];
-    fs.writeFileSync(process.argv[3], JSON.stringify(data, null, 2) + '\n');
+    const tmpPath = process.argv[3] + '.tmp';
+    try {
+      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + '\n');
+      fs.renameSync(tmpPath, process.argv[3]);
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
   " "$EXAMPLE" "$FC_VERSION" "$SETTINGS"
   echo "  Created settings.json from template (v${FC_VERSION})"
 fi
@@ -192,6 +218,7 @@ else
   echo "  Installed workflow template to $WORKFLOW_TARGET"
 fi
 echo "    PROJECT_NAME=$PROJECT_NAME  project_slug=$project_slug  BASE_BRANCH=$BASE_BRANCH"
+validate_placeholders "$WORKFLOW_TARGET" "workflow template ($WORKFLOW_TARGET)"
 
 # ── 4. Install agent templates ───────────────────────────────
 AGENTS_SRC="$FC_ROOT/templates/agents"
@@ -209,6 +236,7 @@ if [ -d "$AGENTS_SRC" ]; then
         -e "s|{{project_slug}}|$project_slug|g" \
         -e "s|{{BASE_BRANCH}}|$BASE_BRANCH|g" \
         "$AGENT_FILE" > "$AGENTS_DIR/$AGENT_NAME"
+    validate_placeholders "$AGENTS_DIR/$AGENT_NAME" "agent template ($AGENT_NAME)"
     AGENT_COUNT=$((AGENT_COUNT + 1))
   done
   echo "  Installed $AGENT_COUNT agent templates to $AGENTS_DIR (v${FC_VERSION})"
