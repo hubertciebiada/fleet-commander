@@ -1368,9 +1368,10 @@ export class FleetDatabase {
   }
 
   getAgentMessages(teamId: number, limit?: number): AgentMessage[] {
+    const cols = 'id, team_id, event_id, sender, recipient, summary, session_id, created_at';
     const sql = limit
-      ? 'SELECT * FROM agent_messages WHERE team_id = ? ORDER BY created_at DESC, id DESC LIMIT ?'
-      : 'SELECT * FROM agent_messages WHERE team_id = ? ORDER BY created_at DESC, id DESC';
+      ? `SELECT ${cols} FROM agent_messages WHERE team_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+      : `SELECT ${cols} FROM agent_messages WHERE team_id = ? ORDER BY created_at DESC, id DESC`;
 
     const stmt = this.db.prepare(sql);
     const rows = (limit ? stmt.all(teamId, limit) : stmt.all(teamId)) as Record<string, unknown>[];
@@ -1380,26 +1381,32 @@ export class FleetDatabase {
   getAgentMessageSummary(teamId: number): MessageEdge[] {
     // Normalize sender/recipient names: strip "fleet-" prefix for backward compat
     // with data inserted before normalization was added.
+    // Uses CTE + ROW_NUMBER window function to find the latest summary per pair
+    // in a single pass, avoiding the O(n^2) correlated subquery.
     const sql = `
+      WITH normalized AS (
+        SELECT
+          CASE WHEN sender LIKE 'fleet-%' THEN SUBSTR(sender, 7) ELSE sender END AS norm_sender,
+          CASE WHEN recipient LIKE 'fleet-%' THEN SUBSTR(recipient, 7) ELSE recipient END AS norm_recipient,
+          summary,
+          created_at,
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY
+              CASE WHEN sender LIKE 'fleet-%' THEN SUBSTR(sender, 7) ELSE sender END,
+              CASE WHEN recipient LIKE 'fleet-%' THEN SUBSTR(recipient, 7) ELSE recipient END
+            ORDER BY created_at DESC, id DESC
+          ) AS rn
+        FROM agent_messages
+        WHERE team_id = ?
+      )
       SELECT
-        CASE WHEN sender LIKE 'fleet-%' THEN SUBSTR(sender, 7) ELSE sender END AS sender,
-        CASE WHEN recipient LIKE 'fleet-%' THEN SUBSTR(recipient, 7) ELSE recipient END AS recipient,
+        norm_sender AS sender,
+        norm_recipient AS recipient,
         COUNT(*) AS count,
-        (
-          SELECT summary FROM agent_messages AS am2
-          WHERE am2.team_id = am.team_id
-            AND (CASE WHEN am2.sender LIKE 'fleet-%' THEN SUBSTR(am2.sender, 7) ELSE am2.sender END)
-              = (CASE WHEN am.sender LIKE 'fleet-%' THEN SUBSTR(am.sender, 7) ELSE am.sender END)
-            AND (CASE WHEN am2.recipient LIKE 'fleet-%' THEN SUBSTR(am2.recipient, 7) ELSE am2.recipient END)
-              = (CASE WHEN am.recipient LIKE 'fleet-%' THEN SUBSTR(am.recipient, 7) ELSE am.recipient END)
-          ORDER BY am2.created_at DESC, am2.id DESC
-          LIMIT 1
-        ) AS last_summary
-      FROM agent_messages AS am
-      WHERE team_id = ?
-      GROUP BY
-        CASE WHEN sender LIKE 'fleet-%' THEN SUBSTR(sender, 7) ELSE sender END,
-        CASE WHEN recipient LIKE 'fleet-%' THEN SUBSTR(recipient, 7) ELSE recipient END
+        MAX(CASE WHEN rn = 1 THEN summary END) AS last_summary
+      FROM normalized
+      GROUP BY norm_sender, norm_recipient
       ORDER BY count DESC
     `;
     const rows = this.db.prepare(sql).all(teamId) as Array<{
