@@ -643,6 +643,71 @@ describe('TeamManager.gracefulShutdown', () => {
 
     expect((tm as any).shutdownTimers.size).toBe(1);
   });
+
+  it('should store killTimer in shutdownTimers after grace period expires', () => {
+    const mockStdin = createMockStdin();
+    (tm as any).stdinPipes.set(1, mockStdin);
+    (tm as any).parsedEvents.set(1, []);
+    (tm as any).childProcesses.set(1, createMockChildProcess());
+
+    tm.gracefulShutdown(1, 42, 5000);
+
+    // graceTimer is stored immediately
+    expect((tm as any).shutdownTimers.has(1)).toBe(true);
+    const graceTimerRef = (tm as any).shutdownTimers.get(1);
+
+    // Advance past grace period — graceTimer fires, killTimer is created
+    vi.advanceTimersByTime(5000);
+
+    // killTimer should now be stored in shutdownTimers
+    expect((tm as any).shutdownTimers.has(1)).toBe(true);
+    expect((tm as any).shutdownTimers.size).toBe(1);
+    // Verify it is a different timer (the killTimer, not the graceTimer)
+    expect((tm as any).shutdownTimers.get(1)).not.toBe(graceTimerRef);
+
+    // purgeTeamMaps should cancel the killTimer
+    (tm as any).purgeTeamMaps(1);
+    expect((tm as any).shutdownTimers.has(1)).toBe(false);
+
+    // Advance past kill window — force kill should NOT fire (timer was cancelled)
+    vi.advanceTimersByTime(10_000);
+    // If killTimer had fired, it would call killProcess and broadcast team_stopped.
+    // Since we purged, neither should happen.
+    expect(mockSseBroker.broadcast).not.toHaveBeenCalledWith(
+      'team_stopped',
+      expect.objectContaining({ team_id: 1 }),
+      1,
+    );
+  });
+
+  it('should allow stop() to cancel the killTimer during the kill window', async () => {
+    const mockStdin = createMockStdin();
+    (tm as any).stdinPipes.set(1, mockStdin);
+    (tm as any).parsedEvents.set(1, []);
+    (tm as any).childProcesses.set(1, createMockChildProcess());
+    mockDb.getTeam.mockReturnValue(makeTeam({ id: 1, pid: 12345 }));
+
+    tm.gracefulShutdown(1, 42, 5000);
+
+    // Advance past grace period — killTimer is created and stored
+    vi.advanceTimersByTime(5000);
+    expect((tm as any).shutdownTimers.has(1)).toBe(true);
+
+    // stop() should clear the killTimer from shutdownTimers
+    await tm.stop(1);
+    expect((tm as any).shutdownTimers.has(1)).toBe(false);
+
+    // Clear all mock calls so we can isolate what happens after stop()
+    mockSseBroker.broadcast.mockClear();
+
+    // Advance past kill window — force kill should NOT fire (no additional broadcast)
+    vi.advanceTimersByTime(10_000);
+    expect(mockSseBroker.broadcast).not.toHaveBeenCalledWith(
+      'team_stopped',
+      expect.objectContaining({ team_id: 1 }),
+      1,
+    );
+  });
 });
 
 // =============================================================================
