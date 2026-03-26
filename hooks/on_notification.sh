@@ -10,3 +10,4 @@ _LOG="${FLEET_HOOK_LOG:-/tmp/fleet-hooks.log}"
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | HOOK  | notification | ${FLEET_TEAM_ID:-?} | cwd=$(pwd)" >> "$_LOG" 2>/dev/null || true
 input=$(cat)
 echo "$input" | "$HOOK_DIR/send_event.sh" "notification"
+exit 0
