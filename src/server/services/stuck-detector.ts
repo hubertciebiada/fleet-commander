@@ -199,9 +199,13 @@ class StuckDetector {
               IDLE_MINUTES: String(Math.round(idleMinutes)),
             });
             if (idleMsg) {
-              const manager = getTeamManager();
-              manager.sendMessage(team.id, idleMsg, 'fc', 'idle_nudge');
-              console.log(`[StuckDetector] Idle nudge sent to team ${team.id}`);
+              try {
+                const manager = getTeamManager();
+                manager.sendMessage(team.id, idleMsg, 'fc', 'idle_nudge');
+                console.log(`[StuckDetector] Idle nudge sent to team ${team.id}`);
+              } catch {
+                console.warn(`[StuckDetector] Failed to send idle nudge to team ${team.id}`);
+              }
             }
           }
 
@@ -211,9 +215,13 @@ class StuckDetector {
               ISSUE_NUMBER: String(team.issueNumber),
             });
             if (msg) {
-              const manager = getTeamManager();
-              manager.sendMessage(team.id, msg, 'fc', 'stuck_nudge');
-              console.log(`[StuckDetector] Nudge sent to team ${team.id}`);
+              try {
+                const manager = getTeamManager();
+                manager.sendMessage(team.id, msg, 'fc', 'stuck_nudge');
+                console.log(`[StuckDetector] Nudge sent to team ${team.id}`);
+              } catch {
+                console.warn(`[StuckDetector] Failed to send stuck nudge to team ${team.id}`);
+              }
             }
           }
         }
