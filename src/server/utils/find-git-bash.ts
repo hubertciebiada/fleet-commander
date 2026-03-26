@@ -10,12 +10,21 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 
+// Module-level cache: null = not yet resolved, undefined = resolved but not found
+let _cachedGitBash: string | undefined | null = null;
+
 export function findGitBash(): string | undefined {
-  if (process.platform !== 'win32') return undefined;
+  if (_cachedGitBash !== null) return _cachedGitBash;
+
+  if (process.platform !== 'win32') {
+    _cachedGitBash = undefined;
+    return _cachedGitBash;
+  }
 
   // Honour explicit override first
   if (process.env['CLAUDE_CODE_GIT_BASH_PATH']) {
-    return process.env['CLAUDE_CODE_GIT_BASH_PATH'];
+    _cachedGitBash = process.env['CLAUDE_CODE_GIT_BASH_PATH'];
+    return _cachedGitBash;
   }
 
   // Well-known install locations
@@ -28,7 +37,10 @@ export function findGitBash(): string | undefined {
   ];
 
   for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+    if (fs.existsSync(p)) {
+      _cachedGitBash = p;
+      return _cachedGitBash;
+    }
   }
 
   // Fallback: ask Windows where bash.exe lives
@@ -39,10 +51,19 @@ export function findGitBash(): string | undefined {
       shell: 'cmd.exe',
     });
     const first = result.trim().split('\n')[0]?.trim();
-    if (first && fs.existsSync(first)) return first;
+    if (first && fs.existsSync(first)) {
+      _cachedGitBash = first;
+      return _cachedGitBash;
+    }
   } catch {
     /* ignore — where may not find it */
   }
 
-  return undefined;
+  _cachedGitBash = undefined;
+  return _cachedGitBash;
+}
+
+/** Reset the cached path — exposed only for unit tests. */
+export function _resetForTesting(): void {
+  _cachedGitBash = null;
 }

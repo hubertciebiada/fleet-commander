@@ -28,6 +28,7 @@ import { usagePoller } from './services/usage-tracker.js';
 import { dataRetention } from './services/data-retention.js';
 import config from './config.js';
 import { resolveClaudePath } from './utils/resolve-claude-path.js';
+import { findGitBash } from './utils/find-git-bash.js';
 import { getTeamManager } from './services/team-manager.js';
 import { DEFAULT_MESSAGE_TEMPLATES } from '../shared/message-templates.js';
 
@@ -117,6 +118,15 @@ async function main() {
     server.log.info(`Agent Teams: ${config.enableAgentTeams ? 'enabled' : 'disabled'} (FLEET_ENABLE_AGENT_TEAMS)`);
 
     const claudePath = resolveClaudePath();
+
+    // Warm the findGitBash() cache so subsequent spawn calls don't block
+    const gitBashPath = findGitBash();
+    if (gitBashPath) {
+      server.log.info(`Git Bash path: ${gitBashPath}`);
+    } else if (process.platform === 'win32') {
+      server.log.warn('Git Bash not found — CC hook scripts may fail');
+    }
+
     const { stdout } = await execAsync(`"${claudePath}" --version`, {
       encoding: 'utf-8',
       timeout: 10000,
