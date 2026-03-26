@@ -850,3 +850,109 @@ describe('GET /api/teams/:id/tasks', () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+// =============================================================================
+// Tests: NaN guard on previously-unguarded :id handlers
+// =============================================================================
+
+describe('NaN guard on :id param', () => {
+  it('POST /api/teams/:id/stop should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/api/teams/abc/stop',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('POST /api/teams/:id/force-launch should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/api/teams/abc/force-launch',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('POST /api/teams/:id/resume should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/api/teams/abc/resume',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('POST /api/teams/:id/restart should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/api/teams/abc/restart',
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('GET /api/teams/:id/output should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/teams/abc/output',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('GET /api/teams/:id/stream-events should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/teams/abc/stream-events',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('GET /api/teams/:id/events should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/teams/abc/events',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('GET /api/teams/:id/roster should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/teams/abc/roster',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('GET /api/teams/:id/transitions should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/teams/abc/transitions',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('GET /api/teams/:id/messages should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/teams/abc/messages',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+
+  it('GET /api/teams/:id/messages/summary should return 400 for non-numeric ID', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/teams/abc/messages/summary',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('positive integer');
+  });
+});

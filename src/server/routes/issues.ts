@@ -14,6 +14,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getIssueService } from '../services/issue-service.js';
 import { ServiceError } from '../services/service-error.js';
+import { parseIdParam } from '../utils/parse-params.js';
 
 // ---------------------------------------------------------------------------
 // Fastify plugin
@@ -51,7 +52,7 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
     '/api/projects/:projectId/issues',
     async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
       try {
-        const projectId = parseInt(request.params.projectId, 10);
+        const projectId = parseIdParam(request.params.projectId, 'projectId');
         const service = getIssueService();
         const result = await service.getProjectIssues(projectId);
         return result;
@@ -116,7 +117,7 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
     '/api/issues/:number',
     async (request: FastifyRequest<{ Params: { number: string } }>, reply: FastifyReply) => {
       try {
-        const issueNumber = parseInt(request.params.number, 10);
+        const issueNumber = parseIdParam(request.params.number, 'number');
         const service = getIssueService();
         return service.getIssue(issueNumber);
       } catch (err: unknown) {
@@ -140,7 +141,7 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
     '/api/projects/:projectId/issues/dependencies',
     async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
       try {
-        const projectId = parseInt(request.params.projectId, 10);
+        const projectId = parseIdParam(request.params.projectId, 'projectId');
         const service = getIssueService();
         return await service.getProjectDependencies(projectId);
       } catch (err: unknown) {
@@ -168,7 +169,7 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
       reply: FastifyReply,
     ) => {
       try {
-        const issueNumber = parseInt(request.params.number, 10);
+        const issueNumber = parseIdParam(request.params.number, 'number');
         const projectIdStr = (request.query as { projectId?: string }).projectId;
 
         if (!projectIdStr) {
@@ -178,7 +179,7 @@ async function issueRoutes(server: FastifyInstance): Promise<void> {
           });
         }
 
-        const projectId = parseInt(projectIdStr, 10);
+        const projectId = parseIdParam(projectIdStr, 'projectId');
         const service = getIssueService();
         return await service.getIssueDependencies(issueNumber, projectId);
       } catch (err: unknown) {

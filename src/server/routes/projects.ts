@@ -14,6 +14,7 @@ import type {
 } from 'fastify';
 import { getProjectService } from '../services/project-service.js';
 import { ServiceError } from '../services/service-error.js';
+import { parseIdParam } from '../utils/parse-params.js';
 import type { ProjectStatus } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -128,13 +129,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectService();
         const detail = service.getProjectDetail(projectId);
@@ -162,13 +157,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectService();
         const settings = await service.getRepoSettings(projectId);
@@ -196,13 +185,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectService();
         const updated = service.updateProject(projectId, request.body || {});
@@ -230,13 +213,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectService();
         await service.deleteProject(projectId);
@@ -264,13 +241,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectService();
         const result = service.installHooksForProject(projectId);
@@ -298,13 +269,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const body = (request.body ?? {}) as { reinstall?: boolean };
         const service = getProjectService();
@@ -335,13 +300,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectService();
         const teams = service.getProjectTeams(projectId);
@@ -369,13 +328,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const resetTeams = (request.query as { resetTeams?: string }).resetTeams === 'true';
         const service = getProjectService();
@@ -404,13 +357,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const body = request.body || {};
         const itemPaths = Array.isArray(body.items) ? body.items : [];
@@ -442,13 +389,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectService();
         const result = service.getPrompt(projectId);
@@ -476,13 +417,7 @@ const projectsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const projectId = parseInt(request.params.id, 10);
-        if (isNaN(projectId) || projectId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid project ID',
-          });
-        }
+        const projectId = parseIdParam(request.params.id, 'id');
 
         const { content } = request.body || {};
         if (content === undefined || typeof content !== 'string') {

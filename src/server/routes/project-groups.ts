@@ -12,6 +12,7 @@ import type {
 } from 'fastify';
 import { getProjectGroupService } from '../services/project-group-service.js';
 import { ServiceError } from '../services/service-error.js';
+import { parseIdParam } from '../utils/parse-params.js';
 
 // ---------------------------------------------------------------------------
 // Request body / param interfaces
@@ -102,13 +103,7 @@ const projectGroupsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const groupId = parseInt(request.params.id, 10);
-        if (isNaN(groupId) || groupId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid group ID',
-          });
-        }
+        const groupId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectGroupService();
         const result = service.getWithProjects(groupId);
@@ -136,7 +131,7 @@ const projectGroupsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const groupId = parseInt(request.params.id, 10);
+        const groupId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectGroupService();
         const updated = service.updateGroup(groupId, request.body || {});
@@ -164,7 +159,7 @@ const projectGroupsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const groupId = parseInt(request.params.id, 10);
+        const groupId = parseIdParam(request.params.id, 'id');
 
         const service = getProjectGroupService();
         service.deleteGroup(groupId);

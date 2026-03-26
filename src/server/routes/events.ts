@@ -6,6 +6,7 @@ import { sseBroker } from '../services/sse-broker.js';
 import { getTeamManager } from '../services/team-manager.js';
 import { getEventService } from '../services/event-service.js';
 import { ServiceError } from '../services/service-error.js';
+import { parseOptionalIdParam } from '../utils/parse-params.js';
 
 interface EventQuerystring {
   team_id?: string;
@@ -197,7 +198,7 @@ const eventsRoutes: FastifyPluginCallback = (
 
         const service = getEventService();
         const result = service.queryEvents({
-          teamId: query.team_id ? parseInt(query.team_id, 10) : undefined,
+          teamId: parseOptionalIdParam(query.team_id, 'team_id'),
           eventType: query.type || undefined,
           since: query.since || undefined,
           limit,
