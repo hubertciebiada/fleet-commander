@@ -27,7 +27,7 @@ fleet-commander/
       index.ts              # Fastify app entry, route registration, service startup
       config.ts             # Environment variable parsing and validation
       db.ts                 # SQLite connection (WAL mode), schema init, query helpers
-      schema.sql            # 8 tables: projects, teams, pull_requests, events, commands, usage_snapshots, schema_version, message_templates
+      schema.sql            # 13 tables: projects, project_groups, teams, pull_requests, events, commands, usage_snapshots, schema_version, message_templates, team_transitions, agent_messages, stream_events, team_tasks
       routes/               # REST API route handlers
         teams.ts            # CRUD + launch/stop/message
         projects.ts         # CRUD + install/uninstall/cleanup
@@ -89,6 +89,7 @@ fleet-commander/
       message-templates.ts  # Message template type definitions and defaults
   hooks/                    # CC hook scripts (deployed to target repos)
     send_event.sh           # Fire-and-forget POST to Fleet Commander
+    run-hook.sh             # Generic hook runner (delegates to send_event.sh)
     on_session_start.sh
     on_session_end.sh
     on_stop.sh
@@ -98,6 +99,9 @@ fleet-commander/
     on_pre_compact.sh
     on_subagent_start.sh
     on_subagent_stop.sh
+    on_stop_failure.sh
+    on_teammate_idle.sh
+    on_task_created.sh
   scripts/
     launch.js               # Auto-install + build + open browser
     install.sh / install.ps1
@@ -122,7 +126,7 @@ fleet-commander/
 | `src/server/index.ts` | App entry point, registers routes, starts services |
 | `src/server/config.ts` | All env var parsing, validation, frozen config object |
 | `src/server/db.ts` | SQLite connection, WAL mode, schema initialization |
-| `src/server/schema.sql` | Full database schema (8 tables + 1 view) |
+| `src/server/schema.sql` | Full database schema (13 tables + 1 view) |
 | `src/server/services/team-manager.ts` | Spawns CC processes, manages stdin/stdout pipes |
 | `src/server/services/event-collector.ts` | Receives hook events, writes to DB, broadcasts SSE |
 | `src/server/services/github-poller.ts` | Polls GitHub via `gh` CLI for PR/CI/merge status |
@@ -151,11 +155,12 @@ npm run launch       # Full launch: install + build + open browser
 
 ## Database
 
-SQLite with WAL mode, 8 tables:
+SQLite with WAL mode, 13 tables:
 
 | Table | Purpose |
 |-------|---------|
 | `projects` | Registered repositories (path, GitHub slug, max teams, prompt file) |
+| `project_groups` | Logical grouping of projects |
 | `teams` | Agent team instances (status, phase, PID, session, PR link) |
 | `pull_requests` | PR tracking (state, CI status, merge state, auto-merge flag) |
 | `events` | Hook events from CC sessions (type, tool name, payload JSON) |
@@ -163,6 +168,10 @@ SQLite with WAL mode, 8 tables:
 | `usage_snapshots` | Usage percentage snapshots (daily, weekly, Sonnet, extra) |
 | `schema_version` | Migration tracking |
 | `message_templates` | Editable PM->TL message templates |
+| `team_transitions` | State machine transition audit log |
+| `agent_messages` | Inter-agent message tracking |
+| `stream_events` | Raw CC stream events for output replay |
+| `team_tasks` | Task tracking per team (from TaskCreated hooks) |
 
 Plus one view: `v_team_dashboard` (joins teams + projects + PRs for the grid).
 
@@ -183,7 +192,7 @@ Team ID format: `{project_slug}-{issue_number}` (used as worktree name).
 
 ## SSE Event Types
 
-The SSE broker emits 14 event types:
+The SSE broker emits 17 event types:
 
 1. `team_status_changed`
 2. `team_event`
@@ -199,6 +208,9 @@ The SSE broker emits 14 event types:
 12. `snapshot`
 13. `heartbeat` (every 30s)
 14. `dependency_resolved`
+15. `team_thinking_start`
+16. `team_thinking_stop`
+17. `task_updated`
 
 ## Environment Variables
 
