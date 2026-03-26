@@ -48,8 +48,10 @@ interface OAuthUsageResponse {
 
 /**
  * Process and store a usage snapshot, then broadcast via SSE.
+ * Updates module-level usage variables so getUsageZone() reflects the
+ * submitted values, and triggers queue drain on red-to-green transitions.
  */
-export function processUsageSnapshot(data: {
+export async function processUsageSnapshot(data: {
   teamId?: number;
   projectId?: number;
   sessionId?: string;
@@ -60,7 +62,15 @@ export function processUsageSnapshot(data: {
   dailyResetsAt?: string;
   weeklyResetsAt?: string;
   rawOutput?: string;
-}): void {
+}): Promise<void> {
+  const previousZone = _lastZone;
+
+  // Update module-level tracking variables so getUsageZone() reflects the submitted values
+  _latestDaily = data.dailyPercent ?? 0;
+  _latestWeekly = data.weeklyPercent ?? 0;
+
+  const currentZone = getUsageZone();
+
   const db = getDatabase();
   db.insertUsageSnapshot(data);
 
@@ -69,8 +79,16 @@ export function processUsageSnapshot(data: {
     weekly_percent: data.weeklyPercent ?? 0,
     sonnet_percent: data.sonnetPercent ?? 0,
     extra_percent: data.extraPercent ?? 0,
-    zone: getUsageZone(),
+    zone: currentZone,
   });
+
+  await checkZoneTransitionAndDrain(previousZone, currentZone);
+
+  _lastZone = currentZone;
+
+  console.log(
+    `[UsageTracker] Manual snapshot — daily=${data.dailyPercent ?? 0}% weekly=${data.weeklyPercent ?? 0}% zone=${currentZone}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +107,42 @@ export function getUsageZone(): UsageZone {
     return 'red';
   }
   return 'green';
+}
+
+// ---------------------------------------------------------------------------
+// Zone transition — shared drain logic
+// ---------------------------------------------------------------------------
+
+/**
+ * Check for a red-to-green zone transition and trigger queue processing
+ * for all active projects with queued teams.  Used by both the poller's
+ * fetchUsage() and the manual processUsageSnapshot() path.
+ *
+ * Uses a dynamic import for team-manager to avoid circular dependencies.
+ */
+export async function checkZoneTransitionAndDrain(
+  previousZone: UsageZone,
+  currentZone: UsageZone,
+): Promise<void> {
+  if (previousZone === 'red' && currentZone === 'green') {
+    console.log('[UsageTracker] Zone transition: red -> green — draining queues');
+    try {
+      const { getTeamManager } = await import('./team-manager.js');
+      const manager = getTeamManager();
+      const db = getDatabase();
+      const projects = db.getProjects({ status: 'active' });
+      for (const project of projects) {
+        const queued = db.getQueuedTeamsByProject(project.id);
+        if (queued.length > 0) {
+          manager.processQueue(project.id).catch((err: unknown) => {
+            console.error(`[UsageTracker] processQueue error for project ${project.id}:`, err);
+          });
+        }
+      }
+    } catch (err: unknown) {
+      console.error('[UsageTracker] Failed to drain queues on zone transition:', err);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,25 +315,7 @@ class UsagePoller {
     );
 
     // Zone transition: red -> green => trigger queue processing for all projects
-    if (previousZone === 'red' && currentZone === 'green') {
-      console.log('[UsagePoller] Zone transition: red -> green — draining queues');
-      try {
-        // Dynamically import to avoid circular dependency
-        const { getTeamManager } = await import('./team-manager.js');
-        const manager = getTeamManager();
-        const projects = db.getProjects({ status: 'active' });
-        for (const project of projects) {
-          const queued = db.getQueuedTeamsByProject(project.id);
-          if (queued.length > 0) {
-            manager.processQueue(project.id).catch((err: unknown) => {
-              console.error(`[UsagePoller] processQueue error for project ${project.id}:`, err);
-            });
-          }
-        }
-      } catch (err: unknown) {
-        console.error('[UsagePoller] Failed to drain queues on zone transition:', err);
-      }
-    }
+    await checkZoneTransitionAndDrain(previousZone, currentZone);
 
     _lastZone = currentZone;
   }

@@ -1,9 +1,9 @@
 // =============================================================================
-// Fleet Commander — UsagePoller.start() DB seeding tests (issue #66)
+// Fleet Commander — UsageTracker tests
 // =============================================================================
-// Verifies that _lastZone, _latestDaily, and _latestWeekly are hydrated from
-// the latest usage_snapshots DB row on startup, so that zone transitions
-// (especially red -> green) are correctly detected after a server restart.
+// Tests for:
+// 1. UsagePoller.start() DB seeding of zone state (issue #66)
+// 2. processUsageSnapshot() zone transition and queue drain (issue #533)
 // =============================================================================
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -13,11 +13,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // ---------------------------------------------------------------------------
 
 const mockGetLatestUsage = vi.fn();
+const mockInsertUsageSnapshot = vi.fn();
+const mockGetProjects = vi.fn();
+const mockGetQueuedTeamsByProject = vi.fn();
 
 vi.mock('../../src/server/db.js', () => ({
   getDatabase: () => ({
     getLatestUsage: mockGetLatestUsage,
-    insertUsageSnapshot: vi.fn(),
+    insertUsageSnapshot: mockInsertUsageSnapshot,
+    getProjects: mockGetProjects,
+    getQueuedTeamsByProject: mockGetQueuedTeamsByProject,
   }),
 }));
 
@@ -35,11 +40,19 @@ vi.mock('../../src/server/services/sse-broker.js', () => ({
   },
 }));
 
+const mockProcessQueue = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('../../src/server/services/team-manager.js', () => ({
+  getTeamManager: () => ({
+    processQueue: mockProcessQueue,
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { usagePoller, getUsageZone } from '../../src/server/services/usage-tracker.js';
+import { usagePoller, getUsageZone, processUsageSnapshot } from '../../src/server/services/usage-tracker.js';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -160,5 +173,75 @@ describe('UsagePoller.start() — DB seeding of zone state', () => {
 
     usagePoller.stop();
     pollSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processUsageSnapshot() — zone transition and queue drain (issue #533)
+// ---------------------------------------------------------------------------
+
+describe('processUsageSnapshot() — zone transition and queue drain', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetProjects.mockReturnValue([]);
+    mockGetQueuedTeamsByProject.mockReturnValue([]);
+  });
+
+  it('should update _latestDaily and _latestWeekly from submitted data', async () => {
+    // Submit low values => zone should be green
+    await processUsageSnapshot({ dailyPercent: 50, weeklyPercent: 60 });
+    expect(getUsageZone()).toBe('green');
+
+    // Submit high daily value => zone should be red (85 threshold)
+    await processUsageSnapshot({ dailyPercent: 90, weeklyPercent: 50 });
+    expect(getUsageZone()).toBe('red');
+  });
+
+  it('should trigger queue drain on red-to-green transition', async () => {
+    mockGetProjects.mockReturnValue([{ id: 1, slug: 'test-proj', status: 'active' }]);
+    mockGetQueuedTeamsByProject.mockReturnValue([{ id: 10, status: 'queued' }]);
+
+    // Set zone to red
+    await processUsageSnapshot({ dailyPercent: 90, weeklyPercent: 50 });
+    expect(getUsageZone()).toBe('red');
+    expect(mockProcessQueue).not.toHaveBeenCalled();
+
+    // Transition to green
+    await processUsageSnapshot({ dailyPercent: 10, weeklyPercent: 10 });
+    expect(getUsageZone()).toBe('green');
+    expect(mockProcessQueue).toHaveBeenCalledWith(1);
+  });
+
+  it('should not trigger queue drain when zone stays green', async () => {
+    await processUsageSnapshot({ dailyPercent: 10, weeklyPercent: 10 });
+    expect(getUsageZone()).toBe('green');
+
+    await processUsageSnapshot({ dailyPercent: 20, weeklyPercent: 20 });
+    expect(getUsageZone()).toBe('green');
+
+    expect(mockProcessQueue).not.toHaveBeenCalled();
+  });
+
+  it('should not trigger queue drain when zone stays red', async () => {
+    mockGetProjects.mockReturnValue([{ id: 1, slug: 'test-proj', status: 'active' }]);
+    mockGetQueuedTeamsByProject.mockReturnValue([{ id: 10, status: 'queued' }]);
+
+    await processUsageSnapshot({ dailyPercent: 90, weeklyPercent: 50 });
+    expect(getUsageZone()).toBe('red');
+
+    await processUsageSnapshot({ dailyPercent: 92, weeklyPercent: 50 });
+    expect(getUsageZone()).toBe('red');
+
+    expect(mockProcessQueue).not.toHaveBeenCalled();
+  });
+
+  it('should not trigger queue drain on green-to-red transition', async () => {
+    await processUsageSnapshot({ dailyPercent: 10, weeklyPercent: 10 });
+    expect(getUsageZone()).toBe('green');
+
+    await processUsageSnapshot({ dailyPercent: 90, weeklyPercent: 50 });
+    expect(getUsageZone()).toBe('red');
+
+    expect(mockProcessQueue).not.toHaveBeenCalled();
   });
 });

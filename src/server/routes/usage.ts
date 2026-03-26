@@ -96,7 +96,7 @@ const usageRoutes: FastifyPluginCallback = (
         } | null;
 
         const service = getUsageService();
-        const result = service.submitSnapshot(body);
+        const result = await service.submitSnapshot(body);
         return reply.code(201).send(result);
       } catch (err: unknown) {
         if (err instanceof ServiceError) {
