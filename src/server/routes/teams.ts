@@ -15,6 +15,7 @@ import type {
 } from 'fastify';
 import { getTeamService } from '../services/team-service.js';
 import { ServiceError } from '../services/service-error.js';
+import { parseIdParam } from '../utils/parse-params.js';
 import type { TeamPhase } from '../../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -195,7 +196,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const service = getTeamService();
         const team = await service.stopTeam(teamId);
         return reply.code(200).send(team);
@@ -228,7 +229,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const service = getTeamService();
         const team = await service.forceLaunch(teamId);
         return reply.code(200).send(team);
@@ -264,7 +265,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const service = getTeamService();
         const team = await service.resumeTeam(teamId);
         return reply.code(200).send(team);
@@ -300,7 +301,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const { prompt } = request.body || {};
         const service = getTeamService();
         const team = await service.restartTeam(teamId, prompt);
@@ -374,13 +375,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
+        const teamId = parseIdParam(request.params.id, 'id');
 
         const service = getTeamService();
         const detail = service.getTeamDetail(teamId);
@@ -434,7 +429,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const linesParam = (request.query as OutputQuerystring).lines;
         const lines = linesParam ? parseInt(linesParam, 10) : undefined;
 
@@ -469,7 +464,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const service = getTeamService();
         const events = service.getStreamEvents(teamId);
         return reply.code(200).send(events);
@@ -496,13 +491,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
+        const teamId = parseIdParam(request.params.id, 'id');
 
         const limitParam = (request.query as TimelineQuerystring).limit;
         const rawLimit = limitParam ? parseInt(limitParam, 10) : undefined;
@@ -537,13 +526,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
+        const teamId = parseIdParam(request.params.id, 'id');
 
         const format = (request.query as ExportQuerystring).format ?? 'json';
         const service = getTeamService();
@@ -575,7 +558,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const query = request.query as PaginationQuerystring;
         const rawLimit = query.limit ? parseInt(query.limit, 10) : undefined;
         const rawOffset = query.offset ? parseInt(query.offset, 10) : undefined;
@@ -616,13 +599,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
+        const teamId = parseIdParam(request.params.id, 'id');
 
         const { message } = request.body || {};
         const service = getTeamService();
@@ -664,13 +641,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
+        const teamId = parseIdParam(request.params.id, 'id');
 
         const { phase, reason } = request.body || {};
         const service = getTeamService();
@@ -699,7 +670,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const service = getTeamService();
         const roster = service.getRoster(teamId);
         return reply.code(200).send(roster);
@@ -726,7 +697,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const service = getTeamService();
         const transitions = service.getTransitions(teamId);
         return reply.code(200).send(transitions);
@@ -753,13 +724,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
+        const teamId = parseIdParam(request.params.id, 'id');
 
         const service = getTeamService();
         const updated = service.acknowledgeAlert(teamId);
@@ -787,13 +752,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
-        if (isNaN(teamId) || teamId < 1) {
-          return reply.code(400).send({
-            error: 'Bad Request',
-            message: 'Invalid team ID',
-          });
-        }
+        const teamId = parseIdParam(request.params.id, 'id');
 
         const service = getTeamService();
         const tasks = service.getTasks(teamId);
@@ -821,7 +780,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const limitParam = (request.query as { limit?: string }).limit;
         const rawLimit = limitParam ? parseInt(limitParam, 10) : undefined;
         if (rawLimit !== undefined && (isNaN(rawLimit) || rawLimit < 1)) {
@@ -855,7 +814,7 @@ const teamsRoutes: FastifyPluginCallback = (
       reply: FastifyReply,
     ) => {
       try {
-        const teamId = parseInt(request.params.id, 10);
+        const teamId = parseIdParam(request.params.id, 'id');
         const service = getTeamService();
         const summary = service.getMessageSummary(teamId);
         return reply.code(200).send(summary);
