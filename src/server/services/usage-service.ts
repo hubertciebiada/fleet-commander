@@ -74,7 +74,7 @@ export class UsageService {
    * @returns The latest usage snapshot after insertion
    * @throws ServiceError with code VALIDATION if body is missing
    */
-  submitSnapshot(data: {
+  async submitSnapshot(data: {
     teamId?: number;
     projectId?: number;
     sessionId?: string;
@@ -83,12 +83,12 @@ export class UsageService {
     sonnetPercent?: number;
     extraPercent?: number;
     rawOutput?: string;
-  } | null): unknown {
+  } | null): Promise<unknown> {
     if (!data) {
       throw validationError('Request body is required');
     }
 
-    processUsageSnapshot({
+    await processUsageSnapshot({
       teamId: data.teamId,
       projectId: data.projectId,
       sessionId: data.sessionId,
