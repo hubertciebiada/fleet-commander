@@ -304,6 +304,7 @@ export function processEvent(
   // that team's subagents are removed on the next event for that team.
   if (isTerminal) {
     cleanSubagentTrackersForTeam(payload.team);
+    lastToolUseByTeam.delete(payload.team);
   }
 
   // ── Collect transition data (without writing to DB yet) ──────────
