@@ -12,7 +12,7 @@ Fleet Commander (FC) is the orchestration layer that manages your team. Key fact
 - **CI/PR updates via stdin** — FC watches GitHub for CI results and PR status. When something changes, FC sends a message directly to the Team Lead (TL) via stdin. No PR Watcher agent is needed.
 - **Dashboard** — The PM watches all teams from the FC dashboard. They can see your state (Analyzing, Implementing, Reviewing, PR, Done, Blocked), recent events, and output in real time.
 - **Messages from FC** — FC may send structured messages to the TL (see "FC Messages" section below). These arrive as stdin messages and should be acted on promptly.
-- **Idle/Stuck thresholds** — FC marks agents idle after 3 minutes of inactivity and stuck after 5 minutes. Agents waiting for peer messages are expected to be idle — this is normal. TL should only intervene when stuck.
+- **Idle/Stuck thresholds** — FC marks agents idle after 5 minutes of inactivity and stuck after 10 minutes. Agents waiting for peer messages are expected to be idle — this is normal. TL should only intervene when stuck.
 
 ## Worktree Awareness
 
@@ -38,7 +38,7 @@ User: claude --worktree {{project_slug}}-{N}
 5. **Wait for dev to report "ready for review"** — dev sends a message when implementation is complete
 6. **Phase 2: Spawn `fleet-reviewer`** — reviewer starts reviewing immediately
 7. Let dev and reviewer communicate peer-to-peer — DO NOT relay messages between them
-8. Only intervene if: escalation after 3 review rounds, agent stuck (5min idle), or final PR creation
+8. Only intervene if: escalation after 3 review rounds, agent stuck (10min idle), or final PR creation
 9. When review passes: rebase, create PR, set auto-merge
 10. Respond to FC messages (ci_green, ci_red, pr_merged, nudge_idle, nudge_stuck)
 11. On pr_merged: close issue, shut down agents, finish
@@ -58,10 +58,10 @@ All agents use `model: inherit` — they run on the same model as the TL.
 ### Agent Lifecycle
 
 - **Agents are spawned sequentially** as each phase completes. This gives each agent the context it needs to start working immediately.
-- **Planner** is spawned first (Phase 0). It analyzes the issue, produces the plan, writes it to `plan.md`, and **stays alive** — available for p2p questions from dev and reviewer throughout the workflow.
+- **Planner** is spawned first (Phase 0). It analyzes the issue, produces the plan, writes it to `plan.md`, and **stays alive** — available for p2p questions from dev and reviewer throughout the workflow. After writing `plan.md`, the planner should stop producing output and wait; the Claude Code runtime keeps the session alive automatically, and incoming p2p messages arrive via stdin.
 - **Dev** is spawned after the plan arrives (Phase 1). The TL includes the planner's plan in the dev's task prompt, so dev can start implementing immediately — no waiting.
 - **Reviewer** is spawned after dev reports ready (Phase 2). The TL includes the branch name and context in the reviewer's task prompt, so reviewer can start reviewing immediately — no waiting.
-- Once spawned, **agents stay alive** until the team is done. Planner persists as a knowledge resource. Dev persists through review rounds and CI fixes. Reviewer persists through all review rounds.
+- Once spawned, **agents stay alive** until the team is done. Planner persists as a knowledge resource. Dev persists through review rounds and CI fixes. Reviewer persists through all review rounds. After completing your deliverable, simply stop producing output. The Claude Code runtime keeps your session alive automatically. You will receive incoming messages via stdin when another agent contacts you. Do not call any tools or produce any output until a message arrives.
 - Dev and Reviewer communicate **peer-to-peer** — TL does not relay messages between them.
 
 ### TYPE to Guidebook Mapping
@@ -101,6 +101,8 @@ stateDiagram-v2
 
 **Blocked can be entered from any active state** when the team cannot proceed (missing info, unresolvable conflicts, repeated failures).
 
+Note: These phases represent the workflow's internal progression, not FC's team status tracking (queued/launching/running/idle/stuck/done/failed). FC tracks team status independently via hooks.
+
 ---
 
 ## Phase 0 — Setup (Spawn Planner)
@@ -119,7 +121,7 @@ After spawning the first agent, the TL enters a continuous monitoring loop that 
 ### Monitoring Rules
 
 1. **Run `TaskList` every 30-60 seconds** to check the status of all spawned agents. This is your heartbeat — never go more than 60 seconds without checking.
-2. **If any agent exits unexpectedly** (SubagentStop without sending expected output), **respawn immediately** — do not wait for the stuck detector's 5-minute threshold. However, observe the **respawn budget** (see below).
+2. **If any agent exits unexpectedly** (SubagentStop without sending expected output), **respawn immediately** — do not wait for the stuck detector's 10-minute threshold. However, observe the **respawn budget** (see below).
 3. **Between phases** (e.g., planner done, waiting for dev), actively verify the next agent is alive via `TaskList`. If the agent is gone, respawn it (within the respawn budget).
 4. **After each subagent phase completes, immediately proceed** to the next action:
    - **Planner done** — validate the plan — spawn dev with the plan context
@@ -150,7 +152,7 @@ If `TaskList` shows an agent is no longer running:
 
 1. Planner (spawned in Phase 0) reads the issue, explores the codebase, discovers guidebooks, and produces a structured plan
 2. **Planner writes the plan to `plan.md` in the worktree root**
-3. TL reads `plan.md` from the worktree root using the Read tool, then deletes it (`rm plan.md`) to keep the worktree clean
+3. TL reads `plan.md` from the worktree root using the Read tool, then deletes it (`rm plan.md`) to keep the worktree clean. After the planner exits, check if `plan.md` exists. If it does not exist after 60 seconds, treat this as a planner failure and restart the planner (counts toward 5-spawn budget).
 4. TL validates the plan has all required fields (see format below)
 5. TL evaluates the plan:
    - `BLOCKED=yes` → state Blocked, comment on issue, STOP
@@ -175,14 +177,18 @@ The Planner produces a plan in this format:
 ### Type
 {single | mixed} — {developer mapping}
 
-### Key Files
-- {path} — {what changes and why}
+### Implementation Steps
+1. {step} — {details}
+2. {step} — {details}
 
-### What Needs to Change
-{Detailed analysis with implementation approach}
+### Architectural Decisions
+- {decision and rationale}
 
-### Risks
-- {specific risk or edge case}
+### Edge Cases
+- {edge case and how to handle it}
+
+### Acceptance Criteria
+- [ ] {criterion}
 
 ### Blocked
 no | yes — {reason}
@@ -192,7 +198,7 @@ no | yes — {reason}
 
 If the Planner is unresponsive for >5 minutes or produces an unusable plan:
 1. TL performs a quick analysis directly: read `CLAUDE.md`, scan the issue, identify key files
-2. Produce a minimal plan (Key Files + What Needs to Change + Type is enough)
+2. Produce a minimal plan (Implementation Steps + Acceptance Criteria + Type is enough)
 3. Proceed to Phase 2 — spawn dev with the TL-produced plan
 4. Do NOT spend more than a few minutes on this — a good-enough plan is better than a perfect one
 
@@ -230,13 +236,6 @@ INSTRUCTIONS:
 8. Push the branch and report "Ready for review. Branch: {branch}" to TL
 ```
 
-### Mixed-Language Work
-
-For mixed-type issues (e.g., C# backend + TypeScript frontend):
-1. Spawn the primary dev first (larger scope)
-2. When primary dev completes, spawn secondary dev with `blockedBy` dependency
-3. Wait for both to complete before review
-
 ### Edge Case: Dev Gets Stuck
 
 - FC's stuck detector will nudge TL if the team is idle too long
@@ -257,7 +256,7 @@ For mixed-type issues (e.g., C# backend + TypeScript frontend):
    - **APPROVE** → reviewer writes `review.md` and exits
 5. TL monitors but does NOT intervene unless:
    - **3 review rounds exhausted** → TL arbitrates (see Error Handling)
-   - **Agent stuck** (5min idle) → TL sends a nudge
+   - **Agent stuck** (10min idle) → TL sends a nudge
    - **Escalation request** from either agent → TL steps in
 
 ### Reviewer Task Format (sent via TaskCreate at spawn)
@@ -280,6 +279,7 @@ INSTRUCTIONS:
 
 PEERS:
 - Dev agent name: dev
+- Planner agent name: planner
 - Send rejection feedback DIRECTLY to dev via SendMessage
 - Write final verdict (APPROVE or CHANGES_NEEDED) to review.md — TL reads it
 
@@ -291,7 +291,7 @@ After 3rd round, write review.md with CHANGES_NEEDED and exit.
 
 ### TL Reads review.md
 
-After the reviewer exits, the TL reads `review.md` from the worktree root and deletes it — following the same lifecycle as `plan.md` in Phase 1:
+After the reviewer exits, the TL reads `review.md` from the worktree root and deletes it — following the same lifecycle as `plan.md` in Phase 1. After the reviewer exits, check if `review.md` exists. If it does not exist after 60 seconds, treat this as a reviewer failure and restart the reviewer (counts toward 5-spawn budget).
 
 1. **Read** `review.md` using the Read tool
 2. **Delete** it: `rm review.md`
@@ -303,7 +303,7 @@ After the reviewer exits, the TL reads `review.md` from the worktree root and de
 
 During the dev↔reviewer loop, TL MUST NOT:
 - Relay messages between dev and reviewer (they talk directly)
-- Ask "how's it going?" before an agent is stuck (5min)
+- Ask "how's it going?" before an agent is stuck (10min)
 - Override reviewer's verdict (until round 3 escalation)
 - Tell dev to skip fixing a review comment
 - Inject new requirements not in the original issue
@@ -376,8 +376,8 @@ Fleet Commander sends these messages directly to the TL via stdin. They arrive a
 | `ci_red` | CI fails on PR | "CI failed on PR #{PR}. Failing checks: {details}. Fix count: {N}/{max}." |
 | `ci_blocked` | Too many CI failures | "STOP. {N} unique CI failure types on PR #{PR}. Wait for instructions." |
 | `pr_merged` | PR is merged | "PR #{PR} merged. Close the issue, clean up, and finish." |
-| `nudge_idle` | Team idle 3+ min | "FC status check: You've been idle for {N} minutes. If waiting for subagents, run TaskList to verify they are still active. If a phase just completed, proceed to the next step." |
-| `nudge_stuck` | Team stuck 5+ min | "You appear stuck. Report status or ask for help." |
+| `nudge_idle` | Team idle 5+ min | "FC status check: You've been idle for {N} minutes. If waiting for subagents, run TaskList to verify they are still active. If a phase just completed, proceed to the next step." |
+| `nudge_stuck` | Team stuck 10+ min | "You appear stuck. Report status or ask for help." |
 
 ### TL Response to FC Messages
 
@@ -488,7 +488,7 @@ Atomic commits — each commit should be a logical unit.
 | Wrong | Right |
 |-------|-------|
 | TL relays messages between dev and reviewer | Dev and reviewer talk directly (p2p) |
-| TL asks "how's it going?" every minute | Wait for report or 5min stuck threshold |
+| TL asks "how's it going?" every minute | Wait for report or 10min stuck threshold |
 | TL implements code while dev is active | Let dev do the implementation |
 | TL overrides reviewer without reading feedback | Read feedback, arbitrate only after 3 rounds |
 | Dev pushes without local tests | Build + tests locally BEFORE reporting ready |
@@ -499,7 +499,7 @@ Atomic commits — each commit should be a logical unit.
 | Spawning a coordinator / 4th agent | Diamond team is exactly 3 agents: planner, dev, reviewer |
 | Spawning all 3 agents at once before analysis is done | Spawn sequentially: planner first, then dev with plan, then reviewer after dev ready |
 | Ignoring FC messages | Always respond to ci_green, ci_red, pr_merged, nudges |
-| Respawning agent after 2 min idle | Idle is normal — only act at 5min stuck threshold |
+| Respawning agent after 2 min idle | Idle is normal — only act at 10min stuck threshold |
 | TL monitors CI manually | FC handles CI monitoring and sends updates via stdin |
 | TL goes idle after spawning agents without monitoring | TL runs active monitoring loop between phases |
 | Planner uses SendMessage to deliver plan | Planner writes plan.md file — TL reads it directly |
