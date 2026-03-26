@@ -1346,6 +1346,48 @@ export class FleetDatabase {
     }
   }
 
+  /**
+   * Wrap the throttled tool_use path's DB writes in a single transaction.
+   *
+   * The throttled path skips event insertion and SSE broadcast but still
+   * needs to (optionally) record a transition, (optionally) update team
+   * status/phase, and always update the heartbeat timestamp. Wrapping
+   * these in a transaction ensures atomicity (Issue #529).
+   */
+  processThrottledUpdate(ops: {
+    transition?: { teamId: number; fromStatus: TeamStatus; toStatus: TeamStatus; trigger: string; reason: string };
+    statusUpdate?: { teamId: number; fields: TeamUpdate };
+    heartbeatUpdate: { teamId: number; lastEventAt: string };
+  }): void {
+    const runTransaction = this.db.transaction((txOps: typeof ops) => {
+      if (txOps.transition) {
+        this.stmt(
+          'INSERT INTO team_transitions (team_id, from_status, to_status, trigger, reason) VALUES (?, ?, ?, ?, ?)'
+        ).run(
+          txOps.transition.teamId,
+          txOps.transition.fromStatus,
+          txOps.transition.toStatus,
+          txOps.transition.trigger,
+          txOps.transition.reason,
+        );
+      }
+      if (txOps.statusUpdate) {
+        this.updateTeamSilent(txOps.statusUpdate.teamId, txOps.statusUpdate.fields);
+      }
+      this.updateTeamSilent(txOps.heartbeatUpdate.teamId, { lastEventAt: txOps.heartbeatUpdate.lastEventAt });
+    });
+
+    try {
+      runTransaction(ops);
+    } catch (err: unknown) {
+      const sqliteErr = err as { code?: string };
+      if (sqliteErr.code === 'SQLITE_BUSY') {
+        console.warn('[DB] processThrottledUpdate: SQLITE_BUSY after busy_timeout exhausted');
+      }
+      throw err;
+    }
+  }
+
   getEventsByTeam(teamId: number, limit?: number, offset?: number): Event[] {
     let sql = 'SELECT * FROM events WHERE team_id = ? ORDER BY id DESC';
     const params: unknown[] = [teamId];
