@@ -115,8 +115,8 @@ export function IssueTreeView() {
 
   // Resolve which project to use for launches:
   // If only one project exists, auto-use it. Otherwise null — user must pick.
-  const activeProjects = projects.filter((p) => p.status === 'active');
-  const launchProjectId = activeProjects.length === 1 ? activeProjects[0].id : null;
+  const activeProjects = useMemo(() => projects.filter((p) => p.status === 'active'), [projects]);
+  const launchProjectId = useMemo(() => activeProjects.length === 1 ? activeProjects[0].id : null, [activeProjects]);
 
   // -------------------------------------------------------------------------
   // Fetch issue tree
