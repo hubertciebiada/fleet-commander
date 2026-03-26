@@ -1446,7 +1446,7 @@ export class TeamManager {
       }
       this.stdinPipes.delete(teamId);
 
-      // Step 4: Wait 10s then force kill if still alive
+      // Step 4: Wait 10s then force kill if still alive (stored in shutdownTimers for cancellability)
       const killTimer = setTimeout(() => {
         if (!this.childProcesses.has(teamId)) {
           console.log(`[TeamManager] Team ${teamId} exited after stdin close`);
@@ -1476,6 +1476,7 @@ export class TeamManager {
         sseBroker.broadcast('team_stopped', { team_id: teamId }, teamId);
       }, 10_000);
       if (killTimer.unref) killTimer.unref();
+      this.shutdownTimers.set(teamId, killTimer);
     }, graceMs);
 
     if (graceTimer.unref) graceTimer.unref();
