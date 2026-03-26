@@ -65,6 +65,24 @@ function createMockDb(overrides?: Partial<EventCollectorDb>): EventCollectorDb {
     },
   );
 
+  // processThrottledUpdate delegates to individual mocks so existing
+  // assertions on insertTransition, updateTeam, etc. continue to pass.
+  const processThrottledUpdate = vi.fn().mockImplementation(
+    (ops: {
+      transition?: { teamId: number; fromStatus: string; toStatus: string; trigger: string; reason: string };
+      statusUpdate?: { teamId: number; fields: Record<string, unknown> };
+      heartbeatUpdate: { teamId: number; lastEventAt: string };
+    }) => {
+      if (ops.transition) {
+        insertTransition(ops.transition);
+      }
+      if (ops.statusUpdate) {
+        updateTeam(ops.statusUpdate.teamId, ops.statusUpdate.fields);
+      }
+      updateTeam(ops.heartbeatUpdate.teamId, { lastEventAt: ops.heartbeatUpdate.lastEventAt });
+    },
+  );
+
   return {
     getTeamByWorktree: vi.fn().mockReturnValue({ id: 1, status: 'running', phase: 'implementing' }),
     insertEvent,
@@ -73,6 +91,7 @@ function createMockDb(overrides?: Partial<EventCollectorDb>): EventCollectorDb {
     insertTransition,
     insertAgentMessage,
     processEventTransaction,
+    processThrottledUpdate,
     ...overrides,
   };
 }
@@ -2199,30 +2218,66 @@ describe('Transaction atomicity', () => {
     }
   });
 
-  it('still calls db.updateTeam directly for throttled tool_use heartbeat', () => {
+  it('calls processThrottledUpdate for throttled tool_use heartbeat', () => {
     const db = createMockDb();
     const sse = createMockSse();
 
-    // First tool_use goes through the transaction
+    // First tool_use goes through the full transaction
     processEvent(makePayload({ event: 'tool_use' }), db, sse);
     expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+    expect(db.processThrottledUpdate).toHaveBeenCalledTimes(0);
 
-    // Second tool_use within throttle window — should NOT call processEventTransaction
+    // Second tool_use within throttle window — should call processThrottledUpdate
     const result = processEvent(makePayload({ event: 'tool_use' }), db, sse);
     expect(result.processed).toBe(false);
     expect(db.processEventTransaction).toHaveBeenCalledTimes(1); // still 1
+    expect(db.processThrottledUpdate).toHaveBeenCalledTimes(1);
 
-    // But updateTeam should have been called directly for the heartbeat
-    const directUpdateCalls = (db.updateTeam as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call: unknown[]) => {
-        // These are direct calls (not via processEventTransaction delegation)
-        // The delegated calls from processEventTransaction also show up here,
-        // but the throttled path adds an extra direct call with lastEventAt
-        return (call[1] as Record<string, unknown>).lastEventAt !== undefined;
-      },
+    // Verify the heartbeat was passed through
+    const ops = (db.processThrottledUpdate as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(ops.heartbeatUpdate).toEqual({
+      teamId: 1,
+      lastEventAt: expect.any(String),
+    });
+    // No transition or status update for a running team
+    expect(ops.transition).toBeUndefined();
+    expect(ops.statusUpdate).toBeUndefined();
+  });
+
+  it('passes transition data to processThrottledUpdate when idle team receives throttled tool_use', () => {
+    const db = createMockDb({
+      getTeamByWorktree: vi.fn().mockReturnValue({ id: 1, status: 'idle', phase: 'implementing' }),
+    });
+    const sse = createMockSse();
+
+    // First tool_use goes through the full transaction (and resets idle -> running)
+    processEvent(makePayload({ event: 'tool_use' }), db, sse);
+    expect(db.processEventTransaction).toHaveBeenCalledTimes(1);
+
+    // Second tool_use within throttle window — throttled path
+    // Team is still reported as 'idle' by the mock, so a transition should occur
+    const result = processEvent(makePayload({ event: 'tool_use' }), db, sse);
+    expect(result.processed).toBe(false);
+    expect(db.processThrottledUpdate).toHaveBeenCalledTimes(1);
+
+    const ops = (db.processThrottledUpdate as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(ops.transition).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        fromStatus: 'idle',
+        toStatus: 'running',
+      }),
     );
-    // At least 2: one delegated from transaction + one direct from throttled path
-    expect(directUpdateCalls.length).toBeGreaterThanOrEqual(2);
+    expect(ops.statusUpdate).toEqual(
+      expect.objectContaining({
+        teamId: 1,
+        fields: expect.objectContaining({ status: 'running' }),
+      }),
+    );
+    expect(ops.heartbeatUpdate).toEqual({
+      teamId: 1,
+      lastEventAt: expect.any(String),
+    });
   });
 
   it('wraps terminal-state event inserts in a transaction (no transition)', () => {

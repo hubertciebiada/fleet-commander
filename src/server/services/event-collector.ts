@@ -90,6 +90,11 @@ export interface EventCollectorDb {
     eventInsert: { teamId: number; sessionId: string | null; agentName: string | null; eventType: string; toolName?: string | null; payload: string };
     agentMessages?: Array<{ teamId: number; sender: string; recipient: string; summary?: string | null; content?: string | null; sessionId?: string | null }>;
   }): { eventId: number };
+  processThrottledUpdate(ops: {
+    transition?: { teamId: number; fromStatus: TeamStatus; toStatus: TeamStatus; trigger: string; reason: string };
+    statusUpdate?: { teamId: number; fields: Record<string, unknown> };
+    heartbeatUpdate: { teamId: number; lastEventAt: string };
+  }): void;
   upsertTeamTask?(data: {
     teamId: number;
     taskId: string;
@@ -397,15 +402,14 @@ export function processEvent(
     const lastTime = lastToolUseByTeam.get(teamKey) || 0;
 
     if (now - lastTime < TOOL_USE_THROTTLE_MS) {
-      // Deduplicated: still apply any transition + heartbeat, but skip
-      // event insert and SSE broadcast.
-      if (transitionData) {
-        db.insertTransition(transitionData);
-      }
-      if (statusUpdateData) {
-        db.updateTeamSilent(statusUpdateData.teamId, statusUpdateData.fields);
-      }
-      db.updateTeamSilent(teamId, { lastEventAt: nowIso });
+      // Deduplicated: still apply any transition + heartbeat atomically,
+      // but skip event insert and SSE broadcast. Wrapped in a transaction
+      // for atomicity (Issue #529).
+      db.processThrottledUpdate({
+        transition: transitionData,
+        statusUpdate: statusUpdateData,
+        heartbeatUpdate: { teamId, lastEventAt: nowIso },
+      });
       if (previousStatus !== undefined) {
         sse.broadcast('team_status_changed', {
           team_id: teamId,
