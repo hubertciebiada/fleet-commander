@@ -24,6 +24,9 @@ const mockSseBroker = {
 const mockManager = {
   stop: vi.fn().mockResolvedValue(undefined),
   sendMessage: vi.fn(),
+  syncStreamActivityToDb: vi.fn(),
+  getLastStreamAt: vi.fn().mockReturnValue(null),
+  thinkingTeams: new Set<number>(),
 };
 
 vi.mock('../../src/server/db.js', () => ({
@@ -34,8 +37,9 @@ vi.mock('../../src/server/services/sse-broker.js', () => ({
   sseBroker: mockSseBroker,
 }));
 
+const mockGetTeamManager = vi.fn(() => mockManager);
 vi.mock('../../src/server/services/team-manager.js', () => ({
-  getTeamManager: () => mockManager,
+  getTeamManager: (...args: unknown[]) => mockGetTeamManager(...args),
 }));
 
 vi.mock('../../src/server/utils/resolve-message.js', () => ({
@@ -92,6 +96,7 @@ function minutesAgo(min: number): string {
 beforeEach(() => {
   vi.clearAllMocks();
   mockDb.getActiveTeams.mockReturnValue([]);
+  mockGetTeamManager.mockImplementation(() => mockManager);
 });
 
 // =============================================================================
@@ -340,6 +345,59 @@ describe('Idle nudge message', () => {
     expect(mockManager.sendMessage).toHaveBeenCalledWith(1, 'Hey, you have been idle for a while', 'fc', 'stuck_nudge');
 
     // Reset mock to default
+    mockedResolveMessage.mockReturnValue(null);
+  });
+
+  it('does not crash check loop when getTeamManager throws during idle nudge', async () => {
+    const { resolveMessage } = await import('../../src/server/utils/resolve-message.js');
+    const mockedResolveMessage = vi.mocked(resolveMessage);
+    mockedResolveMessage.mockReturnValue('FC status check: idle for 6 minutes');
+
+    // Make getTeamManager throw on every call — all existing call sites are
+    // already guarded by try/catch, so only the nudge send is being tested here
+    mockGetTeamManager.mockImplementation(() => { throw new Error('TeamManager not initialized'); });
+
+    const team = makeTeam({
+      status: 'running',
+      lastEventAt: minutesAgo(6),
+    });
+    mockDb.getActiveTeams.mockReturnValue([team]);
+
+    // Should not throw despite getTeamManager throwing
+    expect(() => stuckDetector.check()).not.toThrow();
+
+    // Transition should still happen
+    expect(mockDb.updateTeamSilent).toHaveBeenCalledWith(1, { status: 'idle' });
+    // But sendMessage should NOT have been called (getTeamManager threw)
+    expect(mockManager.sendMessage).not.toHaveBeenCalled();
+
+    // Reset mock
+    mockedResolveMessage.mockReturnValue(null);
+  });
+
+  it('does not crash check loop when getTeamManager throws during stuck nudge', async () => {
+    const { resolveMessage } = await import('../../src/server/utils/resolve-message.js');
+    const mockedResolveMessage = vi.mocked(resolveMessage);
+    mockedResolveMessage.mockReturnValue('Hey, you have been idle for a while');
+
+    // Make getTeamManager throw on every call
+    mockGetTeamManager.mockImplementation(() => { throw new Error('TeamManager not initialized'); });
+
+    const team = makeTeam({
+      status: 'idle',
+      lastEventAt: minutesAgo(11),
+    });
+    mockDb.getActiveTeams.mockReturnValue([team]);
+
+    // Should not throw despite getTeamManager throwing
+    expect(() => stuckDetector.check()).not.toThrow();
+
+    // Transition should still happen
+    expect(mockDb.updateTeamSilent).toHaveBeenCalledWith(1, { status: 'stuck' });
+    // But sendMessage should NOT have been called (getTeamManager threw)
+    expect(mockManager.sendMessage).not.toHaveBeenCalled();
+
+    // Reset mock
     mockedResolveMessage.mockReturnValue(null);
   });
 
