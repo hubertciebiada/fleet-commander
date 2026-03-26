@@ -330,3 +330,140 @@ describe('IssueFetcher orphan detection', () => {
     fetchParentsSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Partial fetch failure caching tests
+// ---------------------------------------------------------------------------
+
+describe('IssueFetcher partial fetch failure caching', () => {
+  let fetcher: IssueFetcher;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fetcher = new IssueFetcher();
+  });
+
+  it('should not cache empty results with valid cachedAt when GraphQL fetch fails on first page', async () => {
+    // Simulate gh CLI error on the very first page
+    const graphqlSpy = vi.spyOn(fetcher as any, 'executeGraphQL').mockResolvedValue(null);
+
+    const result = await fetcher.fetchIssueHierarchy(1);
+
+    // Should return empty array
+    expect(result).toHaveLength(0);
+
+    // The cache entry should exist but with cachedAt: null (not a valid timestamp)
+    const cache = (fetcher as any).cacheByProject.get(1);
+    expect(cache).toBeDefined();
+    expect(cache.cachedAt).toBeNull();
+    expect(cache.issues).toHaveLength(0);
+
+    graphqlSpy.mockRestore();
+  });
+
+  it('should preserve previous good cache when GraphQL fetch fails mid-pagination', async () => {
+    // First, successfully populate the cache with valid data
+    const graphqlSpy = vi.spyOn(fetcher as any, 'executeGraphQL').mockResolvedValue(
+      makeGraphQLResponse([
+        { number: 1, title: 'Issue 1' },
+        { number: 2, title: 'Issue 2' },
+      ])
+    );
+
+    const firstResult = await fetcher.fetchIssueHierarchy(1);
+    expect(firstResult).toHaveLength(2);
+
+    // Capture the original cachedAt timestamp
+    const cacheAfterSuccess = (fetcher as any).cacheByProject.get(1);
+    const originalCachedAt = cacheAfterSuccess.cachedAt;
+    expect(originalCachedAt).not.toBeNull();
+
+    // Now simulate a failure on the next fetch
+    graphqlSpy.mockResolvedValue(null);
+
+    const secondResult = await fetcher.fetchIssueHierarchy(1);
+    // The function still returns whatever it collected (empty in this case)
+    expect(secondResult).toHaveLength(0);
+
+    // But the cache should still hold the previous good data
+    const cacheAfterFailure = (fetcher as any).cacheByProject.get(1);
+    expect(cacheAfterFailure.issues).toHaveLength(2);
+    expect(cacheAfterFailure.cachedAt).toBe(originalCachedAt);
+
+    graphqlSpy.mockRestore();
+  });
+
+  it('should set cachedAt to null on first fetch failure so getIssues triggers refetch', async () => {
+    // No prior cache — simulate gh CLI error
+    const graphqlSpy = vi.spyOn(fetcher as any, 'executeGraphQL').mockResolvedValue(null);
+
+    await fetcher.fetchIssueHierarchy(1);
+
+    // cachedAt should be null
+    const cache = (fetcher as any).cacheByProject.get(1);
+    expect(cache.cachedAt).toBeNull();
+
+    // Now spy on fetchIssueHierarchy to verify getIssues triggers a refetch
+    const fetchSpy = vi.spyOn(fetcher, 'fetchIssueHierarchy').mockResolvedValue([]);
+
+    const issues = await fetcher.getIssues(1);
+
+    // getIssues should return empty (from cache) and trigger a background refetch
+    expect(issues).toHaveLength(0);
+    expect(fetchSpy).toHaveBeenCalledWith(1);
+
+    graphqlSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  it('should cache with valid cachedAt when fetch completes successfully', async () => {
+    const graphqlSpy = vi.spyOn(fetcher as any, 'executeGraphQL').mockResolvedValue(
+      makeGraphQLResponse([
+        { number: 1, title: 'Issue 1' },
+      ])
+    );
+
+    await fetcher.fetchIssueHierarchy(1);
+
+    const cache = (fetcher as any).cacheByProject.get(1);
+    expect(cache).toBeDefined();
+    expect(cache.cachedAt).not.toBeNull();
+    expect(typeof cache.cachedAt).toBe('string');
+    expect(cache.issues).toHaveLength(1);
+
+    graphqlSpy.mockRestore();
+  });
+
+  it('should cache empty repository correctly with valid cachedAt', async () => {
+    // Empty repo — zero issues but fetch completes successfully
+    const graphqlSpy = vi.spyOn(fetcher as any, 'executeGraphQL').mockResolvedValue(
+      makeGraphQLResponse([])
+    );
+
+    await fetcher.fetchIssueHierarchy(1);
+
+    const cache = (fetcher as any).cacheByProject.get(1);
+    expect(cache).toBeDefined();
+    expect(cache.cachedAt).not.toBeNull();
+    expect(typeof cache.cachedAt).toBe('string');
+    expect(cache.issues).toHaveLength(0);
+
+    graphqlSpy.mockRestore();
+  });
+
+  it('should not cache when issues.nodes is falsy on first page with no prior cache', async () => {
+    // Simulate a response where issues.nodes is undefined
+    const graphqlSpy = vi.spyOn(fetcher as any, 'executeGraphQL').mockResolvedValue({
+      data: { repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: undefined } } },
+    });
+
+    await fetcher.fetchIssueHierarchy(1);
+
+    // Should set cachedAt to null since this is a partial failure with no prior cache
+    const cache = (fetcher as any).cacheByProject.get(1);
+    expect(cache).toBeDefined();
+    expect(cache.cachedAt).toBeNull();
+
+    graphqlSpy.mockRestore();
+  });
+});

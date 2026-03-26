@@ -285,16 +285,21 @@ export class IssueFetcher {
     let allNodes: GraphQLIssueNode[] = [];
     let cursor: string | null = null;
     let hasNextPage = true;
+    let fetchComplete = true;
 
     while (hasNextPage) {
       const result = await this.executeGraphQL(owner, repo, cursor);
       if (!result) {
         // gh CLI error -- return whatever we have so far (or empty)
+        fetchComplete = false;
         break;
       }
 
       const issues = result.data?.repository?.issues;
-      if (!issues?.nodes) break;
+      if (!issues?.nodes) {
+        fetchComplete = false;
+        break;
+      }
 
       allNodes = allNodes.concat(issues.nodes);
       hasNextPage = issues.pageInfo?.hasNextPage ?? false;
@@ -460,10 +465,20 @@ export class IssueFetcher {
     }
 
     // Update the per-project cache
-    this.cacheByProject.set(projectId, {
-      issues: rootIssues,
-      cachedAt: new Date().toISOString(),
-    });
+    if (fetchComplete) {
+      this.cacheByProject.set(projectId, {
+        issues: rootIssues,
+        cachedAt: new Date().toISOString(),
+      });
+    } else if (!this.cacheByProject.has(projectId)) {
+      // Partial failure on first fetch: store with null cachedAt so
+      // getIssues() will trigger a background refetch next time.
+      this.cacheByProject.set(projectId, {
+        issues: rootIssues,
+        cachedAt: null,
+      });
+    }
+    // else: partial failure with existing cache — keep previous good data
 
     return rootIssues;
   }
