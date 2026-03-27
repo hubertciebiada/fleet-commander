@@ -765,10 +765,10 @@ function DependencyConfirmDialog({ issueNumber, message, onForce, onQueue, onCan
 // RunAllConfirmDialog — confirmation modal for Run All action
 // ---------------------------------------------------------------------------
 
-function RunAllConfirmDialog({ issues, skippedActive, skippedBlocked, projectId, api, fetchTree, onClose }: {
+function RunAllConfirmDialog({ issues, skippedActive, blockedIssues, projectId, api, fetchTree, onClose }: {
   issues: IssueNode[];
   skippedActive: number;
-  skippedBlocked: number;
+  blockedIssues: IssueNode[];
   projectId: number;
   api: ReturnType<typeof useApi>;
   fetchTree: () => Promise<void>;
@@ -783,7 +783,7 @@ function RunAllConfirmDialog({ issues, skippedActive, skippedBlocked, projectId,
     try {
       await api.post('teams/launch-batch', {
         projectId,
-        issues: issues.map((n) => ({ number: n.number, title: n.title })),
+        issues: [...issues, ...blockedIssues].map((n) => ({ number: n.number, title: n.title })),
       });
       onClose();
       // Give the server a moment to process, then refresh
@@ -793,9 +793,13 @@ function RunAllConfirmDialog({ issues, skippedActive, skippedBlocked, projectId,
       setError(message);
       setLaunching(false);
     }
-  }, [api, projectId, issues, onClose, fetchTree]);
+  }, [api, projectId, issues, blockedIssues, onClose, fetchTree]);
 
-  if (issues.length === 0) return null;
+  if (issues.length === 0 && blockedIssues.length === 0) return null;
+
+  const headerText = issues.length > 0
+    ? `Launch ${issues.length} team${issues.length !== 1 ? 's' : ''}?`
+    : `Queue ${blockedIssues.length} team${blockedIssues.length !== 1 ? 's' : ''}?`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -805,33 +809,51 @@ function RunAllConfirmDialog({ issues, skippedActive, skippedBlocked, projectId,
             <svg className="w-4 h-4 text-[#3FB950]" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z" />
             </svg>
-            Launch {issues.length} team{issues.length !== 1 ? 's' : ''}?
+            {headerText}
           </h3>
         </div>
         <div className="px-5 py-4 max-h-[50vh] overflow-auto">
-          {/* List of issues to launch */}
-          <ul className="space-y-1 mb-3">
-            {issues.map((n) => (
-              <li key={n.number} className="text-xs text-dark-text flex items-center gap-2">
-                <svg className="w-3 h-3 text-[#3FB950] shrink-0" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
-                  <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z" />
-                </svg>
-                <span className="text-dark-muted">#{n.number}</span>
-                <span className="truncate">{n.title}</span>
-              </li>
-            ))}
-          </ul>
+          {/* List of issues to launch now */}
+          {issues.length > 0 && (
+            <ul className="space-y-1 mb-3">
+              {issues.map((n) => (
+                <li key={n.number} className="text-xs text-dark-text flex items-center gap-2">
+                  <svg className="w-3 h-3 text-[#3FB950] shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+                    <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z" />
+                  </svg>
+                  <span className="text-dark-muted">#{n.number}</span>
+                  <span className="truncate">{n.title}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* Blocked issues — queued, waiting for dependencies */}
+          {blockedIssues.length > 0 && (
+            <div className={issues.length > 0 ? 'border-t border-dark-border/40 pt-2 mb-3' : 'mb-3'}>
+              <p className="text-xs text-[#D29922] mb-1">
+                {blockedIssues.length} issue{blockedIssues.length !== 1 ? 's' : ''} queued (waiting for dependencies to resolve)
+              </p>
+              <ul className="space-y-1">
+                {blockedIssues.map((n) => (
+                  <li key={n.number} className="text-xs text-dark-text flex items-center gap-2">
+                    <svg className="w-3 h-3 text-[#D29922] shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+                      <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z" />
+                    </svg>
+                    <span className="text-dark-muted">#{n.number}</span>
+                    <span className="truncate">{n.title}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Skipped counts */}
-          {(skippedActive > 0 || skippedBlocked > 0) && (
+          {skippedActive > 0 && (
             <div className="text-xs text-dark-muted space-y-0.5 mb-3 border-t border-dark-border/40 pt-2">
-              {skippedActive > 0 && (
-                <p>{skippedActive} issue{skippedActive !== 1 ? 's' : ''} skipped (already have active teams)</p>
-              )}
-              {skippedBlocked > 0 && (
-                <p>{skippedBlocked} issue{skippedBlocked !== 1 ? 's' : ''} skipped (blocked by dependencies)</p>
-              )}
+              <p>{skippedActive} issue{skippedActive !== 1 ? 's' : ''} skipped (already have active teams)</p>
             </div>
           )}
 
@@ -865,7 +887,7 @@ function RunAllConfirmDialog({ issues, skippedActive, skippedBlocked, projectId,
                 <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z" />
               </svg>
             )}
-            {launching ? 'Launching...' : 'Launch All'}
+            {launching ? 'Launching...' : issues.length > 0 ? 'Launch All' : 'Queue All'}
           </button>
         </div>
       </div>
@@ -1150,7 +1172,7 @@ function ProjectGroup({ group, onLaunch, launchingIssues, launchErrors, forceExp
           prioritization={prioritization}
           tree={group.tree}
           onRunAll={() => setShowRunAllDialog(true)}
-          runAllDisabled={launchableInfo.launchable.length === 0}
+          runAllDisabled={launchableInfo.launchable.length === 0 && launchableInfo.blocked.length === 0}
         />
       </div>
 
@@ -1206,7 +1228,7 @@ function ProjectGroup({ group, onLaunch, launchingIssues, launchErrors, forceExp
         <RunAllConfirmDialog
           issues={launchableInfo.launchable}
           skippedActive={launchableInfo.skippedActive}
-          skippedBlocked={launchableInfo.skippedBlocked}
+          blockedIssues={launchableInfo.blocked}
           projectId={group.projectId}
           api={api}
           fetchTree={fetchTree}
@@ -1255,7 +1277,7 @@ function SingleProjectTree({ tree, projectId, onLaunch, launchingIssues, launchE
           prioritization={prioritization}
           tree={tree}
           onRunAll={projectId ? () => setShowRunAllDialog(true) : undefined}
-          runAllDisabled={launchableInfo.launchable.length === 0}
+          runAllDisabled={launchableInfo.launchable.length === 0 && launchableInfo.blocked.length === 0}
         />
       </div>
 
@@ -1308,7 +1330,7 @@ function SingleProjectTree({ tree, projectId, onLaunch, launchingIssues, launchE
         <RunAllConfirmDialog
           issues={launchableInfo.launchable}
           skippedActive={launchableInfo.skippedActive}
-          skippedBlocked={launchableInfo.skippedBlocked}
+          blockedIssues={launchableInfo.blocked}
           projectId={projectId}
           api={api}
           fetchTree={fetchTree}
@@ -1392,11 +1414,11 @@ function countNodes(nodes: IssueNode[]): number {
 function collectLaunchableIssues(nodes: IssueNode[]): {
   launchable: IssueNode[];
   skippedActive: number;
-  skippedBlocked: number;
+  blocked: IssueNode[];
 } {
   const launchable: IssueNode[] = [];
   let skippedActive = 0;
-  let skippedBlocked = 0;
+  const blocked: IssueNode[] = [];
 
   function walk(items: IssueNode[]) {
     for (const node of items) {
@@ -1404,7 +1426,7 @@ function collectLaunchableIssues(nodes: IssueNode[]): {
         if (node.activeTeam) {
           skippedActive++;
         } else if (node.dependencies && !node.dependencies.resolved) {
-          skippedBlocked++;
+          blocked.push(node);
         } else {
           launchable.push(node);
         }
@@ -1414,7 +1436,7 @@ function collectLaunchableIssues(nodes: IssueNode[]): {
   }
 
   walk(nodes);
-  return { launchable, skippedActive, skippedBlocked };
+  return { launchable, skippedActive, blocked };
 }
 
 /**

@@ -472,7 +472,7 @@ describe('IssueTreeView', () => {
     });
   });
 
-  it('Run All dialog shows skipped issue counts', async () => {
+  it('Run All dialog shows skipped and queued issue counts', async () => {
     mockGet.mockImplementation((path: string) => {
       if (path === 'issues') {
         return Promise.resolve({
@@ -501,7 +501,7 @@ describe('IssueTreeView', () => {
     await waitFor(() => {
       expect(screen.getByText(/Launch 1 team\?/)).toBeInTheDocument();
       expect(screen.getByText(/1 issue skipped \(already have active teams\)/)).toBeInTheDocument();
-      expect(screen.getByText(/1 issue skipped \(blocked by dependencies\)/)).toBeInTheDocument();
+      expect(screen.getByText(/1 issue queued \(waiting for dependencies to resolve\)/)).toBeInTheDocument();
     });
   });
 
@@ -543,6 +543,107 @@ describe('IssueTreeView', () => {
           { number: 20, title: 'Add feature' },
         ],
       });
+    });
+  });
+
+  it('Run All dialog includes blocked issues in launch-batch API call', async () => {
+    mockGet.mockImplementation((path: string) => {
+      if (path === 'issues') {
+        return Promise.resolve({
+          tree: [
+            { number: 10, title: 'Launchable', state: 'open', labels: [], children: [], activeTeam: null },
+            {
+              number: 30, title: 'Blocked', state: 'open', labels: [], children: [], activeTeam: null,
+              dependencies: { issueNumber: 30, blockedBy: [{ number: 5, owner: 'o', repo: 'r', state: 'open', title: 'Blocker' }], resolved: false, openCount: 1 },
+            },
+          ],
+          cachedAt: '2026-03-22T10:00:00Z',
+          count: 2,
+        });
+      }
+      if (path === 'projects') return Promise.resolve(makeProjectsResponse());
+      return Promise.resolve({});
+    });
+    mockPost.mockResolvedValue({ launched: 1, queued: 1 });
+
+    render(<IssueTreeView />);
+    await waitFor(() => {
+      expect(screen.getByText('Run All')).toBeInTheDocument();
+    });
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.click(screen.getByText('Run All'));
+    await waitFor(() => {
+      expect(screen.getByText(/Launch 1 team\?/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Launch All'));
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith('teams/launch-batch', {
+        projectId: 1,
+        issues: [
+          { number: 10, title: 'Launchable' },
+          { number: 30, title: 'Blocked' },
+        ],
+      });
+    });
+  });
+
+  it('Run All button is enabled when only blocked issues exist', async () => {
+    mockGet.mockImplementation((path: string) => {
+      if (path === 'issues') {
+        return Promise.resolve({
+          tree: [
+            {
+              number: 30, title: 'Blocked', state: 'open', labels: [], children: [], activeTeam: null,
+              dependencies: { issueNumber: 30, blockedBy: [{ number: 5, owner: 'o', repo: 'r', state: 'open', title: 'Blocker' }], resolved: false, openCount: 1 },
+            },
+          ],
+          cachedAt: '2026-03-22T10:00:00Z',
+          count: 1,
+        });
+      }
+      if (path === 'projects') return Promise.resolve(makeProjectsResponse());
+      return Promise.resolve({});
+    });
+
+    render(<IssueTreeView />);
+    await waitFor(() => {
+      expect(screen.getByText('Run All')).toBeInTheDocument();
+    });
+    const runAllBtn = screen.getByText('Run All').closest('button')!;
+    expect(runAllBtn).not.toBeDisabled();
+  });
+
+  it('Run All dialog shows Queue header when only blocked issues', async () => {
+    mockGet.mockImplementation((path: string) => {
+      if (path === 'issues') {
+        return Promise.resolve({
+          tree: [
+            {
+              number: 30, title: 'Blocked', state: 'open', labels: [], children: [], activeTeam: null,
+              dependencies: { issueNumber: 30, blockedBy: [{ number: 5, owner: 'o', repo: 'r', state: 'open', title: 'Blocker' }], resolved: false, openCount: 1 },
+            },
+            {
+              number: 40, title: 'Also Blocked', state: 'open', labels: [], children: [], activeTeam: null,
+              dependencies: { issueNumber: 40, blockedBy: [{ number: 6, owner: 'o', repo: 'r', state: 'open', title: 'Other Blocker' }], resolved: false, openCount: 1 },
+            },
+          ],
+          cachedAt: '2026-03-22T10:00:00Z',
+          count: 2,
+        });
+      }
+      if (path === 'projects') return Promise.resolve(makeProjectsResponse());
+      return Promise.resolve({});
+    });
+
+    render(<IssueTreeView />);
+    await waitFor(() => {
+      expect(screen.getByText('Run All')).toBeInTheDocument();
+    });
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.click(screen.getByText('Run All'));
+    await waitFor(() => {
+      expect(screen.getByText(/Queue 2 teams\?/)).toBeInTheDocument();
+      expect(screen.getByText('Queue All')).toBeInTheDocument();
     });
   });
 
