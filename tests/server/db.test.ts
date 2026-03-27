@@ -1325,6 +1325,140 @@ describe('processEventTransaction', () => {
     expect(transitions[0]!.fromStatus).toBe('launching');
     expect(transitions[0]!.toStatus).toBe('running');
   });
+
+  it('updates last_event_at via heartbeat-only path', () => {
+    const project = db.insertProject({
+      name: 'hb-txn-test',
+      repoPath: '/tmp/hb-txn-test',
+    });
+    const team = db.insertTeam({
+      issueNumber: 910,
+      worktreeName: 'hb-txn-test-910',
+      projectId: project.id,
+      status: 'running',
+    });
+
+    const heartbeatTime = '2026-03-27T12:00:00.000Z';
+    db.processEventTransaction({
+      heartbeatUpdate: {
+        teamId: team.id,
+        lastEventAt: heartbeatTime,
+      },
+      eventInsert: {
+        teamId: team.id,
+        sessionId: 'sess-hb',
+        agentName: 'team-lead',
+        eventType: 'tool_use',
+        payload: '{}',
+      },
+    });
+
+    const updated = db.getTeam(team.id);
+    expect(updated!.lastEventAt).toBe(heartbeatTime);
+  });
+
+  it('heartbeat update does not alter other team fields', () => {
+    const project = db.insertProject({
+      name: 'hb-fields-test',
+      repoPath: '/tmp/hb-fields-test',
+    });
+    const team = db.insertTeam({
+      issueNumber: 911,
+      worktreeName: 'hb-fields-test-911',
+      projectId: project.id,
+      status: 'running',
+    });
+
+    const before = db.getTeam(team.id)!;
+    const heartbeatTime = '2026-03-27T13:00:00.000Z';
+    db.processEventTransaction({
+      heartbeatUpdate: {
+        teamId: team.id,
+        lastEventAt: heartbeatTime,
+      },
+      eventInsert: {
+        teamId: team.id,
+        sessionId: 'sess-fields',
+        agentName: 'team-lead',
+        eventType: 'tool_use',
+        payload: '{}',
+      },
+    });
+
+    const after = db.getTeam(team.id)!;
+    // lastEventAt and updatedAt should change
+    expect(after.lastEventAt).toBe(heartbeatTime);
+    expect(after.updatedAt).not.toBe(before.updatedAt);
+    // Other fields should remain unchanged
+    expect(after.status).toBe(before.status);
+    expect(after.issueNumber).toBe(before.issueNumber);
+    expect(after.sessionId).toBe(before.sessionId);
+    expect(after.pid).toBe(before.pid);
+    expect(after.branchName).toBe(before.branchName);
+    expect(after.prNumber).toBe(before.prNumber);
+  });
+});
+
+// =============================================================================
+// processThrottledUpdate — heartbeat via cached prepared statement
+// =============================================================================
+
+describe('processThrottledUpdate', () => {
+  it('updates last_event_at via heartbeat-only path', () => {
+    const project = db.insertProject({
+      name: 'throttle-hb-test',
+      repoPath: '/tmp/throttle-hb-test',
+    });
+    const team = db.insertTeam({
+      issueNumber: 920,
+      worktreeName: 'throttle-hb-test-920',
+      projectId: project.id,
+      status: 'running',
+    });
+
+    const heartbeatTime = '2026-03-27T14:00:00.000Z';
+    db.processThrottledUpdate({
+      heartbeatUpdate: {
+        teamId: team.id,
+        lastEventAt: heartbeatTime,
+      },
+    });
+
+    const updated = db.getTeam(team.id);
+    expect(updated!.lastEventAt).toBe(heartbeatTime);
+  });
+
+  it('heartbeat update does not alter other team fields', () => {
+    const project = db.insertProject({
+      name: 'throttle-fields-test',
+      repoPath: '/tmp/throttle-fields-test',
+    });
+    const team = db.insertTeam({
+      issueNumber: 921,
+      worktreeName: 'throttle-fields-test-921',
+      projectId: project.id,
+      status: 'running',
+    });
+
+    const before = db.getTeam(team.id)!;
+    const heartbeatTime = '2026-03-27T15:00:00.000Z';
+    db.processThrottledUpdate({
+      heartbeatUpdate: {
+        teamId: team.id,
+        lastEventAt: heartbeatTime,
+      },
+    });
+
+    const after = db.getTeam(team.id)!;
+    expect(after.lastEventAt).toBe(heartbeatTime);
+    expect(after.updatedAt).not.toBe(before.updatedAt);
+    expect(after.status).toBe(before.status);
+    expect(after.issueNumber).toBe(before.issueNumber);
+    expect(after.sessionId).toBe(before.sessionId);
+    expect(after.pid).toBe(before.pid);
+    expect(after.branchName).toBe(before.branchName);
+    expect(after.prNumber).toBe(before.prNumber);
+  });
 });
 
 // =============================================================================
