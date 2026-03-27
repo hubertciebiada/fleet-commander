@@ -33,7 +33,7 @@ Running 15+ parallel Claude Code agents across multiple repos is chaos without a
 | **Monitor** | Real-time SSE dashboard with status, phase, PR state, CI checks, and Gantt timeline. |
 | **Message** | Send instructions to running agents via stdin pipe. Editable PM message templates. |
 | **Track** | GitHub polling every 30s for PRs, CI status, and merges. Auto-merge support. |
-| **Detect** | Idle detection at 3 minutes, stuck detection at 5 minutes. Automatic status transitions. |
+| **Detect** | Idle detection at 5 minutes, stuck detection at 10 minutes. Automatic status transitions. |
 | **Scale** | Multiple projects (repos), each with independent team slots, queues, and prompt files. |
 
 ---
@@ -121,7 +121,7 @@ graph TB
   Server --> EventCol["Event Collector<br/>hook events"]
   Server --> GitPoller["GitHub Poller<br/>PR / CI / merge"]
   Server --> IssueFetch["Issue Fetcher<br/>GraphQL, 60s cache"]
-  Server --> StuckDet["Stuck Detector<br/>idle 3min / stuck 5min"]
+  Server --> StuckDet["Stuck Detector<br/>idle 5min / stuck 10min"]
   Server --> SSE["SSE Broker<br/>14 event types"]
   Server --> DB[("SQLite<br/>fleet.db, WAL")]
   TeamMgr -->|"spawn + stdin pipe"| CC["Claude Code<br/>stream-json"]
@@ -166,11 +166,11 @@ stateDiagram-v2
   [*] --> queued
   queued --> launching
   launching --> running
-  running --> idle : 3 min no events
+  running --> idle : 5 min no events
   running --> done : session ends normally
   running --> failed : process crashes
   idle --> running : new event received
-  idle --> stuck : 5 min no events
+  idle --> stuck : 10 min no events
   stuck --> running : new event received
   done --> [*]
   failed --> [*]
@@ -183,7 +183,7 @@ stateDiagram-v2
 1. **Queued** -- A team is created for an issue and placed in the FIFO queue. It waits here until a slot opens (per-project concurrency limit).
 2. **Launching** -- A slot is available. Fleet Commander creates a git worktree, spawns a Claude Code process, and waits for the first event. If no event arrives within the launch timeout (default 5 min), the team is marked failed.
 3. **Running** -- The agent is actively working. Hook events stream in, output is captured, and the dashboard shows real-time progress.
-4. **Idle** -- No hook events for 3 minutes. The team is flagged but continues running. Any new event transitions it back to running.
+4. **Idle** -- No hook events for 5 minutes. The team is flagged but continues running. Any new event transitions it back to running.
 5. **Stuck** -- No hook events for 5 minutes (from idle). The team is flagged for PM attention. A message can be sent via stdin to nudge the agent. Any new event transitions it back to running.
 6. **Done / Failed** -- The session ends normally (done) or the process crashes / exits non-zero (failed). The worktree and branch can be cleaned up from the Projects view.
 
@@ -199,14 +199,14 @@ All settings have sensible defaults. Override via environment variables:
 |----------|---------|-------------|
 | `PORT` | `4680` | Server port |
 | `FLEET_HOST` | `0.0.0.0` | Network interface to bind to |
-| `FLEET_IDLE_THRESHOLD_MIN` | `3` | Minutes before a team is marked idle |
-| `FLEET_STUCK_THRESHOLD_MIN` | `5` | Minutes before a team is marked stuck |
+| `FLEET_IDLE_THRESHOLD_MIN` | `5` | Minutes before a team is marked idle |
+| `FLEET_STUCK_THRESHOLD_MIN` | `10` | Minutes before a team is marked stuck |
 | `FLEET_LAUNCH_TIMEOUT_MIN` | `5` | Minutes before a launching team is marked failed |
 | `FLEET_MAX_CI_FAILURES` | `3` | Unique CI failure types before blocking |
 | `FLEET_EARLY_CRASH_THRESHOLD_SEC` | `120` | Seconds before a SubagentStop is considered an early crash |
 | `FLEET_EARLY_CRASH_MIN_TOOLS` | `5` | Minimum tool-use events for a subagent to be considered healthy |
 | `FLEET_GITHUB_POLL_MS` | `30000` | GitHub polling interval (ms) |
-| `FLEET_DB_PATH` | `./fleet.db` | SQLite database file path |
+| `FLEET_DB_PATH` | Platform data dir | SQLite database file path (e.g. `%APPDATA%/fleet-commander/fleet.db` on Windows) |
 | `FLEET_TERMINAL` | `auto` | Windows terminal preference: `auto`, `wt`, or `cmd` |
 | `FLEET_CLAUDE_CMD` | `claude` | Claude Code CLI command |
 | `FLEET_SKIP_PERMISSIONS` | `true` | Skip CC permission prompts (`--dangerously-skip-permissions`) |

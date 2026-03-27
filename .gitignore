@@ -10,3 +10,4 @@ fleet.db-wal
 !docs/diagrams/*.png
 !docs/screenshots/*.png
 plan.md
+.fleet-pm-message
