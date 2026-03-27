@@ -172,8 +172,8 @@ export class TeamService {
     }
 
     // Dependency check for batch launch — separate launchable from queueable
-    const launchable: Array<{ number: number; title?: string }> = [];
-    const queueable: Array<{ issue: { number: number; title?: string }; blockerNumbers: number[] }> = [];
+    const launchable: Array<{ number: number; title?: string; issueKey?: string }> = [];
+    const queueable: Array<{ issue: { number: number; title?: string; issueKey?: string }; blockerNumbers: number[] }> = [];
 
     for (const issue of issues) {
       const depInfo = await checkDependencies(projectId, issue.number);
@@ -209,7 +209,7 @@ export class TeamService {
         try {
           githubPoller.trackBlockedIssue(projectId, issue.number, blockerNumbers);
           const team = await manager.queueTeamWithBlockers(
-            projectId, issue.number, blockerNumbers, issue.title, headless, prompt,
+            projectId, issue.number, blockerNumbers, issue.title, headless, prompt, issue.issueKey,
           );
           queued.push({ issueNumber: issue.number, team, blockedBy: blockerNumbers });
         } catch (err: unknown) {

@@ -346,7 +346,7 @@ describe('TeamService.launchBatch', () => {
 
     // queueTeamWithBlockers should be called for the blocked issue
     expect(mockQueueTeamWithBlockers).toHaveBeenCalledWith(
-      1, 11, [5], 'Blocked issue', undefined, undefined,
+      1, 11, [5], 'Blocked issue', undefined, undefined, undefined,
     );
   });
 
