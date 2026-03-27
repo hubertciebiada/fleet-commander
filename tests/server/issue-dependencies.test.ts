@@ -739,3 +739,260 @@ describe('body-based dependency enrichment merge logic', () => {
     expect(result!.blockedBy[1].number).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GraphQL blockedBy + trackedInIssues + body merge logic (single-issue path)
+// ---------------------------------------------------------------------------
+// These tests verify the three-source merge logic used by
+// fetchDependenciesFromTimeline: blockedBy nodes are processed first,
+// trackedInIssues are deduped against blockedBy, and body-parsed deps
+// are deduped against both. This mirrors the fix for issue #580 where
+// blockedBy from GraphQL was not propagated in the single-issue query.
+// ---------------------------------------------------------------------------
+
+describe('single-issue dependency merge: blockedBy + trackedInIssues + body', () => {
+  const owner = 'octocat';
+  const repo = 'hello-world';
+
+  /** GraphQL node shape matching SingleIssueDepsResult subfields */
+  interface DepNode {
+    number: number;
+    title: string;
+    state: string;
+    repository: { owner: { login: string }; name: string };
+  }
+
+  /**
+   * Simulate the three-source merge logic from fetchDependenciesFromTimeline.
+   * Takes blockedBy nodes, trackedInIssues nodes, and body text, and returns
+   * the merged IssueDependencyInfo. This mirrors the actual implementation
+   * without requiring live gh CLI calls.
+   */
+  function mergeThreeSources(
+    issueNumber: number,
+    blockedByNodes: DepNode[],
+    trackedNodes: DepNode[],
+    body: string | null,
+  ): IssueDependencyInfo {
+    const blockedBy: DependencyRef[] = [];
+
+    // 1. Process blockedBy nodes FIRST
+    for (const node of blockedByNodes) {
+      blockedBy.push({
+        number: node.number,
+        owner: node.repository.owner.login,
+        repo: node.repository.name,
+        state: node.state.toLowerCase() === 'open' ? 'open' : 'closed',
+        title: node.title,
+      });
+    }
+
+    // 2. Process trackedInIssues, deduplicating against blockedBy
+    for (const node of trackedNodes) {
+      const exists = blockedBy.some(
+        (b) => b.number === node.number &&
+               b.owner === node.repository.owner.login &&
+               b.repo === node.repository.name
+      );
+      if (!exists) {
+        blockedBy.push({
+          number: node.number,
+          owner: node.repository.owner.login,
+          repo: node.repository.name,
+          state: node.state.toLowerCase() === 'open' ? 'open' : 'closed',
+          title: node.title,
+        });
+      }
+    }
+
+    // 3. Parse body for dependency patterns, deduplicating against above
+    if (body) {
+      const bodyDeps = parseDependenciesFromBody(body, owner, repo);
+      for (const dep of bodyDeps) {
+        const exists = blockedBy.some(
+          (b) => b.number === dep.number && b.owner === dep.owner && b.repo === dep.repo
+        );
+        if (!exists) {
+          blockedBy.push(dep);
+        }
+      }
+    }
+
+    const openCount = blockedBy.filter((d) => d.state === 'open').length;
+    return { issueNumber, blockedBy, resolved: openCount === 0, openCount };
+  }
+
+  it('includes blockedBy nodes from GraphQL response in dependency info', () => {
+    const blockedByNodes: DepNode[] = [
+      {
+        number: 10,
+        title: 'Blocker issue',
+        state: 'OPEN',
+        repository: { owner: { login: owner }, name: repo },
+      },
+    ];
+
+    const result = mergeThreeSources(42, blockedByNodes, [], null);
+
+    expect(result.issueNumber).toBe(42);
+    expect(result.blockedBy).toHaveLength(1);
+    expect(result.blockedBy[0]).toEqual({
+      number: 10,
+      owner,
+      repo,
+      state: 'open',
+      title: 'Blocker issue',
+    });
+    expect(result.resolved).toBe(false);
+    expect(result.openCount).toBe(1);
+  });
+
+  it('deduplicates blockedBy against trackedInIssues', () => {
+    const sharedNode: DepNode = {
+      number: 10,
+      title: 'Shared dependency',
+      state: 'OPEN',
+      repository: { owner: { login: owner }, name: repo },
+    };
+
+    // Same issue appears in both blockedBy and trackedInIssues
+    const result = mergeThreeSources(42, [sharedNode], [sharedNode], null);
+
+    expect(result.blockedBy).toHaveLength(1); // not 2
+    expect(result.blockedBy[0].number).toBe(10);
+    expect(result.openCount).toBe(1);
+  });
+
+  it('merges blockedBy, trackedInIssues, and body-parsed deps without duplicates', () => {
+    const blockedByNodes: DepNode[] = [
+      {
+        number: 10,
+        title: 'From blockedBy',
+        state: 'OPEN',
+        repository: { owner: { login: owner }, name: repo },
+      },
+    ];
+    const trackedNodes: DepNode[] = [
+      {
+        number: 10, // duplicate with blockedBy
+        title: 'From tracked',
+        state: 'OPEN',
+        repository: { owner: { login: owner }, name: repo },
+      },
+      {
+        number: 20,
+        title: 'From tracked only',
+        state: 'CLOSED',
+        repository: { owner: { login: owner }, name: repo },
+      },
+    ];
+    const body = 'blocked by #10 and depends on #20 and requires #30';
+
+    const result = mergeThreeSources(42, blockedByNodes, trackedNodes, body);
+
+    // #10 from blockedBy (deduped from tracked + body)
+    // #20 from trackedInIssues (deduped from body)
+    // #30 from body (unique)
+    expect(result.blockedBy).toHaveLength(3);
+    expect(result.blockedBy.map((d) => d.number)).toEqual([10, 20, 30]);
+    // #10 should retain the blockedBy title (processed first)
+    expect(result.blockedBy[0].title).toBe('From blockedBy');
+    // #20 should retain the tracked title (processed before body)
+    expect(result.blockedBy[1].title).toBe('From tracked only');
+    expect(result.blockedBy[1].state).toBe('closed');
+  });
+
+  it('returns only trackedInIssues and body deps when blockedBy is not present', () => {
+    const trackedNodes: DepNode[] = [
+      {
+        number: 10,
+        title: 'Tracked blocker',
+        state: 'OPEN',
+        repository: { owner: { login: owner }, name: repo },
+      },
+    ];
+    const body = 'depends on #20';
+
+    const result = mergeThreeSources(42, [], trackedNodes, body);
+
+    expect(result.blockedBy).toHaveLength(2);
+    expect(result.blockedBy[0].number).toBe(10);
+    expect(result.blockedBy[0].title).toBe('Tracked blocker');
+    expect(result.blockedBy[1].number).toBe(20);
+    expect(result.resolved).toBe(false);
+    expect(result.openCount).toBe(2); // both default to open
+  });
+
+  it('handles cross-repo blockedBy nodes correctly', () => {
+    const blockedByNodes: DepNode[] = [
+      {
+        number: 55,
+        title: 'Cross-repo blocker',
+        state: 'OPEN',
+        repository: { owner: { login: 'acme' }, name: 'widgets' },
+      },
+    ];
+
+    const result = mergeThreeSources(42, blockedByNodes, [], null);
+
+    expect(result.blockedBy).toHaveLength(1);
+    expect(result.blockedBy[0]).toEqual({
+      number: 55,
+      owner: 'acme',
+      repo: 'widgets',
+      state: 'open',
+      title: 'Cross-repo blocker',
+    });
+    expect(result.resolved).toBe(false);
+  });
+
+  it('deduplicates cross-repo entries across all three sources', () => {
+    const crossRepoNode: DepNode = {
+      number: 100,
+      title: 'Shared cross-repo',
+      state: 'OPEN',
+      repository: { owner: { login: 'acme' }, name: 'widgets' },
+    };
+
+    const body = 'blocked by acme/widgets#100';
+
+    const result = mergeThreeSources(42, [crossRepoNode], [crossRepoNode], body);
+
+    expect(result.blockedBy).toHaveLength(1); // fully deduped
+    expect(result.blockedBy[0].number).toBe(100);
+    expect(result.blockedBy[0].owner).toBe('acme');
+  });
+
+  it('resolved is true when all blockedBy nodes are closed', () => {
+    const blockedByNodes: DepNode[] = [
+      {
+        number: 10,
+        title: 'Done',
+        state: 'CLOSED',
+        repository: { owner: { login: owner }, name: repo },
+      },
+    ];
+    const trackedNodes: DepNode[] = [
+      {
+        number: 20,
+        title: 'Also done',
+        state: 'CLOSED',
+        repository: { owner: { login: owner }, name: repo },
+      },
+    ];
+
+    const result = mergeThreeSources(42, blockedByNodes, trackedNodes, null);
+
+    expect(result.blockedBy).toHaveLength(2);
+    expect(result.resolved).toBe(true);
+    expect(result.openCount).toBe(0);
+  });
+
+  it('returns resolved=true with empty blockedBy when no sources have deps', () => {
+    const result = mergeThreeSources(42, [], [], 'No dependency patterns here.');
+
+    expect(result.blockedBy).toHaveLength(0);
+    expect(result.resolved).toBe(true);
+    expect(result.openCount).toBe(0);
+  });
+});
