@@ -1229,6 +1229,18 @@ export class FleetDatabase {
     this.db.prepare(sql).run(params);
   }
 
+  /**
+   * Dedicated heartbeat update using a pre-cached prepared statement.
+   * Avoids the dynamic SQL construction of updateTeamSilent() on the
+   * hot path — called on every single hook event via processEventTransaction
+   * and processThrottledUpdate.
+   */
+  private updateTeamHeartbeat(id: number, lastEventAt: string): void {
+    this.stmt(
+      "UPDATE teams SET last_event_at = @lastEventAt, updated_at = datetime('now') WHERE id = @id"
+    ).run({ id, lastEventAt });
+  }
+
   updateTeam(id: number, fields: TeamUpdate): Team | undefined {
     this.updateTeamSilent(id, fields);
     return this.getTeam(id);
@@ -1296,8 +1308,8 @@ export class FleetDatabase {
         this.updateTeamSilent(txOps.statusUpdate.teamId, txOps.statusUpdate.fields);
       }
 
-      // 3. Update heartbeat (lastEventAt) — always required, skip trailing SELECT
-      this.updateTeamSilent(txOps.heartbeatUpdate.teamId, { lastEventAt: txOps.heartbeatUpdate.lastEventAt });
+      // 3. Update heartbeat (lastEventAt) — always required, cached prepared statement
+      this.updateTeamHeartbeat(txOps.heartbeatUpdate.teamId, txOps.heartbeatUpdate.lastEventAt);
 
       // 4. Insert event — always required
       const eventInfo = this.stmt(`
@@ -1374,7 +1386,7 @@ export class FleetDatabase {
       if (txOps.statusUpdate) {
         this.updateTeamSilent(txOps.statusUpdate.teamId, txOps.statusUpdate.fields);
       }
-      this.updateTeamSilent(txOps.heartbeatUpdate.teamId, { lastEventAt: txOps.heartbeatUpdate.lastEventAt });
+      this.updateTeamHeartbeat(txOps.heartbeatUpdate.teamId, txOps.heartbeatUpdate.lastEventAt);
     });
 
     try {
