@@ -233,7 +233,7 @@ describe('TeamService.launchTeam', () => {
     const result = await service.launchTeam({ projectId: 1, issueNumber: 42 });
 
     expect(result).toEqual({ id: 99, status: 'launching' });
-    expect(mockLaunch).toHaveBeenCalledWith(1, 42, undefined, undefined, undefined, undefined);
+    expect(mockLaunch).toHaveBeenCalledWith(1, 42, undefined, undefined, undefined, undefined, undefined);
   });
 });
 

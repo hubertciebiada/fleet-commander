@@ -616,9 +616,18 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
       return;
     }
 
-    const num = parseInt(issueNumber.trim(), 10);
-    if (isNaN(num) || num < 1) {
-      setError('Issue number must be a positive integer');
+    const trimmed = issueNumber.trim();
+    if (!trimmed) {
+      setError('Issue key is required');
+      return;
+    }
+
+    // Try to parse as number; if not numeric, treat as string issue key
+    const num = parseInt(trimmed, 10);
+    const isNumeric = !isNaN(num) && num > 0 && String(num) === trimmed;
+
+    if (!isNumeric && trimmed.length === 0) {
+      setError('Issue key must not be empty');
       return;
     }
 
@@ -628,7 +637,8 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
     setLoading(true);
     try {
       const team = await api.post<Team>('teams/launch', {
-        issueNumber: num,
+        issueNumber: isNumeric ? num : 0,
+        issueKey: trimmed,
         prompt: effectivePrompt,
         projectId,
         headless,
@@ -636,7 +646,7 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
       });
       // Switch to launch log view instead of closing
       setLaunchedTeamId(team.id);
-      setLaunchedIssueNumber(num);
+      setLaunchedIssueNumber(isNumeric ? num : 0);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message || 'Failed to launch team');
@@ -979,10 +989,10 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                       </div>
                     )}
 
-                    {/* Manual issue number input (always available as fallback) */}
+                    {/* Manual issue key input (always available as fallback) */}
                     <div>
                       <label className="block text-sm text-dark-muted mb-1">
-                        Issue number <span className="text-[#F85149]">*</span>
+                        Issue key <span className="text-[#F85149]">*</span>
                         {selectedProjectId && issues.length > 0 && (
                           <span className="text-dark-muted/50 text-xs ml-1">(or type manually)</span>
                         )}
@@ -990,12 +1000,10 @@ export function LaunchDialog({ open, onClose }: LaunchDialogProps) {
                       <input
                         ref={inputRef}
                         type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
                         value={issueNumber}
                         onChange={(e) => setIssueNumber(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="e.g. 763"
+                        placeholder="e.g. 763 or PROJ-123"
                         className="w-full px-3 py-2 text-sm rounded border border-dark-border bg-dark-base text-dark-text placeholder:text-dark-muted/50 focus:outline-none focus:border-dark-accent focus:ring-1 focus:ring-dark-accent/30"
                         disabled={loading}
                       />

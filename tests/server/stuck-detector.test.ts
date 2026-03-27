@@ -66,6 +66,8 @@ function makeTeam(overrides: Partial<Team>): Partial<Team> {
   return {
     id: 1,
     issueNumber: 100,
+    issueKey: '100',
+    issueProvider: 'github',
     issueTitle: 'Test issue',
     projectId: 1,
     status: 'running',
