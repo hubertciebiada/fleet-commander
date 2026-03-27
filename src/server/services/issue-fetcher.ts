@@ -74,6 +74,27 @@ interface GraphQLResponse {
   errors?: Array<{ message: string }>;
 }
 
+/** Shape returned by the single-issue dependency GraphQL query. */
+interface SingleIssueDepsResult {
+  body: string | null;
+  trackedInIssues?: {
+    nodes?: Array<{
+      number: number;
+      title: string;
+      state: string;
+      repository: { owner: { login: string }; name: string };
+    }>;
+  };
+  blockedBy?: {
+    nodes?: Array<{
+      number: number;
+      title: string;
+      state: string;
+      repository: { owner: { login: string }; name: string };
+    }>;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Per-project cache entry
 // ---------------------------------------------------------------------------
@@ -142,6 +163,43 @@ query GetIssues($owner: String!, $repo: String!, $cursor: String) {
         closedByPullRequestsReferences(first: 3, includeClosedPrs: true) {
           nodes { number state }
         }
+      }
+    }
+  }
+}
+`;
+
+// ---------------------------------------------------------------------------
+// Single-issue dependency queries (used by fetchDependenciesFromTimeline)
+// ---------------------------------------------------------------------------
+// Two variants mirror the batch query pattern: FULL includes blockedBy for
+// environments that support GitHub's native issue dependencies; BASIC omits
+// it for environments where the field is not available in the GraphQL schema.
+// ---------------------------------------------------------------------------
+
+const SINGLE_ISSUE_DEPS_QUERY_FULL = `
+query($owner: String!, $repo: String!, $issueNumber: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $issueNumber) {
+      body
+      trackedInIssues(first: 50) {
+        nodes { number title state repository { owner { login } name } }
+      }
+      blockedBy(first: 20) {
+        nodes { number title state repository { owner { login } name } }
+      }
+    }
+  }
+}
+`;
+
+const SINGLE_ISSUE_DEPS_QUERY_BASIC = `
+query($owner: String!, $repo: String!, $issueNumber: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $issueNumber) {
+      body
+      trackedInIssues(first: 50) {
+        nodes { number title state repository { owner { login } name } }
       }
     }
   }
@@ -792,8 +850,12 @@ export class IssueFetcher {
   }
 
   /**
-   * Fetch dependencies from the issue body + trackedInIssues via GraphQL.
+   * Fetch dependencies from the issue body + trackedInIssues + blockedBy via GraphQL.
    * Used for single-issue dependency fetching (e.g. launch-time check).
+   *
+   * Selects between the full query (with blockedBy) and the basic query based on
+   * `this.blockedBySupported`. If the full query fails due to unsupported fields,
+   * automatically downgrades to the basic query and retries.
    */
   private async fetchDependenciesFromTimeline(
     owner: string,
@@ -801,47 +863,16 @@ export class IssueFetcher {
     issueNumber: number
   ): Promise<IssueDependencyInfo | null> {
     try {
-      // Use the GraphQL API to get the issue body + tracked-in issues for dependency parsing
-      const query = `query($owner: String!, $repo: String!, $issueNumber: Int!) { repository(owner: $owner, name: $repo) { issue(number: $issueNumber) { body trackedInIssues(first: 50) { nodes { number title state repository { owner { login } name } } } } } }`;
-
-      const compactQuery = query.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-      const requestBody = JSON.stringify({
-        query: compactQuery,
-        variables: { owner, repo, issueNumber },
-      });
-
-      // spawn + stdin pipe is used because exec does NOT support the `input` option.
-      const stdout = await this.runGHGraphQL(requestBody, 15_000);
-
-      const result = JSON.parse(stdout) as {
-        data?: {
-          repository?: {
-            issue?: {
-              body: string | null;
-              trackedInIssues?: {
-                nodes?: Array<{
-                  number: number;
-                  title: string;
-                  state: string;
-                  repository: { owner: { login: string }; name: string };
-                }>;
-              };
-            };
-          };
-        };
-        errors?: Array<{ message: string }>;
-      };
-
-      const issue = result.data?.repository?.issue;
+      const issue = await this.executeSingleIssueDepsQuery(owner, repo, issueNumber);
       if (!issue) {
         return this.buildEmptyDependencyInfo(issueNumber);
       }
 
       const blockedBy: DependencyRef[] = [];
 
-      // Parse tracked issues (GitHub's native tracking)
-      const trackedNodes = issue.trackedInIssues?.nodes ?? [];
-      for (const node of trackedNodes) {
+      // 1. Process blockedBy nodes FIRST (GitHub's native issue dependencies)
+      const blockedByNodes = issue.blockedBy?.nodes ?? [];
+      for (const node of blockedByNodes) {
         blockedBy.push({
           number: node.number,
           owner: node.repository.owner.login,
@@ -851,13 +882,31 @@ export class IssueFetcher {
         });
       }
 
-      // Parse body for "blocked by" or "depends on" patterns
+      // 2. Process trackedInIssues, deduplicating against blockedBy
+      const trackedNodes = issue.trackedInIssues?.nodes ?? [];
+      for (const node of trackedNodes) {
+        const exists = blockedBy.some(
+          (b) => b.number === node.number &&
+                 b.owner === node.repository.owner.login &&
+                 b.repo === node.repository.name
+        );
+        if (!exists) {
+          blockedBy.push({
+            number: node.number,
+            owner: node.repository.owner.login,
+            repo: node.repository.name,
+            state: node.state.toLowerCase() === 'open' ? 'open' : 'closed',
+            title: node.title,
+          });
+        }
+      }
+
+      // 3. Parse body for "blocked by" or "depends on" patterns, deduplicating
       if (issue.body) {
         const bodyDeps = parseDependenciesFromBody(issue.body, owner, repo);
         // Resolve the actual state for body-parsed deps (they default to 'open')
         const resolvedBodyDeps = await this.resolveIssueStates(bodyDeps);
         for (const dep of resolvedBodyDeps) {
-          // Avoid duplicates from tracked issues
           const exists = blockedBy.some(
             (b) => b.number === dep.number && b.owner === dep.owner && b.repo === dep.repo
           );
@@ -880,6 +929,81 @@ export class IssueFetcher {
         `[IssueFetcher] Failed to fetch dependencies for ${owner}/${repo}#${issueNumber}:`,
         err instanceof Error ? err.message : err
       );
+      return null;
+    }
+  }
+
+  /**
+   * Execute the single-issue dependency GraphQL query with full/basic fallback.
+   * Mirrors the executeGraphQL() pattern: tries the full query first (with
+   * blockedBy), downgrades to basic if the field is unsupported.
+   */
+  private async executeSingleIssueDepsQuery(
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<SingleIssueDepsResult | null> {
+    const query = this.blockedBySupported
+      ? SINGLE_ISSUE_DEPS_QUERY_FULL
+      : SINGLE_ISSUE_DEPS_QUERY_BASIC;
+
+    const result = await this.runSingleIssueDepsQuery(query, owner, repo, issueNumber);
+    if (result !== null) {
+      return result;
+    }
+
+    // If the full query failed and blockedBy was enabled, downgrade and retry
+    if (this.blockedBySupported) {
+      this.blockedBySupported = false;
+      console.warn(
+        '[IssueFetcher] Single-issue deps query with blockedBy failed; ' +
+        'falling back to basic query without blockedBy field'
+      );
+      return this.runSingleIssueDepsQuery(SINGLE_ISSUE_DEPS_QUERY_BASIC, owner, repo, issueNumber);
+    }
+
+    return null;
+  }
+
+  /**
+   * Run a single-issue dependency GraphQL query and return the parsed issue data.
+   * Returns null on error (gh CLI failure, missing data, or GraphQL errors).
+   */
+  private async runSingleIssueDepsQuery(
+    query: string,
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<SingleIssueDepsResult | null> {
+    try {
+      const compactQuery = query.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+      const requestBody = JSON.stringify({
+        query: compactQuery,
+        variables: { owner, repo, issueNumber },
+      });
+
+      // spawn + stdin pipe is used because exec does NOT support the `input` option.
+      const stdout = await this.runGHGraphQL(requestBody, 15_000);
+
+      const parsed = JSON.parse(stdout) as {
+        data?: {
+          repository?: {
+            issue?: SingleIssueDepsResult;
+          };
+        };
+        errors?: Array<{ message: string }>;
+      };
+
+      if (parsed.errors?.length) {
+        const msg = parsed.errors.map((e) => e.message).join('; ');
+        console.error(`[IssueFetcher] Single-issue deps GraphQL errors: ${msg}`);
+        return null;
+      }
+
+      return parsed.data?.repository?.issue ?? null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[IssueFetcher] Single-issue deps query failed: ${message}`);
       return null;
     }
   }
