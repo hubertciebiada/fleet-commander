@@ -5,7 +5,6 @@
   "enabledPlugins": {
     "security-guidance@claude-plugins-official": true
   },
-  "_fleetCommanderVersion": "0.0.11",
   "hooks": {
     "SessionStart": [
       {
@@ -107,16 +106,6 @@
         ]
       }
     ],
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/fleet-commander/run-hook.sh tool_error on_tool_error.sh"
-          }
-        ]
-      }
-    ],
     "TaskCreated": [
       {
         "hooks": [
@@ -126,6 +115,17 @@
           }
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/fleet-commander/run-hook.sh tool_error on_tool_error.sh"
+          }
+        ]
+      }
     ]
-  }
+  },
+  "_fleetCommanderVersion": "0.0.11"
 }
