@@ -107,10 +107,11 @@ Note: These phases represent the workflow's internal progression, not FC's team 
 
 ## Phase 0 — Setup (Spawn Planner)
 
-1. **TL spawns `fleet-planner`** with the issue number and project context.
-2. TL enters the Active Monitoring Loop (see below) while waiting for the plan.
-3. Planner analyzes the issue, explores the codebase, discovers guidebooks, and produces a structured plan. **Note:** Fleet Commander pre-generates a `.fleet-issue-context.md` file in the worktree root before CC starts. If present, the planner should read it for full issue context (body, comments, acceptance criteria) instead of calling `gh issue view`. If the file does not exist, the planner falls back to fetching the issue via `gh`.
-4. Planner writes the plan to `plan.md` in the worktree root. Planner stays alive for p2p questions from dev and reviewer.
+1. **TL reads `.fleet-issue-context.md`** from the worktree root (if it exists). This file contains the full issue body, comments, labels, acceptance criteria, and dependencies — pre-fetched by Fleet Commander at launch time.
+2. **TL spawns `fleet-planner`** with the full issue context included in the spawn prompt (see Planner Task Format below). The planner receives everything it needs — it should NOT need to call `gh issue view`. If `.fleet-issue-context.md` did not exist, tell the planner to fetch the issue itself via `gh issue view`.
+3. TL enters the Active Monitoring Loop (see below) while waiting for the plan.
+4. Planner analyzes the issue context (provided in its spawn prompt), explores the codebase, discovers guidebooks, and produces a structured plan.
+5. Planner writes the plan to `plan.md` in the worktree root. Planner stays alive for p2p questions from dev and reviewer.
 
 ---
 
@@ -211,6 +212,37 @@ If the Planner is unresponsive for >5 minutes or produces an unusable plan:
 3. Dev implements, tests locally, commits atomically
 4. **Dev sends review request directly to TL** via `SendMessage`: "Ready for review. Branch: `{branch}`"
 5. TL transitions to Phase 3 — spawns reviewer
+
+### Planner Task Format (sent via TaskCreate at spawn)
+
+```
+ISSUE: #{N} {title}
+PROJECT: {project_name}
+
+ISSUE CONTEXT (from .fleet-issue-context.md):
+{paste the full issue body/description here}
+
+COMMENTS ({count}):
+{paste all comments with author and date}
+
+LABELS: {comma-separated labels}
+DEPENDENCIES: {blocked-by list if any}
+
+You already have the full issue context above — you do NOT need to run
+`gh issue view`. Start directly with codebase exploration.
+```
+
+If `.fleet-issue-context.md` was NOT available, use this format instead:
+
+```
+ISSUE: #{N} {title}
+PROJECT: {project_name}
+
+The issue context file was not available. Please fetch the full issue:
+  gh issue view {N} --repo "{github_repo}" --json title,body,comments,labels
+
+Read the issue thoroughly before starting your analysis.
+```
 
 ### Dev Task Format (sent via TaskCreate at spawn)
 
@@ -387,6 +419,10 @@ Fleet Commander sends these messages directly to the TL via stdin. They arrive a
 | `pr_merged` | PR is merged | "PR #{PR} merged. Close the issue, clean up, and finish." |
 | `nudge_idle` | Team idle 5+ min | "FC status check: You've been idle for {N} minutes. If waiting for subagents, run TaskList to verify they are still active. If a phase just completed, proceed to the next step." |
 | `nudge_stuck` | Team stuck 10+ min | "You appear stuck. Report status or ask for help." |
+| `issue_comment_new` | New non-bot comment on issue | "New comment on issue #{KEY} by @{author}: {body}" |
+| `issue_labels_changed` | Priority/blocking labels change | "Labels changed on issue #{KEY}: {added} added, {removed} removed." |
+| `issue_closed_externally` | Issue closed outside team | "Issue #{KEY} was closed externally. Wrap up and shut down." |
+| `issue_body_updated` | Issue description edited | "The description of issue #{KEY} has been updated. Review latest requirements." |
 
 ### TL Response to FC Messages
 
@@ -401,6 +437,14 @@ Fleet Commander sends these messages directly to the TL via stdin. They arrive a
 **On `nudge_idle`**: Run `TaskList` to verify all subagents are alive. If any agent is missing or crashed, respawn it. Report current status to FC.
 
 **On `nudge_stuck`**: Check which agent is stuck. Send a targeted nudge. If no progress after nudge, escalate to FC by reporting status.
+
+**On `issue_comment_new`**: Review the new comment for any instructions or questions from the issue reporter. If the comment contains new requirements or clarifications, forward relevant details to the dev agent. If it's just acknowledgment, no action needed.
+
+**On `issue_labels_changed`**: Check the label change for priority shifts. If a `blocking` or `urgent` label was added, prioritize accordingly. If `blocked` was added, check what's blocking and report to FC.
+
+**On `issue_closed_externally`**: The issue was closed by someone outside the team. Stop all active work immediately. Commit any pending changes, push to the branch, and shut down all agents gracefully.
+
+**On `issue_body_updated`**: Re-read the issue description for updated requirements. If the changes affect current implementation, forward the updated requirements to dev. If dev has already completed the affected work, assess whether rework is needed.
 
 ---
 

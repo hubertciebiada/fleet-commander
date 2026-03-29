@@ -107,10 +107,11 @@ Note: These phases represent the workflow's internal progression, not FC's team 
 
 ## Phase 0 — Setup (Spawn Planner)
 
-1. **TL spawns `fleet-planner`** with the issue number and project context.
-2. TL enters the Active Monitoring Loop (see below) while waiting for the plan.
-3. Planner analyzes the issue, explores the codebase, discovers guidebooks, and produces a structured plan. **Note:** Fleet Commander pre-generates a `.fleet-issue-context.md` file in the worktree root before CC starts. If present, the planner should read it for full issue context (body, comments, acceptance criteria) instead of calling `gh issue view`. If the file does not exist, the planner falls back to fetching the issue via `gh`.
-4. Planner writes the plan to `plan.md` in the worktree root. Planner stays alive for p2p questions from dev and reviewer.
+1. **TL reads `.fleet-issue-context.md`** from the worktree root (if it exists). This file contains the full issue body, comments, labels, acceptance criteria, and dependencies — pre-fetched by Fleet Commander at launch time.
+2. **TL spawns `fleet-planner`** with the full issue context included in the spawn prompt (see Planner Task Format below). The planner receives everything it needs — it should NOT need to call `gh issue view`. If `.fleet-issue-context.md` did not exist, tell the planner to fetch the issue itself via `gh issue view`.
+3. TL enters the Active Monitoring Loop (see below) while waiting for the plan.
+4. Planner analyzes the issue context (provided in its spawn prompt), explores the codebase, discovers guidebooks, and produces a structured plan.
+5. Planner writes the plan to `plan.md` in the worktree root. Planner stays alive for p2p questions from dev and reviewer.
 
 ---
 
@@ -211,6 +212,37 @@ If the Planner is unresponsive for >5 minutes or produces an unusable plan:
 3. Dev implements, tests locally, commits atomically
 4. **Dev sends review request directly to TL** via `SendMessage`: "Ready for review. Branch: `{branch}`"
 5. TL transitions to Phase 3 — spawns reviewer
+
+### Planner Task Format (sent via TaskCreate at spawn)
+
+```
+ISSUE: #{N} {title}
+PROJECT: {project_name}
+
+ISSUE CONTEXT (from .fleet-issue-context.md):
+{paste the full issue body/description here}
+
+COMMENTS ({count}):
+{paste all comments with author and date}
+
+LABELS: {comma-separated labels}
+DEPENDENCIES: {blocked-by list if any}
+
+You already have the full issue context above — you do NOT need to run
+`gh issue view`. Start directly with codebase exploration.
+```
+
+If `.fleet-issue-context.md` was NOT available, use this format instead:
+
+```
+ISSUE: #{N} {title}
+PROJECT: {project_name}
+
+The issue context file was not available. Please fetch the full issue:
+  gh issue view {N} --repo "{github_repo}" --json title,body,comments,labels
+
+Read the issue thoroughly before starting your analysis.
+```
 
 ### Dev Task Format (sent via TaskCreate at spawn)
 
