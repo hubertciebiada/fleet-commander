@@ -190,9 +190,8 @@ describe('GitHubIssueProvider', () => {
   // IssueProvider interface methods (stub implementations)
   // -----------------------------------------------------------------------
 
-  it('should return null from getIssue (requires owner/repo context)', async () => {
-    const result = await provider.getIssue('123');
-    expect(result).toBeNull();
+  it('should throw from getIssue (requires owner/repo context)', async () => {
+    await expect(provider.getIssue('123')).rejects.toThrow(/requires owner\/repo context/);
   });
 
   it('should return empty result from queryIssues', async () => {
@@ -221,6 +220,7 @@ describe('GitHubIssueProvider', () => {
         title: 'Fix the bug',
         state: 'OPEN',
         url: 'https://github.com/org/repo/issues/42',
+        createdAt: '2026-01-15T10:00:00Z',
         labels: { nodes: [{ name: 'bug' }, { name: 'P1' }] },
       };
 
@@ -234,6 +234,25 @@ describe('GitHubIssueProvider', () => {
       expect(result.labels).toEqual(['bug', 'P1']);
       expect(result.provider).toBe('github');
       expect(result.parentKey).toBeNull();
+      expect(result.createdAt).toBe('2026-01-15T10:00:00Z');
+    });
+
+    it('should fall back to current time when createdAt is missing', () => {
+      const before = new Date().toISOString();
+      const node: GraphQLIssueNode = {
+        number: 99,
+        title: 'No createdAt',
+        state: 'OPEN',
+        url: 'https://github.com/org/repo/issues/99',
+      };
+
+      const result = provider.mapToGenericIssue(node);
+      const after = new Date().toISOString();
+
+      // createdAt should be a valid ISO 8601 string between before and after
+      expect(result.createdAt).toBeDefined();
+      expect(result.createdAt! >= before).toBe(true);
+      expect(result.createdAt! <= after).toBe(true);
     });
 
     it('should map CLOSED state to closed normalized status', () => {

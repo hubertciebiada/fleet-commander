@@ -521,21 +521,6 @@ export class JiraIssueProvider implements IssueProvider {
         }
       }
 
-      // Also handle outward direction: if outward says "blocks" and we have an outwardIssue,
-      // that means THIS issue blocks the outward issue -- skip (not a dependency OF this issue)
-
-      // Handle reverse: if inward says "blocks" (not "blocked by"), then outwardIssue is the blocker
-      const isBlocksDirection = !isBlockedByDirection && inwardDesc.includes('block');
-      if (isBlocksDirection && link.outwardIssue) {
-        // This means the outward issue blocks this one through the "blocks" inward link
-        // Actually, let's be more precise: if inward = "blocks" and we have outwardIssue,
-        // that doesn't make this issue blocked. Let's check the outward description too.
-        const outwardDesc = link.type.outward.toLowerCase();
-        if (outwardDesc.includes('blocked by') && link.outwardIssue) {
-          // outwardIssue is blocked by this issue -- not a dep of this issue
-          // skip
-        }
-      }
     }
 
     return deps;
