@@ -27,7 +27,7 @@ fleet-commander/
       index.ts              # Fastify app entry, route registration, service startup
       config.ts             # Environment variable parsing and validation
       db.ts                 # SQLite connection (WAL mode), schema init, query helpers
-      schema.sql            # 13 tables: projects, project_groups, teams, pull_requests, events, commands, usage_snapshots, schema_version, message_templates, team_transitions, agent_messages, stream_events, team_tasks
+      schema.sql            # 14 tables: projects, project_groups, project_issue_sources, teams, pull_requests, events, commands, usage_snapshots, schema_version, message_templates, team_transitions, agent_messages, stream_events, team_tasks
       routes/               # REST API route handlers
         teams.ts            # CRUD + launch/stop/message
         projects.ts         # CRUD + install/uninstall/cleanup
@@ -126,7 +126,7 @@ fleet-commander/
 | `src/server/index.ts` | App entry point, registers routes, starts services |
 | `src/server/config.ts` | All env var parsing, validation, frozen config object |
 | `src/server/db.ts` | SQLite connection, WAL mode, schema initialization |
-| `src/server/schema.sql` | Full database schema (13 tables + 1 view) |
+| `src/server/schema.sql` | Full database schema (14 tables + 1 view) |
 | `src/server/services/team-manager.ts` | Spawns CC processes, manages stdin/stdout pipes |
 | `src/server/services/event-collector.ts` | Receives hook events, writes to DB, broadcasts SSE |
 | `src/server/services/github-poller.ts` | Polls GitHub via `gh` CLI for PR/CI/merge status |
@@ -155,12 +155,13 @@ npm run launch       # Full launch: install + build + open browser
 
 ## Database
 
-SQLite with WAL mode, 13 tables:
+SQLite with WAL mode, 14 tables:
 
 | Table | Purpose |
 |-------|---------|
 | `projects` | Registered repositories (path, GitHub slug, max teams, prompt file) |
 | `project_groups` | Logical grouping of projects |
+| `project_issue_sources` | Multiple issue providers per project (provider, config, credentials) |
 | `teams` | Agent team instances (status, phase, PID, session, PR link) |
 | `pull_requests` | PR tracking (state, CI status, merge state, auto-merge flag) |
 | `events` | Hook events from CC sessions (type, tool name, payload JSON) |
@@ -218,20 +219,41 @@ The SSE broker emits 17 event types:
 |----------|---------|-------------|
 | `PORT` | `4680` | Server port |
 | `FLEET_HOST` | `0.0.0.0` | Network interface to bind to |
+| `FLEET_DB_PATH` | (platform data dir) | Database file location. Defaults to platform user data dir |
+| `FLEET_COMMANDER_ROOT` | (auto-detected) | Fleet Commander installation root. Auto-detected from package.json location or git root |
+| `FLEET_BROWSE_ROOT` | (user home dir) | Root directory for filesystem browsing |
+| `FLEET_TERMINAL` | `auto` | Windows terminal preference (`auto`/`wt`/`cmd`) |
+| `FLEET_CLAUDE_CMD` | `claude` | Claude Code CLI command |
+| `FLEET_SKIP_PERMISSIONS` | `true` | Skip CC permission prompts (`true`/`false`) |
+| `FLEET_ENABLE_AGENT_TEAMS` | `true` | Enable agent teams feature (`true`/`false`) |
+| `LOG_LEVEL` | `info` | Server log level |
+| `FLEET_GITHUB_POLL_MS` | `30000` | GitHub PR/CI/merge poll interval (ms) |
+| `FLEET_ISSUE_POLL_MS` | `60000` | Issue list poll interval (ms) |
+| `FLEET_ISSUE_UPDATE_POLL_MS` | `30000` | Issue update (comments, labels, body) poll interval (ms) |
+| `FLEET_STUCK_CHECK_MS` | `60000` | Stuck/idle detection check interval (ms) |
+| `FLEET_USAGE_POLL_MS` | `900000` | Usage percentage poll interval (ms, default 15min) |
+| `FLEET_MAP_CLEANUP_MS` | `3600000` | In-memory map cleanup interval (ms, default 1hr) |
 | `FLEET_IDLE_THRESHOLD_MIN` | `5` | Minutes before idle status |
 | `FLEET_STUCK_THRESHOLD_MIN` | `10` | Minutes before stuck status |
 | `FLEET_LAUNCH_TIMEOUT_MIN` | `5` | Minutes before a launching team is marked failed |
 | `FLEET_MAX_CI_FAILURES` | `3` | Unique CI failures before blocking |
 | `FLEET_EARLY_CRASH_THRESHOLD_SEC` | `120` | Seconds before a SubagentStop is considered an early crash |
 | `FLEET_EARLY_CRASH_MIN_TOOLS` | `5` | Minimum tool-use events for a subagent to be considered healthy |
-| `FLEET_CC_QUERY_PRIORITIZE_TIMEOUT_MS` | `300000` | Timeout for AI issue prioritization (ms) |
-| `FLEET_GITHUB_POLL_MS` | `30000` | GitHub poll interval |
-| `FLEET_DB_PATH` | (platform data dir) | Database file location. Defaults to platform user data dir |
-| `FLEET_BROWSE_ROOT` | (user home dir) | Root directory for filesystem browsing (default: user home dir) |
-| `FLEET_TERMINAL` | `auto` | Windows terminal preference (`auto`/`wt`/`cmd`) |
-| `FLEET_CLAUDE_CMD` | `claude` | Claude Code CLI command |
-| `FLEET_SKIP_PERMISSIONS` | `true` | Skip CC permission prompts |
-| `LOG_LEVEL` | `info` | Server log level |
+| `FLEET_MERGE_SHUTDOWN_GRACE_MS` | `120000` | Grace period (ms) after PR merge before stopping the team |
+| `FLEET_CC_QUERY_MODEL` | `sonnet` | Claude model for CC query operations (e.g. `sonnet`, `opus`) |
+| `FLEET_CC_QUERY_TIMEOUT_MS` | `30000` | Timeout (ms) for individual CC query calls |
+| `FLEET_CC_QUERY_PRIORITIZE_TIMEOUT_MS` | `300000` | Timeout (ms) for AI issue prioritization |
+| `FLEET_CC_QUERY_MAX_RETRIES` | `2` | Max retries for CC query calls |
+| `FLEET_CC_QUERY_MAX_TURNS` | `4` | Max conversation turns for CC query calls |
+| `FLEET_EVENTS_RETENTION_DAYS` | `90` | Days to retain hook events before cleanup |
+| `FLEET_USAGE_RETENTION_DAYS` | `30` | Days to retain usage snapshots before cleanup |
+| `FLEET_USAGE_RED_DAILY_PCT` | `85` | Daily usage percentage threshold for red warning |
+| `FLEET_USAGE_RED_WEEKLY_PCT` | `95` | Weekly usage percentage threshold for red warning |
+| `FLEET_USAGE_RED_SONNET_PCT` | `95` | Sonnet usage percentage threshold for red warning |
+| `FLEET_USAGE_RED_EXTRA_PCT` | `95` | Extra usage percentage threshold for red warning |
+| `FLEET_HOOK_LOG` | (platform data dir) | Path to hook execution log file. Defaults to `hooks.log` in platform data dir |
+| `FLEET_ENCRYPTION_KEY` | (auto-generated) | Hex-encoded 32-byte encryption key for provider credentials. Auto-generated if not set |
+| `FLEET_ENCRYPTION_KEY_OLD` | `null` | Previous encryption key (hex) for key rotation. Set alongside `FLEET_ENCRYPTION_KEY` to re-encrypt |
 
 ## Rules for AI Agents
 
