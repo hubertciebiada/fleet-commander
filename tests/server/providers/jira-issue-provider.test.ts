@@ -366,6 +366,33 @@ describe('JiraIssueProvider.getDependencies', () => {
     expect(deps).toHaveLength(0);
   });
 
+  it('should not treat outward "blocks" links as dependencies of this issue', async () => {
+    const provider = new JiraIssueProvider(makeConfig());
+
+    // This issue blocks TEST-99 (outward direction) -- TEST-99 is NOT a dependency of this issue
+    const issue = makeJiraIssue({
+      fields: {
+        issuelinks: [
+          {
+            id: '2',
+            type: { name: 'Blocks', inward: 'is blocked by', outward: 'blocks' },
+            outwardIssue: {
+              key: 'TEST-99',
+              fields: {
+                summary: 'Issue blocked by us',
+                status: { name: 'Open', statusCategory: { key: 'new', name: 'To Do' } },
+              },
+            },
+          },
+        ],
+      },
+    });
+    mockFetchResponse(issue);
+
+    const deps = await provider.getDependencies('TEST-42');
+    expect(deps).toHaveLength(0);
+  });
+
   it('should return empty array on error', async () => {
     const provider = new JiraIssueProvider(makeConfig());
     fetchMock.mockRejectedValueOnce(new Error('API error'));

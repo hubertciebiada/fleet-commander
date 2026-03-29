@@ -42,6 +42,7 @@ export interface GraphQLIssueNode {
   title: string;
   state: string;
   url: string;
+  createdAt?: string;
   body?: string | null;
   labels?: { nodes?: Array<{ name: string }> };
   parent?: { number: number; title: string } | null;
@@ -135,6 +136,7 @@ query GetIssues($owner: String!, $repo: String!, $cursor: String) {
         parent { number title }
         subIssuesSummary { total completed percentCompleted }
         body
+        createdAt
         closedByPullRequestsReferences(first: 3, includeClosedPrs: true) {
           nodes { number state }
         }
@@ -162,6 +164,7 @@ query GetIssues($owner: String!, $repo: String!, $cursor: String) {
         parent { number title }
         subIssuesSummary { total completed percentCompleted }
         body
+        createdAt
         closedByPullRequestsReferences(first: 3, includeClosedPrs: true) {
           nodes { number state }
         }
@@ -491,13 +494,16 @@ export class GitHubIssueProvider implements IssueProvider {
 
   /**
    * Fetch a single issue by key (issue number as string).
-   * Uses GitHub GraphQL aliased query.
+   *
+   * @throws Error - always throws because this method requires owner/repo
+   * context that is not available from the issue key alone. Use
+   * fetchFullIssueContext() or fetchRawIssueHierarchy() instead.
    */
-  async getIssue(key: string): Promise<GenericIssue | null> {
-    // This method requires owner/repo context that is not available from
-    // the key alone. For now, return null -- the IssueFetcher uses
-    // fetchRawIssueHierarchy for batch fetches instead.
-    return null;
+  async getIssue(_key: string): Promise<GenericIssue | null> {
+    throw new Error(
+      'GitHubIssueProvider.getIssue() requires owner/repo context that is not available ' +
+      'from the issue key alone. Use fetchFullIssueContext() or fetchRawIssueHierarchy() instead.'
+    );
   }
 
   /**
@@ -589,7 +595,7 @@ export class GitHubIssueProvider implements IssueProvider {
       assignee: null,
       priority: null,
       parentKey: node.parent?.number ? String(node.parent.number) : null,
-      createdAt: new Date().toISOString(), // GitHub GraphQL does not include createdAt in this query
+      createdAt: node.createdAt ?? new Date().toISOString(), // Fallback for cached responses without createdAt
       updatedAt: null,
       provider: 'github',
     };
