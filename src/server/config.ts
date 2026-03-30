@@ -160,6 +160,10 @@ const config = Object.freeze({
 
   mergeShutdownGraceMs: safeParseInt(process.env['FLEET_MERGE_SHUTDOWN_GRACE_MS'] || '120000', 'FLEET_MERGE_SHUTDOWN_GRACE_MS'),
 
+  retryDelayMin: safeParseInt(process.env['FLEET_RETRY_DELAY_MIN'] || '60', 'FLEET_RETRY_DELAY_MIN'),
+  retryMaxDailyPct: safeParseInt(process.env['FLEET_RETRY_MAX_DAILY_PCT'] || '75', 'FLEET_RETRY_MAX_DAILY_PCT'),
+  retryMaxCount: safeParseInt(process.env['FLEET_RETRY_MAX_COUNT'] || '2', 'FLEET_RETRY_MAX_COUNT'),
+
   ccQueryModel: process.env['FLEET_CC_QUERY_MODEL'] || 'sonnet',
   ccQueryTimeoutMs: safeParseInt(process.env['FLEET_CC_QUERY_TIMEOUT_MS'] || '30000', 'FLEET_CC_QUERY_TIMEOUT_MS'),
   ccQueryPrioritizeTimeoutMs: safeParseInt(process.env['FLEET_CC_QUERY_PRIORITIZE_TIMEOUT_MS'] || '300000', 'FLEET_CC_QUERY_PRIORITIZE_TIMEOUT_MS'),
@@ -211,6 +215,9 @@ export function validateConfig(): void {
     ['ccQueryMaxTurns', config.ccQueryMaxTurns],
     ['eventsRetentionDays', config.eventsRetentionDays],
     ['usageRetentionDays', config.usageRetentionDays],
+    ['retryDelayMin', config.retryDelayMin],
+    ['retryMaxDailyPct', config.retryMaxDailyPct],
+    ['retryMaxCount', config.retryMaxCount],
   ];
   for (const [name, value] of positiveIntegers) {
     if (isNaN(value) || value <= 0) {

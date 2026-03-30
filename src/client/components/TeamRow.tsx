@@ -78,7 +78,8 @@ function areTeamRowPropsEqual(prev: TeamRowProps, next: TeamRowProps): boolean {
     a.issueNumber === b.issueNumber &&
     a.issueKey === b.issueKey &&
     a.issueProvider === b.issueProvider &&
-    a.githubRepo === b.githubRepo
+    a.githubRepo === b.githubRepo &&
+    a.retryCount === b.retryCount
   );
 }
 
@@ -157,7 +158,7 @@ export const TeamRow = memo(function TeamRow({ team, selected, isThinking: teamI
     >
       {/* Status */}
       <td className="px-4 whitespace-nowrap">
-        <StatusBadge status={team.status} />
+        <StatusBadge status={team.status} retryCount={team.retryCount} />
       </td>
 
       {/* Project */}

@@ -100,6 +100,14 @@ let _latestDaily = 0;
 let _latestWeekly = 0;
 
 /**
+ * Returns the latest daily usage percentage.
+ * Used by the retry scheduler to check against the retry usage threshold.
+ */
+export function getLatestDailyPercent(): number {
+  return _latestDaily;
+}
+
+/**
  * Returns 'red' if usage exceeds the configured thresholds, 'green' otherwise.
  */
 export function getUsageZone(): UsageZone {

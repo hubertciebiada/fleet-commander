@@ -235,6 +235,7 @@ export interface Team {
   stoppedAt: string | null;
   lastEventAt: string | null;
   blockedByJson: string | null;
+  retryCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -512,6 +513,7 @@ export interface TeamDashboardRow {
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
   totalCostUsd: number;
+  retryCount: number;
   githubRepo: string | null;
   prState: PRState | null;
   ciStatus: CIStatus | null;
@@ -554,6 +556,7 @@ export interface TeamDetail {
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
   totalCostUsd: number;
+  retryCount: number;
   githubRepo?: string | null;
   pr: {
     number: number;

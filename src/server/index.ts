@@ -28,6 +28,7 @@ import { errorHandler } from './middleware/error-handler.js';
 import { getDatabase, closeDatabase } from './db.js';
 import { recoverOnStartup } from './services/startup-recovery.js';
 import { usagePoller } from './services/usage-tracker.js';
+import { retryScheduler } from './services/retry-scheduler.js';
 import { dataRetention } from './services/data-retention.js';
 import config from './config.js';
 import { resolveClaudePath } from './utils/resolve-claude-path.js';
@@ -163,12 +164,13 @@ async function main() {
   const issueFetcher = getIssueFetcher();
   issueFetcher.start();
   stuckDetector.start();
+  retryScheduler.start();
   githubPoller.start();
   issueUpdatePoller.start();
   usagePoller.start();
   dataRetention.start();
   getTeamManager().startPeriodicCleanup();
-  server.log.info('All services started (SSE, issues, stuck detector, GitHub poller, issue update poller, usage poller, data retention, map cleanup)');
+  server.log.info('All services started (SSE, issues, stuck detector, retry scheduler, GitHub poller, issue update poller, usage poller, data retention, map cleanup)');
 
   // Graceful shutdown
   server.addHook('onClose', async () => {
@@ -177,6 +179,7 @@ async function main() {
     usagePoller.stop();
     issueUpdatePoller.stop();
     githubPoller.stop();
+    retryScheduler.stop();
     stuckDetector.stop();
     issueFetcher.stop();
     sseBroker.stop();

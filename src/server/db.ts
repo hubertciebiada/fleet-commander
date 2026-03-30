@@ -138,6 +138,7 @@ export interface TeamUpdate {
   totalCacheCreationTokens?: number;
   totalCacheReadTokens?: number;
   totalCostUsd?: number;
+  retryCount?: number;
   launchedAt?: string | null;
   stoppedAt?: string | null;
   lastEventAt?: string | null;
@@ -395,6 +396,9 @@ export class FleetDatabase {
 
     // Add provider_state table if missing (for persisting provider runtime state)
     this.addProviderStateTable();
+
+    // Add retry_count column to teams if missing (v14 migration — auto-retry)
+    this.addRetryCountColumn();
 
     // Migrate any 'paused' projects to 'active' (paused status removed in #228)
     this.migratePausedProjects();
@@ -1038,6 +1042,22 @@ export class FleetDatabase {
   }
 
   /**
+   * v14 migration: Add retry_count column to teams table for auto-retry tracking.
+   */
+  private addRetryCountColumn(): void {
+    try {
+      const cols = this.db.prepare('PRAGMA table_info(teams)').all() as Array<{ name: string }>;
+      if (cols.some((c) => c.name === 'retry_count')) return; // Already exists
+
+      this.db.exec('ALTER TABLE teams ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0');
+      this.db.exec('INSERT OR IGNORE INTO schema_version (version) VALUES (14)');
+      console.log('[DB] Migrated to v14: added retry_count column to teams');
+    } catch {
+      // Table may not exist yet (fresh database) — schema.sql will create it
+    }
+  }
+
+  /**
    * Migrate any projects with status 'paused' to 'active'.
    * The paused status was removed in issue #228.
    */
@@ -1530,6 +1550,18 @@ export class FleetDatabase {
   }
 
   /**
+   * Get all failed teams ordered by stopped_at (oldest first).
+   * Used by the retry scheduler to find teams eligible for auto-retry.
+   */
+  getFailedTeamsForRetry(): Team[] {
+    const stmt = this.stmt(
+      "SELECT * FROM teams WHERE status = 'failed' ORDER BY stopped_at ASC"
+    );
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map((r) => this.mapTeamRow(r));
+  }
+
+  /**
    * Update team fields without returning the updated record.
    * Use when the caller discards the return value (fire-and-forget updates).
    * Skips the trailing SELECT that `updateTeam()` performs.
@@ -1609,6 +1641,10 @@ export class FleetDatabase {
     if (fields.lastEventAt !== undefined) {
       setClauses.push('last_event_at = @lastEventAt');
       params.lastEventAt = fields.lastEventAt;
+    }
+    if (fields.retryCount !== undefined) {
+      setClauses.push('retry_count = @retryCount');
+      params.retryCount = fields.retryCount;
     }
 
     if (setClauses.length === 0) return;
@@ -2776,6 +2812,7 @@ export class FleetDatabase {
       totalCacheReadTokens: (row.total_cache_read_tokens as number | undefined) ?? 0,
       totalCostUsd: (row.total_cost_usd as number | undefined) ?? 0,
       blockedByJson: (row.blocked_by_json as string | null) ?? null,
+      retryCount: (row.retry_count as number | undefined) ?? 0,
       launchedAt: utcify(row.launched_at as string | null),
       stoppedAt: utcify(row.stopped_at as string | null),
       lastEventAt: utcify(row.last_event_at as string | null),
@@ -2866,6 +2903,7 @@ export class FleetDatabase {
       totalCacheCreationTokens: (row.total_cache_creation_tokens as number | undefined) ?? 0,
       totalCacheReadTokens: (row.total_cache_read_tokens as number | undefined) ?? 0,
       totalCostUsd: (row.total_cost_usd as number | undefined) ?? 0,
+      retryCount: (row.retry_count as number | undefined) ?? 0,
       githubRepo: (row.github_repo as string | null) ?? null,
       prState: (row.pr_state as PRState | null) ?? null,
       ciStatus: (row.ci_status as CIStatus | null) ?? null,
