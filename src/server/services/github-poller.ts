@@ -495,6 +495,38 @@ class GitHubPoller {
         } catch (err) {
           console.error(`[GitHubPoller] Failed to initiate graceful shutdown for team ${teamId}:`, err);
         }
+
+        // Surgical cache update: check if the merged PR closed the issue,
+        // and if so, update the cached issue tree without a full refresh.
+        try {
+          if (team.projectId && team.issueNumber) {
+            const [owner, repo] = githubRepo.split('/');
+            const issueState = await execGHAsync(
+              `gh api "/repos/${owner}/${repo}/issues/${team.issueNumber}" --jq ".state"`,
+            );
+            if (issueState && issueState.trim() === 'closed') {
+              const { getIssueFetcher } = await import('./issue-fetcher.js');
+              const fetcher = getIssueFetcher();
+              fetcher.markIssueClosed(team.projectId, team.issueNumber);
+
+              sseBroker.broadcast('project_updated', {
+                project_id: team.projectId,
+                reason: 'issue_closed',
+                issue_number: team.issueNumber,
+              });
+
+              console.log(
+                `[GitHubPoller] Issue #${team.issueNumber} confirmed closed after PR #${prNumber} merge — cache updated`
+              );
+            }
+          }
+        } catch (err) {
+          // Non-fatal: the next full cache refresh will pick up the state change
+          console.error(
+            `[GitHubPoller] Failed to check/update issue state after PR #${prNumber} merge:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
       }
     }
 
@@ -580,7 +612,11 @@ class GitHubPoller {
       // Check in-memory blocked issues
       for (const [key, entry] of this.previouslyBlocked) {
         try {
-          const deps = await fetcher.fetchDependenciesForIssue(entry.projectId, entry.issueNumber);
+          // Try cache first to avoid unnecessary API calls
+          let deps = fetcher.getDependenciesFromCache(entry.projectId, entry.issueNumber);
+          if (deps === null) {
+            deps = await fetcher.fetchDependenciesForIssue(entry.projectId, entry.issueNumber);
+          }
           if (deps && deps.resolved) {
             // All blockers are now closed — broadcast resolution event
             sseBroker.broadcast('dependency_resolved', {
@@ -613,7 +649,11 @@ class GitHubPoller {
         if (!team.projectId) continue;
 
         try {
-          const deps = await fetcher.fetchDependenciesForIssue(team.projectId, team.issueNumber);
+          // Try cache first to avoid unnecessary API calls
+          let deps = fetcher.getDependenciesFromCache(team.projectId, team.issueNumber);
+          if (deps === null) {
+            deps = await fetcher.fetchDependenciesForIssue(team.projectId, team.issueNumber);
+          }
           if (deps && deps.resolved) {
             // All blockers resolved — clear blocked_by_json and broadcast
             db.updateTeamSilent(team.id, { blockedByJson: null });

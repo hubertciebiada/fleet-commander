@@ -32,7 +32,7 @@ vi.mock('../../src/server/db.js', () => ({
 
 vi.mock('../../src/server/config.js', () => ({
   default: {
-    issuePollIntervalMs: 60000,
+    issuePollIntervalMs: 300000,
   },
 }));
 

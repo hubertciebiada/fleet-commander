@@ -114,7 +114,7 @@ const config = Object.freeze({
   fleetCommanderRoot,
 
   githubPollIntervalMs: safeParseInt(process.env['FLEET_GITHUB_POLL_MS'] || '30000', 'FLEET_GITHUB_POLL_MS'),
-  issuePollIntervalMs: safeParseInt(process.env['FLEET_ISSUE_POLL_MS'] || '60000', 'FLEET_ISSUE_POLL_MS'),
+  issuePollIntervalMs: safeParseInt(process.env['FLEET_ISSUE_POLL_MS'] || '300000', 'FLEET_ISSUE_POLL_MS'),
   issueUpdatePollMs: safeParseInt(process.env['FLEET_ISSUE_UPDATE_POLL_MS'] || '30000', 'FLEET_ISSUE_UPDATE_POLL_MS'),
   stuckCheckIntervalMs: safeParseInt(process.env['FLEET_STUCK_CHECK_MS'] || '60000', 'FLEET_STUCK_CHECK_MS'),
   usagePollIntervalMs: safeParseInt(process.env['FLEET_USAGE_POLL_MS'] || '900000', 'FLEET_USAGE_POLL_MS'),

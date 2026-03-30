@@ -48,7 +48,7 @@ export interface SSEEventPayloads {
   team_stopped: { team_id: number };
   usage_updated: { daily_percent: number; weekly_percent: number; sonnet_percent: number; extra_percent: number; zone: UsageZone };
   project_added: { project_id: number; name: string; repo_path: string };
-  project_updated: { project_id: number; name: string; status: string };
+  project_updated: { project_id: number; name?: string; status?: string; reason?: string; issue_number?: number };
   project_removed: { project_id: number };
   project_cleanup: { project_id: number; removed_count: number; failed_count: number };
   snapshot: { teams: unknown[] };
