@@ -26,6 +26,8 @@ import { registerGetTeamTimelineTool } from './tools/get-team-timeline.js';
 import { registerListIssuesTool } from './tools/list-issues.js';
 import { registerListProjectsTool } from './tools/list-projects.js';
 import { registerAddProjectTool } from './tools/add-project.js';
+import { registerRemoveProjectTool } from './tools/remove-project.js';
+import { registerInstallProjectTool } from './tools/install-project.js';
 import { registerGetUsageTool } from './tools/get-usage.js';
 import { registerListTeamsTool } from './tools/list-teams.js';
 import { registerGetTeamTool } from './tools/get-team.js';
@@ -33,6 +35,13 @@ import { registerStopTeamTool } from './tools/stop-team.js';
 import { registerRestartTeamTool } from './tools/restart-team.js';
 import { registerSendMessageTool } from './tools/send-message.js';
 import { registerLaunchTeamTool } from './tools/launch-team.js';
+import { registerGetRelationsTool } from './tools/get-relations.js';
+import { registerAddBlockedByTool } from './tools/add-blocked-by.js';
+import { registerRemoveBlockedByTool } from './tools/remove-blocked-by.js';
+import { registerSetParentTool } from './tools/set-parent.js';
+import { registerRemoveParentTool } from './tools/remove-parent.js';
+import { registerAddChildTool } from './tools/add-child.js';
+import { registerRemoveChildTool } from './tools/remove-child.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,6 +71,8 @@ export async function startMcpServer(): Promise<void> {
   registerListIssuesTool(mcpServer);
   registerListProjectsTool(mcpServer);
   registerAddProjectTool(mcpServer);
+  registerRemoveProjectTool(mcpServer);
+  registerInstallProjectTool(mcpServer);
   registerGetUsageTool(mcpServer);
   registerListTeamsTool(mcpServer);
   registerGetTeamTool(mcpServer);
@@ -69,6 +80,13 @@ export async function startMcpServer(): Promise<void> {
   registerRestartTeamTool(mcpServer);
   registerSendMessageTool(mcpServer);
   registerLaunchTeamTool(mcpServer);
+  registerGetRelationsTool(mcpServer);
+  registerAddBlockedByTool(mcpServer);
+  registerRemoveBlockedByTool(mcpServer);
+  registerSetParentTool(mcpServer);
+  registerRemoveParentTool(mcpServer);
+  registerAddChildTool(mcpServer);
+  registerRemoveChildTool(mcpServer);
 
   // Initialize database
   const db = getDatabase(config.dbPath);
