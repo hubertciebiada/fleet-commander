@@ -91,6 +91,11 @@ Your final verdict is delivered by writing a `review.md` file in the worktree ro
 - [DEVIATED] {step} — {how it differs and whether justified}
 - [MISSING] {step} — not implemented
 
+## Completeness Check
+- [OK] {sibling checked} — no changes needed
+- [MISSING] {file/component} — should have been updated because {reason}
+- [DUPLICATION] {file}:{line} duplicates logic from {other file}:{line}
+
 ## Issues Found
 {If CHANGES_NEEDED, list all unresolved CRITICAL/MAJOR issues here.
 If APPROVE, write "No blocking issues." and optionally list MINOR/NIT suggestions.}
@@ -136,10 +141,12 @@ Your review MUST focus exclusively on these categories. If none of these fail, i
 4. **Missing error handling on external calls** — unhandled promise rejections, missing try/catch on network/filesystem/process calls
 5. **CLAUDE.md rule violation** — explicit contradiction of a numbered rule in CLAUDE.md
 6. **Plan deviation without justification** — implementation diverges from the planner's plan with no documented reason
+7. **Duplicated business logic** — code that performs entity operations, state transitions, validation, or business rules is copy-pasted instead of extracted into a shared function/service. If you see the same logic in two places, flag it as CRITICAL.
+8. **Missing symmetrical changes** — a feature is added in one place but omitted from other places where it should logically exist. For example: a new field added to the API response but missing from the detail view, a new status handled in the list but not in the detail panel, a route added but missing from navigation. **Actively search** for sibling components/views/routes that should have been updated but were not touched by the diff.
 
 If NONE of these are triggered, write `Status: APPROVE` immediately. Do NOT flag cosmetic issues, style preferences, naming suggestions, or 'nice-to-have' improvements. These waste time and provide no value.
 
-Only flag an issue as CHANGES_NEEDED if it falls into categories 1-6 above AND you are >80% confident it is a real problem.
+Only flag an issue as CHANGES_NEEDED if it falls into categories 1-8 above AND you are >80% confident it is a real problem.
 
 ---
 
@@ -179,6 +186,25 @@ Run must-fail checklist items 5-6:
    - Were any deviations justified? The dev may have pushed back on parts of the plan with good reason — note deviations but only flag unjustified ones as issues.
    - Were acceptance criteria from the plan met? The plan may define additional criteria beyond the issue description.
 2. If you need clarification about the original intent behind a planned change, **ask the planner directly** via `SendMessage` with `recipient: "{planner_agent_name}"` before marking it as an issue.
+
+## Pass 3 — Completeness & Duplication
+
+Run must-fail checklist items 7-8. This pass requires **actively searching the codebase**, not just reading the diff.
+
+### Duplicated Business Logic (checklist item 7)
+- For each new function/method that performs business logic (entity operations, state transitions, validation, data transformation), **Grep the codebase** for similar patterns.
+- If the same logic exists elsewhere, flag as CRITICAL — dev must extract it into a shared function/service.
+- Common duplication spots: route handlers vs MCP tools, service methods vs inline logic, client-side vs server-side validation.
+
+### Missing Symmetrical Changes (checklist item 8)
+- For each changed file, identify its **siblings** — other files that serve a parallel purpose:
+  - API route added → check if MCP tool should also exist
+  - Field added to list view → check if detail view also shows it
+  - New status/state handled in one component → check all components that render that entity
+  - Database column added → check if API response includes it, if UI displays it
+  - Server-side type changed → check if shared/client types match
+- Use **Grep and Glob** to find these siblings. Do NOT rely only on the diff — the missing change is by definition NOT in the diff.
+- If you find a place that should have been updated but was not, flag as MAJOR with the specific file and what is missing.
 
 ## Feedback Format (to Dev)
 
