@@ -371,6 +371,7 @@ export class TeamService {
       totalCacheCreationTokens: team.totalCacheCreationTokens,
       totalCacheReadTokens: team.totalCacheReadTokens,
       totalCostUsd: team.totalCostUsd,
+      retryCount: team.retryCount,
       pr: prDetail,
       recentEvents,
       outputTail,

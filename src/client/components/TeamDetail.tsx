@@ -280,7 +280,7 @@ export function TeamDetail() {
                     {detail.issueTitle ?? 'Untitled'}
                   </h3>
                   <div className="flex items-center gap-2 shrink-0">
-                    <StatusBadge status={detail.status} />
+                    <StatusBadge status={detail.status} retryCount={detail.retryCount} />
                     <svg
                       className={`w-4 h-4 text-dark-muted transition-transform duration-200 ${metadataCollapsed ? '' : 'rotate-180'}`}
                       viewBox="0 0 20 20"

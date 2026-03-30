@@ -238,6 +238,16 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     hookEvent: null,
   },
   {
+    id: 'failed-queued-auto',
+    from: 'failed',
+    to: 'queued',
+    trigger: 'timer',
+    triggerLabel: 'Auto-retry timer',
+    description: 'Failed team auto-retries after configurable delay when daily usage is below threshold and retry count has not been exhausted',
+    condition: 'stoppedAt + retryDelayMin < now AND dailyUsage < retryMaxDailyPct AND retryCount < retryMaxCount',
+    hookEvent: null,
+  },
+  {
     id: 'failed-launching',
     from: 'failed',
     to: 'launching',

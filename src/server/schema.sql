@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS teams (
   custom_prompt   TEXT,                            -- custom prompt override (persisted for queued teams)
   headless        INTEGER NOT NULL DEFAULT 1,     -- 0=interactive terminal, 1=headless stream-json
   blocked_by_json TEXT,                            -- JSON array of blocking issue numbers e.g. [368, 370]
+  retry_count     INTEGER NOT NULL DEFAULT 0,     -- auto-retry count (0 = never retried)
   total_input_tokens INTEGER DEFAULT 0,
   total_output_tokens INTEGER DEFAULT 0,
   total_cache_creation_tokens INTEGER DEFAULT 0,
@@ -184,6 +185,7 @@ SELECT
   t.total_cache_creation_tokens,
   t.total_cache_read_tokens,
   t.total_cost_usd,
+  t.retry_count,
   pr.state AS pr_state,
   pr.ci_status,
   pr.merge_status,
@@ -344,4 +346,4 @@ CREATE TABLE IF NOT EXISTS provider_state (
 );
 
 -- Insert schema version 9 (or upgrade from earlier versions)
-INSERT OR IGNORE INTO schema_version (version) VALUES (13);
+INSERT OR IGNORE INTO schema_version (version) VALUES (14);

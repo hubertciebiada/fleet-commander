@@ -14,9 +14,11 @@ const STATUS_LABELS: Record<TeamStatus, string> = {
 
 interface StatusBadgeProps {
   status: TeamStatus;
+  retryCount?: number;
+  maxRetries?: number;
 }
 
-export function StatusBadge({ status }: StatusBadgeProps) {
+export function StatusBadge({ status, retryCount, maxRetries }: StatusBadgeProps) {
   const color = STATUS_COLORS[status] ?? '#8B949E';
   const label = STATUS_LABELS[status] ?? status;
 
@@ -26,6 +28,16 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     animationClass = 'animate-pulse-stuck';
   } else if (status === 'launching') {
     animationClass = 'animate-blink';
+  }
+
+  // Retry annotation for failed teams
+  let retryAnnotation: string | null = null;
+  if (status === 'failed' && retryCount !== undefined && retryCount > 0) {
+    if (maxRetries !== undefined && retryCount >= maxRetries) {
+      retryAnnotation = '(permanent)';
+    } else {
+      retryAnnotation = `(retry ${retryCount})`;
+    }
   }
 
   return (
@@ -40,6 +52,11 @@ export function StatusBadge({ status }: StatusBadgeProps) {
       >
         {label}
       </span>
+      {retryAnnotation && (
+        <span className="text-xs text-dark-muted">
+          {retryAnnotation}
+        </span>
+      )}
     </span>
   );
 }
