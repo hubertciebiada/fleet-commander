@@ -43,7 +43,7 @@ function makeSettings() {
     earlyCrashThresholdSec: 120,
     earlyCrashMinTools: 5,
     githubPollIntervalMs: 30000,
-    issuePollIntervalMs: 60000,
+    issuePollIntervalMs: 300000,
     stuckCheckIntervalMs: 60000,
     usagePollIntervalMs: 30000,
     sseHeartbeatMs: 30000,

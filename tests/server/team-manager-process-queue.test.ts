@@ -52,9 +52,12 @@ vi.mock('../../src/server/utils/find-git-bash.js', () => ({
 // Mock issue-fetcher for dependency checks in processQueue
 const mockFetchDependenciesForIssue = vi.fn();
 
+const mockGetDependenciesFromCache = vi.fn().mockReturnValue(null);
+
 vi.mock('../../src/server/services/issue-fetcher.js', () => ({
   getIssueFetcher: () => ({
     fetchDependenciesForIssue: mockFetchDependenciesForIssue,
+    getDependenciesFromCache: mockGetDependenciesFromCache,
   }),
   detectCircularDependencies: vi.fn().mockReturnValue(null),
 }));

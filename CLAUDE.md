@@ -43,7 +43,7 @@ fleet-commander/
         team-manager.ts     # child_process.spawn, stdin/stdout pipes, lifecycle
         event-collector.ts  # Hook event processing -> DB -> SSE broadcast
         github-poller.ts    # gh CLI polling (PRs, CI, merges) every 30s
-        issue-fetcher.ts    # GraphQL issue fetch with 60s cache
+        issue-fetcher.ts    # GraphQL issue fetch with 5min cache
         stuck-detector.ts   # Idle (5min) and stuck (10min) detection
         sse-broker.ts       # SSE connection management, 17 event types, 30s heartbeat
         usage-tracker.ts    # Usage percentage polling
@@ -228,7 +228,7 @@ The SSE broker emits 17 event types:
 | `FLEET_ENABLE_AGENT_TEAMS` | `true` | Enable agent teams feature (`true`/`false`) |
 | `LOG_LEVEL` | `info` | Server log level |
 | `FLEET_GITHUB_POLL_MS` | `30000` | GitHub PR/CI/merge poll interval (ms) |
-| `FLEET_ISSUE_POLL_MS` | `60000` | Issue list poll interval (ms) |
+| `FLEET_ISSUE_POLL_MS` | `300000` | Issue list poll interval (ms, default 5min) |
 | `FLEET_ISSUE_UPDATE_POLL_MS` | `30000` | Issue update (comments, labels, body) poll interval (ms) |
 | `FLEET_STUCK_CHECK_MS` | `60000` | Stuck/idle detection check interval (ms) |
 | `FLEET_USAGE_POLL_MS` | `900000` | Usage percentage poll interval (ms, default 15min) |

@@ -65,6 +65,8 @@ vi.mock('../../src/server/services/team-manager.js', () => ({
 
 const mockFetcher = {
   fetchDependenciesForIssue: vi.fn().mockResolvedValue(null),
+  getDependenciesFromCache: vi.fn().mockReturnValue(null),
+  markIssueClosed: vi.fn(),
 };
 vi.mock('../../src/server/services/issue-fetcher.js', () => ({
   getIssueFetcher: () => mockFetcher,
@@ -1366,6 +1368,117 @@ describe('Input validation guards', () => {
 
     // gh CLI should never be called for an invalid repo slug
     expect(mockExecGHAsync).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+});
+
+// =============================================================================
+// Surgical cache update on PR merge (Issue #646)
+// =============================================================================
+
+describe('Surgical cache update on PR merge', () => {
+  it('calls markIssueClosed when issue is confirmed closed after merge', async () => {
+    const project = makeProject();
+    const team = makeTeam({ prNumber: 42, status: 'running', projectId: 1, issueNumber: 10 });
+    mockDb.getProjects.mockReturnValue([project]);
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getPullRequest.mockReturnValue({
+      prNumber: 42,
+      state: 'open',
+      ciStatus: 'passing',
+      mergeStatus: 'clean',
+      autoMerge: false,
+      ciFailCount: 0,
+    });
+    mockDb.getTeam.mockReturnValue({ ...team, status: 'running' });
+
+    // First call: pollPR gh pr view -> merged
+    // Second call: issue state check -> closed
+    mockExecGHAsync
+      .mockResolvedValueOnce(
+        makeGHPRViewResult({
+          state: 'CLOSED',
+          mergedAt: '2025-01-01T00:00:00Z',
+        }),
+      )
+      .mockResolvedValueOnce('closed\n');
+
+    await githubPoller.poll();
+
+    expect(mockFetcher.markIssueClosed).toHaveBeenCalledWith(1, 10);
+    expect(mockSseBroker.broadcast).toHaveBeenCalledWith(
+      'project_updated',
+      expect.objectContaining({
+        project_id: 1,
+        reason: 'issue_closed',
+        issue_number: 10,
+      }),
+    );
+  });
+
+  it('does NOT call markIssueClosed when issue is still open after merge', async () => {
+    const project = makeProject();
+    const team = makeTeam({ prNumber: 42, status: 'running', projectId: 1, issueNumber: 10 });
+    mockDb.getProjects.mockReturnValue([project]);
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getPullRequest.mockReturnValue({
+      prNumber: 42,
+      state: 'open',
+      ciStatus: 'passing',
+      mergeStatus: 'clean',
+      autoMerge: false,
+      ciFailCount: 0,
+    });
+    mockDb.getTeam.mockReturnValue({ ...team, status: 'running' });
+
+    // First call: pollPR gh pr view -> merged
+    // Second call: issue state check -> open (not auto-closed)
+    mockExecGHAsync
+      .mockResolvedValueOnce(
+        makeGHPRViewResult({
+          state: 'CLOSED',
+          mergedAt: '2025-01-01T00:00:00Z',
+        }),
+      )
+      .mockResolvedValueOnce('open\n');
+
+    await githubPoller.poll();
+
+    expect(mockFetcher.markIssueClosed).not.toHaveBeenCalled();
+  });
+
+  it('handles issue state check failure gracefully', async () => {
+    const project = makeProject();
+    const team = makeTeam({ prNumber: 42, status: 'running', projectId: 1, issueNumber: 10 });
+    mockDb.getProjects.mockReturnValue([project]);
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getPullRequest.mockReturnValue({
+      prNumber: 42,
+      state: 'open',
+      ciStatus: 'passing',
+      mergeStatus: 'clean',
+      autoMerge: false,
+      ciFailCount: 0,
+    });
+    mockDb.getTeam.mockReturnValue({ ...team, status: 'running' });
+
+    // First call: pollPR gh pr view -> merged
+    // Second call: issue state check -> failure
+    mockExecGHAsync
+      .mockResolvedValueOnce(
+        makeGHPRViewResult({
+          state: 'CLOSED',
+          mergedAt: '2025-01-01T00:00:00Z',
+        }),
+      )
+      .mockRejectedValueOnce(new Error('API rate limit exceeded'));
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Should not throw
+    await githubPoller.poll();
+
+    expect(mockFetcher.markIssueClosed).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
 });

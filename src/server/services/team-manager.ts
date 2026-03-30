@@ -1134,7 +1134,11 @@ export class TeamManager {
       if (unblocked.length >= available) break;
 
       try {
-        const deps = await fetcher.fetchDependenciesForIssue(projectId, team.issueNumber);
+        // Try cache first to avoid unnecessary API calls
+        let deps = fetcher.getDependenciesFromCache(projectId, team.issueNumber);
+        if (deps === null) {
+          deps = await fetcher.fetchDependenciesForIssue(projectId, team.issueNumber);
+        }
 
         // Permissive fallback: if fetch returns null, treat as unblocked
         if (!deps || deps.resolved) {
@@ -1153,7 +1157,11 @@ export class TeamManager {
           // Add the open deps' own dependencies (if we can fetch them)
           for (const dep of openDeps) {
             try {
-              const subDeps = await fetcher.fetchDependenciesForIssue(projectId, dep.number);
+              // Try cache first to avoid unnecessary API calls
+              let subDeps = fetcher.getDependenciesFromCache(projectId, dep.number);
+              if (subDeps === null) {
+                subDeps = await fetcher.fetchDependenciesForIssue(projectId, dep.number);
+              }
               if (subDeps && subDeps.blockedBy.length > 0) {
                 depGraph.set(dep.number, subDeps.blockedBy.filter((d) => d.state === 'open').map((d) => d.number));
               }

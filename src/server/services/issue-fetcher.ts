@@ -893,6 +893,90 @@ export class IssueFetcher {
   }
 
   /**
+   * Surgically mark an issue as closed in the cache without a full refresh.
+   * Also updates any blockedBy references to this issue across the entire tree,
+   * recalculating openCount and resolved status.
+   *
+   * Synchronous — no network calls; operates on cached data in place.
+   * Called after GitHub API confirms the issue is closed (e.g. after PR merge).
+   *
+   * @param projectId - The project owning the issue
+   * @param issueNumber - The issue number to mark as closed
+   */
+  markIssueClosed(projectId: number, issueNumber: number): void {
+    const cache = this.cacheByProject.get(projectId);
+    if (!cache) return;
+
+    // Mark the issue node itself as closed
+    const node = this.findInTree(cache.issues, issueNumber);
+    if (node) {
+      node.state = 'closed';
+    }
+
+    // Walk the entire tree and update any blockedBy references to this issue
+    const allNodes = this.flattenTree(cache.issues);
+    for (const n of allNodes) {
+      if (!n.dependencies || !n.dependencies.blockedBy) continue;
+
+      let updated = false;
+      for (const dep of n.dependencies.blockedBy) {
+        if (dep.number === issueNumber && dep.state === 'open') {
+          // Only update same-repo deps, or deps without owner/repo (body-parsed same-repo)
+          if (!dep.owner || !dep.repo || this.isSameProjectRepo(projectId, dep.owner, dep.repo)) {
+            dep.state = 'closed';
+            updated = true;
+          }
+        }
+      }
+
+      if (updated) {
+        n.dependencies.openCount = n.dependencies.blockedBy.filter((d) => d.state === 'open').length;
+        n.dependencies.resolved = n.dependencies.openCount === 0;
+      }
+    }
+  }
+
+  /**
+   * Look up dependencies for a specific issue from the in-memory cache.
+   * Returns the cached IssueDependencyInfo if the issue is found in the cache,
+   * or null if the cache does not contain this issue (caller should fall back
+   * to a live API call).
+   *
+   * @param projectId - The project to search in
+   * @param issueNumber - The issue number to look up
+   * @returns Cached dependency info, or null if not in cache
+   */
+  getDependenciesFromCache(projectId: number, issueNumber: number): IssueDependencyInfo | null {
+    const cache = this.cacheByProject.get(projectId);
+    if (!cache || !cache.cachedAt) return null;
+
+    const node = this.findInTree(cache.issues, issueNumber);
+    if (!node) return null;
+
+    if (node.dependencies) {
+      return node.dependencies;
+    }
+
+    // Issue exists in cache but has no dependencies — return empty/resolved info
+    return this.buildEmptyDependencyInfo(issueNumber);
+  }
+
+  /**
+   * Check whether an owner/repo pair matches the project's GitHub repo.
+   */
+  private isSameProjectRepo(projectId: number, owner: string, repo: string): boolean {
+    try {
+      const db = getDatabase();
+      const project = db.getProject(projectId);
+      if (!project || !project.githubRepo) return false;
+      const [projOwner, projRepo] = project.githubRepo.split('/');
+      return projOwner === owner && projRepo === repo;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Force a re-fetch from the issue provider for a specific project.
    */
   async refresh(projectId?: number): Promise<IssueNode[]> {
