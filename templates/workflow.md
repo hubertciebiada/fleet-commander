@@ -1,4 +1,4 @@
-<!-- fleet-commander v0.0.13 -->
+<!-- fleet-commander v0.0.14 -->
 <!-- Fleet Commander workflow template. Installed by Fleet Commander into your project. -->
 <!-- Placeholders {{PROJECT_NAME}}, {{project_slug}}, {{BASE_BRANCH}}, {{ISSUE_NUMBER}} are replaced during installation. -->
 
@@ -131,34 +131,31 @@ Note: These phases represent the workflow's internal progression, not FC's team 
 
 1. **TL reads `.fleet-issue-context.md`** from the worktree root (if it exists). This file contains the full issue body, comments, labels, acceptance criteria, and dependencies — pre-fetched by Fleet Commander at launch time.
 2. **TL spawns `fleet-planner`** with the full issue context included in the spawn prompt (see Planner Task Format below). The planner receives everything it needs — it should NOT need to call `gh issue view`. If `.fleet-issue-context.md` did not exist, tell the planner to fetch the issue itself via `gh issue view`.
-3. TL enters the Active Monitoring Loop (see below) while waiting for the plan.
-4. The planner stays alive after writing `plan.md`. Wait for the planner's ping via SendMessage (`"Done. Plan written to plan.md."`), or periodically check if `plan.md` exists (every 30s alongside TaskList). When the ping arrives or the file appears, read it and proceed to Phase 1. Do NOT wait for the planner to exit — it stays alive for p2p questions.
+3. **Wait for the planner's ping.** The planner will send a SendMessage when done: `"Done. Plan written to plan.md."` Do NOT proceed until you receive this ping. Do NOT poll for plan.md. Do NOT assume the planner is done because it went quiet. Just wait — the ping will arrive.
+4. When the ping arrives, read `plan.md` and proceed to Phase 1. Do NOT wait for the planner to exit — it stays alive for p2p questions.
 5. Planner analyzes the issue context (provided in its spawn prompt), explores the codebase, discovers guidebooks, and produces a structured plan.
 6. Planner writes the plan to `plan.md` in the worktree root. Planner stays alive for p2p questions from dev and reviewer.
 
 ---
 
-## Active Monitoring Loop
+## Waiting for Agent Deliverables
 
-After spawning the first agent, the TL enters a continuous monitoring loop that runs throughout the entire workflow. This prevents the TL from going silent between phases.
+**TL waits for pings, not polls.** Each agent sends a SendMessage ping when their deliverable is ready:
+- Planner: `"Done. Plan written to plan.md."`
+- Dev: `"Ready for review. Branch: {branch}. Changes in changes.md."`
+- Reviewer: `"Review complete. Verdict in review.md."`
 
-### Monitoring Rules
+**Do NOT proceed to the next phase until you receive the ping AND the file exists.** If you receive a ping but the file is missing, ask the agent to write it. If the agent exited without pinging, check if the file exists — if not, respawn (within budget).
 
-1. **Run `TaskList` every 30-60 seconds** to check the status of all spawned agents. This is your heartbeat — never go more than 60 seconds without checking.
-2. **If any agent exits unexpectedly** (SubagentStop without sending expected output), **respawn immediately** — do not wait for the stuck detector's 10-minute threshold. However, observe the **respawn budget** (see below).
-3. **Between phases** (e.g., planner done, waiting for dev), actively verify the next agent is alive via `TaskList`. If the agent is gone, respawn it (within the respawn budget).
-4. **After each subagent phase completes, immediately proceed** to the next action:
-   - **Planner done** — validate the plan — spawn dev with the plan context
-   - **Dev done** — read `changes.md` — spawn reviewer with branch context + changes report
-   - **Reviewer done** — immediately proceed to PR creation (rebase, `gh pr create`, auto-merge)
-5. **Never passively wait** — if you have nothing to do, run `TaskList` to confirm all agents are healthy.
+**Do NOT poll with TaskList in a loop.** Polling wastes tool calls and makes you impatient. The pings will arrive. Being idle while waiting is normal — FC knows you are waiting and will not penalize you.
 
-### What To Do When An Agent Is Missing
+### When An Agent Exits Without Delivering
 
-If `TaskList` shows an agent is no longer running:
-1. Check the last output/events from that agent
-2. If the agent completed its work (sent its deliverable), proceed to the next phase
-3. If the agent exited without delivering, respawn it with the same task plus any additional context from the failed attempt
+If an agent exits (SubagentStop) before sending its ping:
+1. Check if the deliverable file exists anyway (Read tool)
+2. If the file exists → proceed to next phase
+3. If the file does NOT exist → respawn the agent (within respawn budget)
+4. Do NOT skip the deliverable — every phase REQUIRES its file
 
 ### Respawn Budget
 
@@ -339,14 +336,15 @@ INSTRUCTIONS:
 2. **TL spawns `fleet-reviewer`** with the branch name, issue context, guidebook paths, and the dev's changes report (see Reviewer Task Format below)
 3. Reviewer starts reviewing immediately — it has all the context it needs, including the dev's own account of what changed and why
 4. **Dev and reviewer already know each other's names** (set at spawn time). No TL introduction needed.
-5. **TL steps back.** The dev-reviewer loop runs peer-to-peer:
+5. **TL steps back and WAITS for the reviewer's ping.** The dev-reviewer loop runs peer-to-peer:
    - Reviewer performs two-pass review (code quality + acceptance)
    - **REJECT** → reviewer sends actionable feedback directly to dev → dev fixes and re-requests review from reviewer directly
-   - **APPROVE** → reviewer writes `review.md` using Write tool, pings TL, and waits for shutdown_request
-6. TL monitors but does NOT intervene unless:
+   - **APPROVE** → reviewer writes `review.md` using Write tool, pings TL: `"Review complete. Verdict in review.md."`
+6. **TL does NOT proceed to PR creation until it receives the reviewer's ping AND `review.md` exists.** This is a hard requirement — no exceptions. Do NOT assume the review is done because the reviewer went quiet or exited.
+7. TL does NOT intervene unless:
    - **3 review rounds exhausted** → TL arbitrates (see Error Handling)
-   - **Agent stuck** (10min idle) → TL sends a nudge
    - **Escalation request** from either agent → TL steps in
+   - **FC sends a nudge** → TL checks on the reviewer (see FC Messages below)
 
 ### Reviewer Task Format (sent via TaskCreate at spawn)
 
@@ -387,7 +385,11 @@ After 3rd round, write review.md with CHANGES_NEEDED and wait for shutdown_reque
 
 ### TL Reads review.md
 
-After the reviewer writes `review.md` and pings TL, the TL reads it from the worktree root. Do NOT delete it — it stays in `.gitignore`. The reviewer stays alive briefly for shutdown_request. If `review.md` does not exist after the reviewer's ping (or after 60 seconds), treat this as a reviewer failure and restart the reviewer (counts toward 5-spawn budget).
+After receiving the reviewer's ping (`"Review complete. Verdict in review.md."`), the TL reads `review.md` from the worktree root. Do NOT delete it. The reviewer stays alive briefly for shutdown_request.
+
+If the ping arrived but `review.md` does not exist, ask the reviewer via SendMessage to write it. If the reviewer has exited without writing it, respawn (within budget).
+
+**NEVER proceed to PR creation without reading review.md.** No review.md = no PR.
 
 1. **Read** `review.md` using the Read tool (do NOT delete it)
 2. **Act on the verdict**:
@@ -488,9 +490,9 @@ Fleet Commander sends these messages directly to the TL via stdin. They arrive a
 
 **On `pr_merged`**: Close the issue, shut down agents (`shutdown_request` to all), finish.
 
-**On `nudge_idle`**: Run `TaskList` to verify all subagents are alive. If any agent is missing or crashed, respawn it. Report current status to FC.
+**On `nudge_idle`**: You are being nudged because FC detected no activity for 5 minutes. This is often normal — you may be waiting for an agent's ping. **Your first action MUST be to check on the active agent via SendMessage** (e.g., ask the reviewer: "How is the review going? Do you need help?"). Do NOT skip waiting for a deliverable just because you were nudged. Do NOT "proceed to the next step" without the required file (plan.md / changes.md / review.md). Only respawn if the agent has exited without delivering.
 
-**On `nudge_stuck`**: Check which agent is stuck. Send a targeted nudge. If no progress after nudge, escalate to FC by reporting status.
+**On `nudge_stuck`**: Same as nudge_idle but more urgent. **First action: SendMessage to the active agent** asking for status. If the agent responds — wait for it to finish. If no response after 2 minutes — check if it exited (TaskList). If exited without deliverable — respawn (within budget). Do NOT skip phases.
 
 **On `issue_comment_new`**: Review the new comment for any instructions or questions from the issue reporter. If the comment contains new requirements or clarifications, forward relevant details to the dev agent. If it's just acknowledgment, no action needed.
 
@@ -595,7 +597,7 @@ Atomic commits — each commit should be a logical unit.
 | Wrong | Right |
 |-------|-------|
 | TL relays messages between dev and reviewer | Dev and reviewer talk directly (p2p) |
-| TL asks "how's it going?" every minute | Wait for report or 10min stuck threshold |
+| TL asks "how's it going?" every minute | Wait for agent's ping — idle is normal |
 | TL implements code while dev is active | Let dev do the implementation |
 | TL overrides reviewer without reading feedback | Read feedback, arbitrate only after 3 rounds |
 | Dev pushes without local tests | Build + tests locally BEFORE reporting ready |
@@ -608,13 +610,15 @@ Atomic commits — each commit should be a logical unit.
 | Ignoring FC messages | Always respond to ci_green, ci_red, pr_merged, nudges |
 | Respawning agent after 2 min idle | Idle is normal — only act at 10min stuck threshold |
 | TL monitors CI manually | FC handles CI monitoring and sends updates via stdin |
-| TL goes idle after spawning agents without monitoring | TL runs active monitoring loop between phases |
+| TL polls TaskList in a loop while waiting | Wait for agent ping — polling wastes tool calls and makes TL impatient |
+| TL proceeds to PR without review.md | NEVER — no review.md = no PR, hard requirement |
+| TL skips waiting after FC nudge | On nudge: first ask the agent how it's going via SendMessage, then wait |
 | Planner puts plan content in SendMessage | Planner writes plan.md, pings TL: "Done. Plan in plan.md." — TL reads file directly |
 | Dev puts changes report in SendMessage | Dev writes changes.md, pings TL: "Ready. Changes in changes.md." — TL reads file directly |
 | Reviewer puts verdict in SendMessage | Reviewer writes review.md, pings TL: "Review complete. Verdict in review.md." — TL reads file directly |
 | Dev skips writing changes.md | Dev writes changes.md before pinging TL — TL passes content to reviewer |
 | TL deletes handoff files (plan.md, changes.md, review.md) | Leave them — they're in .gitignore and cleaned up with the worktree |
-| Subagents read each other's handoff files | TL is the relay — reads each file, deletes it, pastes content into next spawn prompt |
+| Subagents read each other's handoff files | TL is the relay — reads each file and pastes content into next spawn prompt |
 
 ## Decision Summary
 
