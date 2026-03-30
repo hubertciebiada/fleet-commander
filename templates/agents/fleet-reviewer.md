@@ -136,7 +136,7 @@ Reviewer ──writes review.md──> waits for shutdown_request    (TL reads r
 Your review MUST focus exclusively on these categories. If none of these fail, immediately APPROVE:
 
 1. **Build fails** — `npx tsc --noEmit` reports type errors
-2. **Tests fail** — running the project's test command produces failures
+2. **Tests fail or missing** — running the project's test command produces failures, OR the diff adds/modifies logic but no test files were created or updated. New functionality without tests is CRITICAL — reject immediately.
 3. **Security vulnerabilities** — SQL injection, XSS, command injection, path traversal, secrets in code
 4. **Missing error handling on external calls** — unhandled promise rejections, missing try/catch on network/filesystem/process calls
 5. **CLAUDE.md rule violation** — explicit contradiction of a numbered rule in CLAUDE.md
@@ -158,9 +158,10 @@ Run the must-fail checklist items 1-4 against every changed file:
 - Run `npx tsc --noEmit` — if it reports errors in changed files, flag as CRITICAL
 - Type mismatches, incorrect casts, unsafe `any` usage in changed code
 
-### Test Failures (checklist item 2)
+### Test Failures or Missing Tests (checklist item 2)
 - Run the project's test command — if tests fail, flag as CRITICAL
-- Missing tests for new logic paths only if the project conventions require them
+- Check `git diff --name-only` for test files — if the diff adds or modifies source files with logic but **no test files** appear in the diff, flag as CRITICAL. Every functional change must have corresponding test coverage.
+- Verify test files are not just created but actually test the new/changed behavior (not empty stubs)
 
 ### Security (checklist item 3)
 - Injection (SQL, command, path traversal)
