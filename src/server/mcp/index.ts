@@ -12,12 +12,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { getDatabase, closeDatabase } from '../db.js';
-import { sseBroker } from '../services/sse-broker.js';
-import { getIssueFetcher } from '../services/issue-fetcher.js';
-import { stuckDetector } from '../services/stuck-detector.js';
-import { githubPoller } from '../services/github-poller.js';
-import { usagePoller } from '../services/usage-tracker.js';
-import { recoverOnStartup } from '../services/startup-recovery.js';
 import { DEFAULT_MESSAGE_TEMPLATES } from '../../shared/message-templates.js';
 import config from '../config.js';
 import { getPackageVersion } from '../utils/version.js';
@@ -88,25 +82,14 @@ export async function startMcpServer(): Promise<void> {
   registerAddChildTool(mcpServer);
   registerRemoveChildTool(mcpServer);
 
-  // Initialize database
+  // Initialize database (read-only mode — no background services)
+  // The MCP server is a lightweight client that reads from the DB.
+  // Background services (poller, stuck detector, etc.) run in the HTTP server.
   const db = getDatabase(config.dbPath);
   db.initDefaultTemplates(
     DEFAULT_MESSAGE_TEMPLATES.map((t) => ({ id: t.id, template: t.template })),
   );
-  log('Database initialized');
-
-  // Recover state from before restart
-  await recoverOnStartup();
-  log('Startup recovery complete');
-
-  // Start background services
-  sseBroker.start(config.sseHeartbeatMs);
-  const issueFetcher = getIssueFetcher();
-  issueFetcher.start();
-  stuckDetector.start();
-  githubPoller.start();
-  usagePoller.start();
-  log('All services started');
+  log('Database initialized (lightweight mode — no background services)');
 
   // Connect to stdio transport
   const transport = new StdioServerTransport();
@@ -116,14 +99,9 @@ export async function startMcpServer(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     log(`Received ${signal}, shutting down...`);
-    usagePoller.stop();
-    githubPoller.stop();
-    stuckDetector.stop();
-    issueFetcher.stop();
-    sseBroker.stop();
     await mcpServer.close();
     closeDatabase();
-    log('All services stopped, database closed');
+    log('Database closed');
     process.exit(0);
   };
 
