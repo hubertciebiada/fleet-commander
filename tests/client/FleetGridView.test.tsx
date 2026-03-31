@@ -15,9 +15,14 @@ let mockSelectedTeamId: number | null = null;
 const mockSetSelectedTeamId = vi.fn();
 const mockSetProject = vi.fn();
 const mockSetStatuses = vi.fn();
+const mockSetPage = vi.fn();
+const mockSetPageSize = vi.fn();
+const mockResetPage = vi.fn();
 
 let mockSelectedProject: string | null = null;
 let mockSelectedStatuses = new Set<string>();
+let mockPage = 1;
+let mockPageSize = 25;
 
 vi.mock('../../src/client/context/FleetContext', () => ({
   useTeams: () => ({
@@ -45,6 +50,25 @@ vi.mock('../../src/client/hooks/useGridFilters', () => ({
       return true;
     });
   },
+}));
+
+// Mock the pagination hook
+vi.mock('../../src/client/hooks/usePagination', () => ({
+  usePagination: () => ({
+    page: mockPage,
+    pageSize: mockPageSize,
+    setPage: mockSetPage,
+    setPageSize: mockSetPageSize,
+    resetPage: mockResetPage,
+  }),
+  paginateItems: (items: unknown[], page: number, pageSize: number) => {
+    const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+    const clampedPage = Math.max(1, Math.min(page, totalPages));
+    const start = (clampedPage - 1) * pageSize;
+    const end = start + pageSize;
+    return { pageItems: items.slice(start, end), totalPages };
+  },
+  PAGE_SIZE_OPTIONS: [25, 50, 100] as const,
 }));
 
 // Mock child components to keep rendering lightweight
@@ -79,6 +103,22 @@ vi.mock('../../src/client/components/GridFilterBar', () => ({
   ),
 }));
 
+vi.mock('../../src/client/components/PaginationBar', () => ({
+  PaginationBar: (props: {
+    page: number;
+    totalPages: number;
+    pageSize: number;
+    onPageChange: (page: number) => void;
+    onPageSizeChange: (size: number) => void;
+  }) => (
+    <div data-testid="pagination-bar">
+      PaginationBar (page {props.page} of {props.totalPages}, size {props.pageSize})
+      <button data-testid="page-next" onClick={() => props.onPageChange(props.page + 1)}>Next</button>
+      <button data-testid="page-size-50" onClick={() => props.onPageSizeChange(50)}>Size 50</button>
+    </div>
+  ),
+}));
+
 // Import after mocks
 import { FleetGridView } from '../../src/client/views/FleetGridView';
 
@@ -107,9 +147,14 @@ describe('FleetGridView', () => {
     mockSelectedTeamId = null;
     mockSelectedProject = null;
     mockSelectedStatuses = new Set();
+    mockPage = 1;
+    mockPageSize = 25;
     mockSetSelectedTeamId.mockReset();
     mockSetProject.mockReset();
     mockSetStatuses.mockReset();
+    mockSetPage.mockReset();
+    mockSetPageSize.mockReset();
+    mockResetPage.mockReset();
   });
 
   afterEach(() => {
@@ -247,5 +292,74 @@ describe('FleetGridView', () => {
     render(<FleetGridView />);
     // GridFilterBar mock renders project names joined
     expect(screen.getByText('GridFilterBar (projects: alpha,beta)')).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Pagination integration tests
+  // -------------------------------------------------------------------------
+
+  it('renders PaginationBar in grid view when teams exist', () => {
+    mockTeams = [makeTeam()];
+    render(<FleetGridView />);
+    expect(screen.getByTestId('pagination-bar')).toBeInTheDocument();
+  });
+
+  it('does not render PaginationBar in timeline view', () => {
+    mockTeams = [makeTeam()];
+    render(<FleetGridView />);
+    fireEvent.click(screen.getByText('Timeline'));
+    expect(screen.queryByTestId('pagination-bar')).not.toBeInTheDocument();
+  });
+
+  it('does not render PaginationBar in empty state', () => {
+    mockTeams = [];
+    render(<FleetGridView />);
+    expect(screen.queryByTestId('pagination-bar')).not.toBeInTheDocument();
+  });
+
+  it('passes paginated teams to FleetGrid', () => {
+    // Create 30 teams, with page size 25 only 25 should be passed
+    mockTeams = Array.from({ length: 30 }, (_, i) =>
+      makeTeam({ id: i + 1, issueNumber: 100 + i }),
+    );
+    mockPageSize = 25;
+    mockPage = 1;
+    render(<FleetGridView />);
+    expect(screen.getByText('FleetGrid (25 teams)')).toBeInTheDocument();
+  });
+
+  it('passes all filtered teams to TeamTimeline (not paginated)', () => {
+    mockTeams = Array.from({ length: 30 }, (_, i) =>
+      makeTeam({ id: i + 1, issueNumber: 100 + i }),
+    );
+    mockPageSize = 25;
+    mockPage = 1;
+    render(<FleetGridView />);
+    fireEvent.click(screen.getByText('Timeline'));
+    expect(screen.getByText('TeamTimeline (30 teams)')).toBeInTheDocument();
+  });
+
+  it('forwards onPageChange to setPage', () => {
+    mockTeams = [makeTeam()];
+    render(<FleetGridView />);
+    fireEvent.click(screen.getByTestId('page-next'));
+    expect(mockSetPage).toHaveBeenCalledWith(2);
+  });
+
+  it('forwards onPageSizeChange to setPageSize', () => {
+    mockTeams = [makeTeam()];
+    render(<FleetGridView />);
+    fireEvent.click(screen.getByTestId('page-size-50'));
+    expect(mockSetPageSize).toHaveBeenCalledWith(50);
+  });
+
+  it('shows PaginationBar with page and totalPages info', () => {
+    mockTeams = Array.from({ length: 60 }, (_, i) =>
+      makeTeam({ id: i + 1, issueNumber: 100 + i }),
+    );
+    mockPage = 2;
+    mockPageSize = 25;
+    render(<FleetGridView />);
+    expect(screen.getByText('PaginationBar (page 2 of 3, size 25)')).toBeInTheDocument();
   });
 });
