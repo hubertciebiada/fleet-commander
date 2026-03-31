@@ -70,7 +70,7 @@ export function PRBadge({ prNumber, ciStatus, teamId, prState, githubRepo }: PRB
         }`}
         title={canExpand ? 'Click to view PR details' : undefined}
       >
-        <span className="text-sm text-dark-accent">#{prNumber}</span>
+        <span className="text-sm" style={{ color: stateColor }}>#{prNumber}</span>
         <span className="text-sm font-bold" style={{ color: ci.color }}>
           {ci.icon}
         </span>
