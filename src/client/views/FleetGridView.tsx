@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTeams, useSelection } from '../context/FleetContext';
 import { FleetGrid } from '../components/FleetGrid';
 import { TeamTimeline } from '../components/TeamTimeline';
 import { GridFilterBar } from '../components/GridFilterBar';
+import { PaginationBar } from '../components/PaginationBar';
 import { useGridFilters, applyGridFilters } from '../hooks/useGridFilters';
+import { usePagination, paginateItems } from '../hooks/usePagination';
 import type { TeamDashboardRow, TeamStatus } from '../../shared/types';
 
 type ViewMode = 'grid' | 'timeline';
@@ -41,6 +43,12 @@ export function FleetGridView() {
   const { selectedTeamId, setSelectedTeamId } = useSelection();
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const { selectedProject, selectedStatuses, setProject, setStatuses } = useGridFilters();
+  const { page, pageSize, setPage, setPageSize, resetPage } = usePagination();
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    resetPage();
+  }, [selectedProject, selectedStatuses, resetPage]);
 
   // Unique project names sorted alphabetically (derived from unfiltered teams)
   const projectNames = useMemo(() => {
@@ -55,6 +63,12 @@ export function FleetGridView() {
   const filteredTeams = useMemo(
     () => sortTeams(applyGridFilters(teams, selectedProject, selectedStatuses)),
     [teams, selectedProject, selectedStatuses],
+  );
+
+  // Paginate filtered teams (grid view only)
+  const { pageItems: paginatedTeams, totalPages } = useMemo(
+    () => paginateItems(filteredTeams, page, pageSize),
+    [filteredTeams, page, pageSize],
   );
 
   const hasActiveFilters = selectedProject !== null || selectedStatuses.size > 0;
@@ -116,11 +130,22 @@ export function FleetGridView() {
 
       {/* View content */}
       {viewMode === 'grid' ? (
-        <FleetGrid
-          teams={filteredTeams}
-          selectedTeamId={selectedTeamId}
-          onSelectTeam={setSelectedTeamId}
-        />
+        <>
+          <FleetGrid
+            teams={paginatedTeams}
+            selectedTeamId={selectedTeamId}
+            onSelectTeam={setSelectedTeamId}
+          />
+          {filteredTeams.length > 0 && (
+            <PaginationBar
+              page={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          )}
+        </>
       ) : (
         <TeamTimeline teams={filteredTeams} />
       )}
