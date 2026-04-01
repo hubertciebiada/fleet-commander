@@ -1008,6 +1008,26 @@ export class TeamService {
 
     return db.getTeamTasks(teamId);
   }
+
+  /**
+   * Get all captured handoff files for a team.
+   *
+   * @throws ServiceError with code VALIDATION if teamId is invalid
+   * @throws ServiceError with code NOT_FOUND if team doesn't exist
+   */
+  getHandoffFiles(teamId: number): unknown[] {
+    if (isNaN(teamId) || teamId < 1) {
+      throw validationError('Invalid team ID');
+    }
+
+    const db = getDatabase();
+    const team = db.getTeam(teamId);
+    if (!team) {
+      throw notFoundError(`Team ${teamId} not found`);
+    }
+
+    return db.getHandoffFiles(teamId);
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -8,9 +8,10 @@ import { CIChecks } from './CIChecks';
 import { UnifiedTimeline } from './UnifiedTimeline';
 import { CommandInput } from './CommandInput';
 import { CommGraph } from './CommGraph';
+import { HandoffFileCard } from './HandoffFileCard';
 import { STATUS_COLORS } from '../utils/constants';
 import { formatIssueKey } from '../../shared/issue-provider';
-import type { TeamTask } from '../../shared/types';
+import type { TeamTask, HandoffFile } from '../../shared/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -43,9 +44,11 @@ export function TeamDetail() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
   const [quickActionSent, setQuickActionSent] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'session-log' | 'tasks' | 'team'>('session-log');
+  const [activeTab, setActiveTab] = useState<'session-log' | 'tasks' | 'files' | 'team'>('session-log');
   const [tasks, setTasks] = useState<TeamTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
+  const [handoffFiles, setHandoffFiles] = useState<HandoffFile[]>([]);
+  const [handoffFilesLoading, setHandoffFilesLoading] = useState(false);
   const [metadataCollapsed, setMetadataCollapsed] = useState(false);
   const [agentFilters, setAgentFilters] = useState<Set<string>>(new Set());
   const templateCacheRef = useRef<{ data: Array<{ id: string; template: string; enabled: boolean }>; fetchedAt: number } | null>(null);
@@ -110,6 +113,37 @@ export function TeamDetail() {
   }, [api]);
 
   useFleetSSE('task_updated', handleTaskUpdated);
+
+  // Fetch handoff files when the Files tab is selected
+  useEffect(() => {
+    if (activeTab !== 'files' || !selectedTeamId) return;
+    let cancelled = false;
+    setHandoffFilesLoading(true);
+    api.get<HandoffFile[]>(`teams/${selectedTeamId}/handoff-files`)
+      .then((data) => {
+        if (!cancelled) setHandoffFiles(data);
+      })
+      .catch(() => {
+        if (!cancelled) setHandoffFiles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHandoffFilesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedTeamId, api]);
+
+  // Refresh handoff files on SSE team_handoff_file events
+  const handleHandoffFile = useCallback((_type: string, data: unknown) => {
+    const payload = data as { team_id: number };
+    const teamId = selectedTeamIdRef.current;
+    if (activeTabRef.current !== 'files' || !teamId) return;
+    if (payload.team_id !== teamId) return;
+    api.get<HandoffFile[]>(`teams/${teamId}/handoff-files`)
+      .then((files) => setHandoffFiles(files))
+      .catch(() => { /* SSE refresh is best-effort */ });
+  }, [api]);
+
+  useFleetSSE('team_handoff_file', handleHandoffFile);
 
   // Close panel handler
   const handleClose = useCallback(() => {
@@ -522,6 +556,21 @@ export function TeamDetail() {
                     )}
                   </button>
                   <button
+                    onClick={() => setActiveTab('files')}
+                    className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === 'files'
+                        ? 'border-dark-accent text-dark-text'
+                        : 'border-transparent text-dark-muted hover:text-dark-text'
+                    }`}
+                  >
+                    Files
+                    {handoffFiles.length > 0 && (
+                      <span className="ml-1.5 text-xs text-dark-muted">
+                        ({handoffFiles.length})
+                      </span>
+                    )}
+                  </button>
+                  <button
                     onClick={() => setActiveTab('team')}
                     className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
                       activeTab === 'team'
@@ -617,6 +666,38 @@ export function TeamDetail() {
                               {task.owner}
                             </span>
                           </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'files' && (
+                  <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 py-3">
+                    {handoffFilesLoading && handoffFiles.length === 0 && (
+                      <div className="flex items-center justify-center py-8">
+                        <span className="text-dark-muted">Loading files...</span>
+                      </div>
+                    )}
+
+                    {!handoffFilesLoading && handoffFiles.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-12 text-center">
+                        <svg className="w-10 h-10 text-dark-muted/40 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <p className="text-sm text-dark-muted">No handoff files yet.</p>
+                        <p className="text-xs text-dark-muted/60 mt-1">Files appear when agents write plan.md, changes.md, or review.md.</p>
+                      </div>
+                    )}
+
+                    {handoffFiles.length > 0 && (
+                      <div className="space-y-2">
+                        {handoffFiles.map((file) => (
+                          <HandoffFileCard
+                            key={file.id}
+                            file={file}
+                            defaultExpanded={handoffFiles.length <= 3}
+                          />
                         ))}
                       </div>
                     )}

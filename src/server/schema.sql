@@ -341,6 +341,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_team_tasks_team_task ON team_tasks(team_id
 CREATE INDEX IF NOT EXISTS idx_team_tasks_team ON team_tasks(team_id);
 
 -- ---------------------------------------------------------------------------
+-- HANDOFF FILES — captured plan.md, changes.md, review.md from agent worktrees
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS handoff_files (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id         INTEGER NOT NULL REFERENCES teams(id),
+  file_type       TEXT NOT NULL,
+  content         TEXT NOT NULL,
+  agent_name      TEXT,
+  captured_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_handoff_files_team ON handoff_files(team_id);
+
+-- ---------------------------------------------------------------------------
 -- PROVIDER STATE — key-value persistence for issue provider runtime state
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS provider_state (
