@@ -442,6 +442,19 @@ export interface TeamTask {
   updatedAt: string;
 }
 
+/** Valid handoff file types captured from agent Write/Edit operations */
+export type HandoffFileType = 'plan.md' | 'changes.md' | 'review.md';
+
+/** A captured handoff file from an agent's worktree */
+export interface HandoffFile {
+  id: number;
+  teamId: number;
+  fileType: HandoffFileType;
+  content: string;
+  agentName: string | null;
+  capturedAt: string;
+}
+
 /** Aggregated edge for the communication graph (sender -> recipient) */
 export interface MessageEdge {
   sender: string;

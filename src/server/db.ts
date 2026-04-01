@@ -29,6 +29,8 @@ import type {
   AgentMessage,
   MessageEdge,
   TeamTask,
+  HandoffFile,
+  HandoffFileType,
 } from '../shared/types.js';
 import { encrypt, decrypt, isEncrypted, decryptWithKey } from './utils/crypto.js';
 import config from './config.js';
@@ -405,6 +407,9 @@ export class FleetDatabase {
 
     // Add pending_children_json column to teams if missing (v15 migration — parent waits for children)
     this.addPendingChildrenJsonColumn();
+
+    // Add handoff_files table if missing (v16 migration — captured plan/changes/review files)
+    this.addHandoffFilesTable();
 
     // Migrate any 'paused' projects to 'active' (paused status removed in #228)
     this.migratePausedProjects();
@@ -1078,6 +1083,29 @@ export class FleetDatabase {
       console.log('[DB] Migrated to v15: added pending_children_json column to teams');
     } catch {
       // Table may not exist yet (fresh database) — schema.sql will create it
+    }
+  }
+
+  /**
+   * Add handoff_files table if it doesn't exist.
+   * v16 migration — stores captured plan.md, changes.md, review.md files.
+   */
+  private addHandoffFilesTable(): void {
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS handoff_files (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          team_id         INTEGER NOT NULL REFERENCES teams(id),
+          file_type       TEXT NOT NULL,
+          content         TEXT NOT NULL,
+          agent_name      TEXT,
+          captured_at     TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_handoff_files_team ON handoff_files(team_id);
+      `);
+      this.db.exec('INSERT OR IGNORE INTO schema_version (version) VALUES (16)');
+    } catch {
+      // Table may already exist — safe to ignore
     }
   }
 
@@ -3024,6 +3052,62 @@ export class FleetDatabase {
       owner: row.owner as string,
       createdAt: utcify(row.created_at as string),
       updatedAt: utcify(row.updated_at as string),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Handoff Files
+  // -------------------------------------------------------------------------
+
+  /**
+   * Insert a captured handoff file. Content is capped at 50KB server-side.
+   * Each call creates a new row (multiple versions are tracked).
+   */
+  insertHandoffFile(data: {
+    teamId: number;
+    fileType: HandoffFileType;
+    content: string;
+    agentName?: string | null;
+  }): HandoffFile {
+    const cappedContent = data.content.slice(0, 51200); // 50KB cap
+    const stmt = this.stmt(`
+      INSERT INTO handoff_files (team_id, file_type, content, agent_name)
+      VALUES (@teamId, @fileType, @content, @agentName)
+    `);
+
+    const result = stmt.run({
+      teamId: data.teamId,
+      fileType: data.fileType,
+      content: cappedContent,
+      agentName: data.agentName ?? null,
+    });
+
+    const row = this.stmt(
+      'SELECT * FROM handoff_files WHERE id = ?'
+    ).get(result.lastInsertRowid) as Record<string, unknown>;
+
+    return this.mapHandoffFileRow(row);
+  }
+
+  /**
+   * Get all handoff files for a team, ordered by id ascending (oldest first).
+   */
+  getHandoffFiles(teamId: number): HandoffFile[] {
+    const rows = this.stmt(
+      'SELECT * FROM handoff_files WHERE team_id = ? ORDER BY id ASC'
+    ).all(teamId) as Record<string, unknown>[];
+
+    return rows.map((r) => this.mapHandoffFileRow(r));
+  }
+
+  private mapHandoffFileRow(row: Record<string, unknown>): HandoffFile {
+    return {
+      id: row.id as number,
+      teamId: row.team_id as number,
+      fileType: row.file_type as HandoffFileType,
+      content: row.content as string,
+      agentName: (row.agent_name as string | null) ?? null,
+      capturedAt: utcify(row.captured_at as string),
     };
   }
 

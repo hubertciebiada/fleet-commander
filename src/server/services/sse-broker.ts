@@ -36,7 +36,8 @@ export type SSEEventType =
   | 'team_thinking_start'
   | 'team_thinking_stop'
   | 'task_updated'
-  | 'relations_updated';
+  | 'relations_updated'
+  | 'team_handoff_file';
 
 /** Payload shapes for each event type */
 export interface SSEEventPayloads {
@@ -58,6 +59,7 @@ export interface SSEEventPayloads {
   team_thinking_stop: { team_id: number; duration_ms: number };
   task_updated: { team_id: number; task_id: string; subject: string; status: string; owner: string };
   relations_updated: { project_id: number; issue_key: string; relations: IssueRelations };
+  team_handoff_file: { team_id: number; file_type: string; agent_name: string | null; captured_at: string };
 }
 
 // ---------------------------------------------------------------------------

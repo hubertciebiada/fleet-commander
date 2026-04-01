@@ -773,6 +773,34 @@ const teamsRoutes: FastifyPluginCallback = (
   );
 
   // -------------------------------------------------------------------------
+  // GET /api/teams/:id/handoff-files — captured handoff files for this team
+  // -------------------------------------------------------------------------
+  fastify.get(
+    '/api/teams/:id/handoff-files',
+    async (
+      request: FastifyRequest<{ Params: TeamIdParams }>,
+      reply: FastifyReply,
+    ) => {
+      try {
+        const teamId = parseIdParam(request.params.id, 'id');
+
+        const service = getTeamService();
+        const files = service.getHandoffFiles(teamId);
+        return reply.code(200).send(files);
+      } catch (err: unknown) {
+        if (err instanceof ServiceError) {
+          return reply.code(err.statusCode).send({ error: err.code, message: err.message });
+        }
+        request.log.error(err, 'Failed to get team handoff files');
+        return reply.code(500).send({
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // GET /api/teams/:id/messages — agent messages for this team
   // -------------------------------------------------------------------------
   fastify.get(
