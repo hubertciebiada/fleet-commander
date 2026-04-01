@@ -120,15 +120,22 @@ ENCODED_FILE_TYPE=$(printf '%s' "$FILE_TYPE" | json_encode_string)
 ENCODED_TEAM=$(printf '%s' "$TEAM_NAME" | json_encode_string)
 ENCODED_TIMESTAMP=$(printf '%s' "$TIMESTAMP" | json_encode_string)
 
-# Build inner cc_stdin object with file_type and content
+# Build inner cc_stdin as a JSON string (single-encoded, not double).
+# The server does JSON.parse(payload.cc_stdin) so cc_stdin must be a JSON string
+# that, when parsed, yields {file_type, content}.
 CC_STDIN_OBJ="{\"file_type\":${ENCODED_FILE_TYPE},\"content\":${ENCODED_CONTENT}}"
+# cc_stdin is sent as a string value — json_encode_string adds the outer quotes
 ENCODED_CC_STDIN=$(printf '%s' "$CC_STDIN_OBJ" | json_encode_string)
 
 PAYLOAD="{\"event\":\"handoff_file\",\"team\":${ENCODED_TEAM},\"timestamp\":${ENCODED_TIMESTAMP},\"cc_stdin\":${ENCODED_CC_STDIN}}"
 
+PAYLOAD_LEN=${#PAYLOAD}
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | HOOK  | handoff_file | ${FLEET_TEAM_ID:-$TEAM_NAME} | payload=${PAYLOAD_LEN}b to=$FLEET_URL" >> "$_LOG" 2>/dev/null || true
+
 # ── Fire and forget ───────────────────────────────────────────────
 if command -v curl >/dev/null 2>&1; then
-    curl -s -S --max-time 2 --connect-timeout 1 \
+    # Increase timeout for large payloads (plan.md can be 20KB+)
+    curl -s -S --max-time 10 --connect-timeout 2 \
         -X POST \
         -H "Content-Type: application/json" \
         -d "$PAYLOAD" \
