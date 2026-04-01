@@ -3064,7 +3064,7 @@ export class FleetDatabase {
    * content was inserted within this window (prevents duplicate captures from
    * PostToolUse and SubagentStop firing within ~1 second of each other).
    */
-  private static readonly HANDOFF_DEDUP_WINDOW_SEC = 5;
+  private static readonly HANDOFF_DEDUP_WINDOW_SEC = 60;
 
   /**
    * Insert a captured handoff file. Content is capped at 50KB server-side.
