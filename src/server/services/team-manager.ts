@@ -1285,7 +1285,7 @@ export class TeamManager {
     console.log(`[TeamManager] Worktree created for dequeued team: ${team.worktreeName}`);
 
     // Clear blocker metadata now that the team is being launched
-    db.updateTeamSilent(team.id, { status: 'launching', blockedByJson: null });
+    db.updateTeamSilent(team.id, { status: 'launching', blockedByJson: null, pendingChildrenJson: null });
     this.broadcastSnapshot();
 
     // ── Step 2: Copy hooks and settings ──
