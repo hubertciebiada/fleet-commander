@@ -108,21 +108,35 @@ function mapGraphQLNodeToIssueNode(node: GraphQLIssueNode): IssueNode {
   // Map inline blockedBy nodes to DependencyRef[] and populate dependencies.
   // Skip nodes where repository is null/undefined (can happen with cross-repo deps).
   const blockedByNodes = (node.blockedBy?.nodes ?? []).filter((dep) => dep.repository);
-  if (blockedByNodes.length > 0) {
-    const blockedBy: DependencyRef[] = blockedByNodes.map((dep) => ({
-      number: dep.number,
-      owner: dep.repository.owner.login,
-      repo: dep.repository.name,
-      state: dep.state.toLowerCase() === 'open' ? 'open' : 'closed',
-      title: dep.title,
-    }));
-    const openCount = blockedBy.filter((d) => d.state === 'open').length;
+  const blockedBy: DependencyRef[] = blockedByNodes.map((dep) => ({
+    number: dep.number,
+    owner: dep.repository.owner.login,
+    repo: dep.repository.name,
+    state: dep.state.toLowerCase() === 'open' ? 'open' : 'closed',
+    title: dep.title,
+  }));
+  const openCount = blockedBy.filter((d) => d.state === 'open').length;
 
+  // Check for pending children (parent with open sub-issues).
+  // Note: pendingChildren.numbers populated later in enrichWithPendingChildren()
+  // after the tree hierarchy is built, since the batch query only has subIssuesSummary
+  // (totals) but not the individual child node numbers.
+  let pendingChildren: IssueDependencyInfo['pendingChildren'];
+  if (node.subIssuesSummary && node.subIssuesSummary.total > 0 && node.subIssuesSummary.completed < node.subIssuesSummary.total) {
+    pendingChildren = {
+      numbers: [],  // filled by enrichWithPendingChildren after tree build
+      total: node.subIssuesSummary.total,
+      completed: node.subIssuesSummary.completed,
+    };
+  }
+
+  if (blockedBy.length > 0 || pendingChildren) {
     issueNode.dependencies = {
       issueNumber: node.number,
       blockedBy,
-      resolved: openCount === 0,
+      resolved: openCount === 0 && !pendingChildren,
       openCount,
+      pendingChildren,
     };
   }
 
@@ -389,6 +403,20 @@ export class IssueFetcher {
 
     // Root issues are those with no parent
     const rootIssues = flatIssues.filter((issue) => !childNumbers.has(issue.number));
+
+    // -----------------------------------------------------------------------
+    // Post-pass: fill pendingChildren.numbers from built hierarchy
+    // -----------------------------------------------------------------------
+    // The batch query only provides subIssuesSummary (totals) but not the
+    // individual child node numbers. Now that the tree is built and .children
+    // is populated, we can fill in the numbers from open children.
+    for (const issue of flatIssues) {
+      if (issue.dependencies?.pendingChildren && issue.children.length > 0) {
+        issue.dependencies.pendingChildren.numbers = issue.children
+          .filter((c) => c.state === 'open')
+          .map((c) => c.number);
+      }
+    }
 
     // -----------------------------------------------------------------------
     // Post-pass: enrich all issues with body-based dependency data
@@ -879,13 +907,17 @@ export class IssueFetcher {
 
     const openCount = blockedBy.filter((d) => d.state === 'open').length;
 
-    if (blockedBy.length > 0) {
+    // Preserve existing pendingChildren (not affected by relation mutations)
+    const pendingChildren = node.dependencies?.pendingChildren;
+
+    if (blockedBy.length > 0 || pendingChildren) {
       node.dependencies = {
         issueNumber: node.number,
         issueKey,
         blockedBy,
-        resolved: openCount === 0,
+        resolved: openCount === 0 && !pendingChildren,
         openCount,
+        pendingChildren,
       };
     } else {
       node.dependencies = undefined;
