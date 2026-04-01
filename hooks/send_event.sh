@@ -86,7 +86,7 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date +"%Y-%m-%dT%H:%M:%
 # ── JSON string encoder ────────────────────────────────────────
 # Reads raw text from stdin, outputs a valid JSON string WITH
 # surrounding double quotes. Handles all RFC 8259 control chars.
-# Uses jq when available; falls back to awk for portability.
+# Uses jq when available; falls back to Node.js (always present in FC).
 json_encode_string() {
     if command -v jq >/dev/null 2>&1; then
         jq -Rs .

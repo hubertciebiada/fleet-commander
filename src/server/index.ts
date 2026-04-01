@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import path from 'path';
 import fs from 'fs';
@@ -19,6 +20,7 @@ import stateMachineRoutes from './routes/state-machine.js';
 import queryRoutes from './routes/query.js';
 import issueSourcesRoutes from './routes/issue-sources.js';
 import issueRelationsRoutes from './routes/issue-relations.js';
+import handoffRoutes from './routes/handoff.js';
 import { sseBroker } from './services/sse-broker.js';
 import { getIssueFetcher } from './services/issue-fetcher.js';
 import { stuckDetector } from './services/stuck-detector.js';
@@ -63,6 +65,13 @@ async function main() {
   server.setErrorHandler(errorHandler);
 
   await server.register(cors, { origin: true });
+  await server.register(multipart, {
+    limits: {
+      fileSize: 51200, // 50KB cap — matches hook-side head -c 51200
+      fields: 3,       // team, fileType, file
+      files: 1,
+    },
+  });
 
   // API routes
   await server.register(eventsRoutes);
@@ -78,6 +87,7 @@ async function main() {
   await server.register(queryRoutes);
   await server.register(issueSourcesRoutes);
   await server.register(issueRelationsRoutes);
+  await server.register(handoffRoutes);
 
   // Static file serving for production builds
   const clientDistPath = path.resolve(__dirname, '..', 'client');
