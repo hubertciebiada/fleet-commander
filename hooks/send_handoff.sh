@@ -92,23 +92,9 @@ json_encode_string() {
     if command -v jq >/dev/null 2>&1; then
         jq -Rs .
     else
-        local raw
-        raw="$(cat; printf .)"
-        raw="${raw%.}"
-        printf '%s' "$raw" | tr '\015' '\001' | awk '
-        BEGIN { ORS=""; printf "\"" }
-        {
-            gsub(/\\/, "\\\\")
-            gsub(/"/, "\\\"")
-            gsub(/\t/, "\\t")
-            gsub(/\001/, "\\r")
-            gsub(/\x08/, "\\b")
-            gsub(/\x0c/, "\\f")
-            if (NR > 1) printf "\\n"
-            printf "%s", $0
-        }
-        END { printf "\"" }
-        '
+        # Node.js fallback — always available in FC context (FC is a Node app).
+        # awk/sed break on Windows Git Bash with backslash regex.
+        node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(d)))"
     fi
 }
 

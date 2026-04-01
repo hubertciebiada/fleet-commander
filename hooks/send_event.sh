@@ -91,26 +91,9 @@ json_encode_string() {
     if command -v jq >/dev/null 2>&1; then
         jq -Rs .
     else
-        # Pure-shell fallback using awk for reliable multi-line processing.
-        # tr replaces \r with \x01 sentinel because gawk on Windows strips
-        # \r during record splitting before gsub can see it.
-        local raw
-        raw="$(cat; printf .)"   # printf . preserves trailing newlines
-        raw="${raw%.}"            # strip sentinel
-        printf '%s' "$raw" | tr '\015' '\001' | awk '
-        BEGIN { ORS=""; printf "\"" }
-        {
-            gsub(/\\/, "\\\\")       # backslashes first
-            gsub(/"/, "\\\"")        # double quotes
-            gsub(/\t/, "\\t")        # tabs
-            gsub(/\001/, "\\r")      # carriage returns (from sentinel)
-            gsub(/\x08/, "\\b")      # backspace
-            gsub(/\x0c/, "\\f")      # form feed
-            if (NR > 1) printf "\\n" # newlines between lines
-            printf "%s", $0
-        }
-        END { printf "\"" }
-        '
+        # Node.js fallback — always available in FC context (FC is a Node app).
+        # awk/sed break on Windows Git Bash with backslash regex.
+        node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(d)))"
     fi
 }
 
