@@ -20,6 +20,9 @@ FILE_TYPE="${1:-}"
 FILE_PATH="${2:-}"
 CC_STDIN="${3:-}"
 
+# Logging
+_LOG="${FLEET_HOOK_LOG:-/tmp/fleet-hooks.log}"
+
 # Kill switch
 if [ "${FLEET_COMMANDER_OFF:-0}" = "1" ]; then
     exit 0
@@ -27,18 +30,29 @@ fi
 
 # Validate inputs
 if [ -z "$FILE_TYPE" ] || [ -z "$FILE_PATH" ]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | ERROR | handoff_file | ${FLEET_TEAM_ID:-?} | missing file_type or file_path" >> "$_LOG" 2>/dev/null || true
     exit 0
 fi
 
 # ── Read file content (capped at 50KB) ───────────────────────────
+FILE_SIZE=0
+if [ -f "$FILE_PATH" ]; then
+    FILE_SIZE=$(wc -c < "$FILE_PATH" 2>/dev/null || echo 0)
+fi
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | ENTER | handoff_file | ${FLEET_TEAM_ID:-?} | type=$FILE_TYPE path=$FILE_PATH size=${FILE_SIZE}b" >> "$_LOG" 2>/dev/null || true
+
 if [ ! -f "$FILE_PATH" ]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | ERROR | handoff_file | ${FLEET_TEAM_ID:-?} | file not found: $FILE_PATH" >> "$_LOG" 2>/dev/null || true
     exit 0
 fi
 
 CONTENT=$(head -c 51200 "$FILE_PATH" 2>/dev/null || true)
 if [ -z "$CONTENT" ]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | ERROR | handoff_file | ${FLEET_TEAM_ID:-?} | file empty: $FILE_PATH" >> "$_LOG" 2>/dev/null || true
     exit 0
 fi
+CONTENT_LEN=${#CONTENT}
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | HOOK  | handoff_file | ${FLEET_TEAM_ID:-?} | read ${CONTENT_LEN}b from $FILE_PATH" >> "$_LOG" 2>/dev/null || true
 
 # ── Identify worktree / team ─────────────────────────────────────
 TEAM_NAME=""
@@ -113,7 +127,6 @@ ENCODED_CC_STDIN=$(printf '%s' "$CC_STDIN_OBJ" | json_encode_string)
 PAYLOAD="{\"event\":\"handoff_file\",\"team\":${ENCODED_TEAM},\"timestamp\":${ENCODED_TIMESTAMP},\"cc_stdin\":${ENCODED_CC_STDIN}}"
 
 # ── Fire and forget ───────────────────────────────────────────────
-_LOG="${FLEET_HOOK_LOG:-/tmp/fleet-hooks.log}"
 if command -v curl >/dev/null 2>&1; then
     curl -s -S --max-time 2 --connect-timeout 1 \
         -X POST \

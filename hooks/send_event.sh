@@ -138,6 +138,7 @@ PAYLOAD="${PAYLOAD}}"
 # curl with 2-second timeout. Errors are silenced completely.
 # The hook MUST NOT block Claude Code or cause visible failures.
 _LOG="${FLEET_HOOK_LOG:-/tmp/fleet-hooks.log}"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown) | HOOK  | $EVENT_TYPE | $TEAM_NAME | send_event payload=${#PAYLOAD}b" >> "$_LOG" 2>/dev/null || true
 if command -v curl >/dev/null 2>&1; then
     curl -s -S --max-time 2 --connect-timeout 1 \
         -X POST \
