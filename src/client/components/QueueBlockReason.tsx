@@ -64,7 +64,7 @@ function isNumericKey(key: string): boolean {
 
 /**
  * Displays the block reason for a queued team:
- * - "Waiting for children: #X, #Y (N/M done)" (blue) when sub-issues are open
+ * - "Waiting for sub-issues: #X, #Y (N/M done)" (blue) when sub-issues are open
  * - "Blocked by FAILED #49" (red) when a dependency team has failed
  * - "Blocked by #49, #50" (orange) when dependencies are pending
  * - "Waiting for slot" (gray) when all project slots are occupied
@@ -147,7 +147,7 @@ export function QueueBlockReason({ team }: QueueBlockReasonProps) {
     const { childKeys } = result;
     return (
       <span className="block text-xs text-[#58A6FF] mt-0.5">
-        {'Waiting for children: '}
+        {'Waiting for sub-issues: '}
         {childKeys.map((key, i) => {
           const label = isNumericKey(key) ? `#${key}` : key;
           const link =

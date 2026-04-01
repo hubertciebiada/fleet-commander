@@ -2,7 +2,7 @@ import React from 'react';
 import { StatusBadge } from './StatusBadge';
 import { PRBadge } from './PRBadge';
 import { RelationsPanel } from './RelationsPanel';
-import { PlayIcon, LockIcon, GitHubIcon, JiraIcon, LinkIcon } from './Icons';
+import { PlayIcon, LockIcon, LayersIcon, GitHubIcon, JiraIcon, LinkIcon } from './Icons';
 import type { TeamStatus, PrioritizedIssue, IssueDependencyInfo, CIStatus } from '../../shared/types';
 import { formatIssueKey } from '../../shared/issue-provider';
 import type { IssueRelations } from '../../shared/issue-provider';
@@ -88,9 +88,9 @@ function PendingChildrenBadge({ pendingChildren }: { pendingChildren: IssueDepen
 
   return (
     <span className="inline-flex items-center gap-1 text-xs text-[#58A6FF] cursor-default">
-      <span className="shrink-0">&#x1F476;</span>
+      <LayersIcon size={12} className="text-[#58A6FF] shrink-0" />
       <span>
-        waiting for children ({pendingChildren.completed}/{pendingChildren.total} done)
+        waiting for sub-issues ({pendingChildren.completed}/{pendingChildren.total} done)
       </span>
     </span>
   );

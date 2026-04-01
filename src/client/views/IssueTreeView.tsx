@@ -1096,7 +1096,7 @@ function RunAllConfirmDialog({ issues, skippedActive, blockedIssues, projectId, 
                 {childBlocked.length > 0 && (
                   <>
                     <p className="text-xs text-[#58A6FF] mb-1">
-                      {childBlocked.length} issue{childBlocked.length !== 1 ? 's' : ''} queued (waiting for children to complete)
+                      {childBlocked.length} issue{childBlocked.length !== 1 ? 's' : ''} queued (waiting for sub-issues to complete)
                     </p>
                     <ul className="space-y-1">
                       {childBlocked.map((n) => (
