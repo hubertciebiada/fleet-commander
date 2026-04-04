@@ -417,15 +417,15 @@ describe('POST /api/handoff', () => {
       payload: mp1.body,
     });
 
-    // Backdate the first entry by 30 seconds using raw SQL
+    // Backdate the first entry beyond the 60s dedup window using raw SQL
     const db = getDatabase();
     db.raw.exec(`
       UPDATE handoff_files
-         SET captured_at = datetime('now', '-30 seconds')
+         SET captured_at = datetime('now', '-61 seconds')
        WHERE team_id = ${team.id} AND file_type = 'review.md'
     `);
 
-    // Second upload — same content, but now 30s has elapsed
+    // Second upload — same content, but now 61s has elapsed (outside dedup window)
     const mp2 = buildMultipart(
       { team: team.worktreeName, fileType: 'review.md' },
       { name: 'review.md', content },
