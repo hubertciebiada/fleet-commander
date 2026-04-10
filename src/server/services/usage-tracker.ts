@@ -114,15 +114,21 @@ export function getLatestDailyPercent(): number {
 
 /**
  * Returns the current usage zone:
- * - 'hard_red' when extra usage >= hard extra threshold (non-overridable)
+ * - 'hard_red' when daily/weekly exceeds soft thresholds AND extra usage >= hard extra threshold (non-overridable)
  * - 'red' when daily/weekly exceeds soft thresholds (overridable)
  * - 'green' otherwise
+ *
+ * Hard-red only applies when extra usage is actually needed (daily/weekly are
+ * over threshold).  If daily/weekly reset below their thresholds, there is no
+ * need for extra usage so extra depletion is irrelevant.
  */
 export function getUsageZone(): UsageZone {
-  if (_latestExtra >= config.usageHardExtraPct) {
+  const dailyWeeklyExceeded =
+    _latestDaily >= config.usageRedDailyPct || _latestWeekly >= config.usageRedWeeklyPct;
+  if (dailyWeeklyExceeded && _latestExtra >= config.usageHardExtraPct) {
     return 'hard_red';
   }
-  if (_latestDaily >= config.usageRedDailyPct || _latestWeekly >= config.usageRedWeeklyPct) {
+  if (dailyWeeklyExceeded) {
     return 'red';
   }
   return 'green';

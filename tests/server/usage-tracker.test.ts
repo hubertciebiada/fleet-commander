@@ -197,7 +197,7 @@ describe('UsagePoller.start() — DB seeding of zone state', () => {
       teamId: null,
       projectId: null,
       sessionId: null,
-      dailyPercent: 10,
+      dailyPercent: 90,
       weeklyPercent: 10,
       sonnetPercent: 0,
       extraPercent: 92,
@@ -307,8 +307,13 @@ describe('UsageZone hard_red state', () => {
     vi.clearAllMocks();
   });
 
-  it('returns hard_red when extraPercent >= usageHardExtraPct', async () => {
-    await processUsageSnapshot({ extraPercent: 92 });
+  it('returns green when only extraPercent is high but daily/weekly are low', async () => {
+    await processUsageSnapshot({ dailyPercent: 0, weeklyPercent: 0, extraPercent: 92 });
+    expect(getUsageZone()).toBe('green');
+  });
+
+  it('returns hard_red when daily is high AND extraPercent >= usageHardExtraPct', async () => {
+    await processUsageSnapshot({ dailyPercent: 90, extraPercent: 92 });
     expect(getUsageZone()).toBe('hard_red');
   });
 
@@ -400,7 +405,7 @@ describe('Override activation/deactivation', () => {
   });
 
   it('activateUsageOverride() refuses when zone is hard_red', async () => {
-    await processUsageSnapshot({ extraPercent: 95 });
+    await processUsageSnapshot({ dailyPercent: 90, extraPercent: 95 });
     vi.clearAllMocks();
 
     const result = await activateUsageOverride();
