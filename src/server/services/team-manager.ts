@@ -1163,11 +1163,11 @@ export class TeamManager {
       if (unblocked.length >= available) break;
 
       try {
-        // Try cache first to avoid unnecessary API calls
-        let deps = fetcher.getDependenciesFromCache(projectId, team.issueNumber);
-        if (deps === null) {
-          deps = await fetcher.fetchDependenciesForIssue(projectId, team.issueNumber);
-        }
+        // Always fetch fresh — cache cannot distinguish "no deps" from
+        // "deps not yet populated", which has caused teams to dequeue even
+        // though they were legitimately blocked (e.g. user added blockers
+        // after FC started but before the tree cache refreshed).
+        const deps = await fetcher.fetchDependenciesForIssue(projectId, team.issueNumber);
 
         // Permissive fallback: if fetch returns null, treat as unblocked
         if (!deps) {
