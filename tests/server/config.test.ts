@@ -97,6 +97,19 @@ describe('validateConfig', () => {
     // With default values, it should not throw.
     expect(() => validateConfig()).not.toThrow();
   });
+
+  it('defaults mergeShutdownGraceMs to 600000 (10 min) when FLEET_MERGE_SHUTDOWN_GRACE_MS is unset', async () => {
+    const mod = await import('../../src/server/config.js');
+    // If the env var is set we honour it; otherwise the default must be
+    // 600000 ms so that teams waiting on slow CI do not race the shutdown.
+    if (process.env['FLEET_MERGE_SHUTDOWN_GRACE_MS']) {
+      expect(mod.default.mergeShutdownGraceMs).toBe(
+        parseInt(process.env['FLEET_MERGE_SHUTDOWN_GRACE_MS'], 10),
+      );
+    } else {
+      expect(mod.default.mergeShutdownGraceMs).toBe(600000);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

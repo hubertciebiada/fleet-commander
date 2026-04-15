@@ -427,15 +427,24 @@ class GitHubPoller {
         // (sends pr_merged_shutdown instead of pr_merged to avoid duplicates)
 
         // ── Early shutdown on CI green + auto-merge happy path ────────
-        // When CI turns green, auto-merge is enabled, and merge state is
-        // clean, the team can shut down immediately — GitHub will handle
-        // the actual merge. This avoids the 2-minute grace period wait
-        // that normally follows pr_merged detection.
+        // When CI turns green, auto-merge is enabled, the PR is still open,
+        // and merge state is clean/unknown, the team can shut down
+        // immediately — GitHub will handle the actual merge. This avoids
+        // the grace period wait that normally follows pr_merged detection.
+        //
+        // We only fire when mergeStatus is one of {clean, unknown} — any
+        // "blocked_*", "behind", or "dirty" state means the PR cannot
+        // actually be merged yet and we'd be racing against active rebase
+        // / CI / review work. In those cases we leave the team alive and
+        // keep polling so the TL can unblock the PR.
+        const earlyShutdownEligibleMergeState =
+          mergeState === 'clean' || mergeState === 'unknown';
         if (
           existing.ciStatus !== ciStatus &&
           ciStatus === 'passing' &&
           autoMerge &&
-          mergeState !== 'dirty'
+          state !== 'merged' &&
+          earlyShutdownEligibleMergeState
         ) {
           const team = db.getTeam(teamId);
           if (team && team.status !== 'done') {
@@ -492,6 +501,18 @@ class GitHubPoller {
 
             return { ciStatus, state };
           }
+        } else if (
+          existing.ciStatus !== ciStatus &&
+          ciStatus === 'passing' &&
+          autoMerge &&
+          state !== 'merged'
+        ) {
+          // Early-shutdown trigger conditions met (CI just turned green,
+          // auto-merge on) but merge state is not eligible — keep the team
+          // alive and let the poller keep watching.
+          console.log(
+            `[GitHubPoller] Team ${teamId} NOT early-shutting-down — mergeStatus=${mergeState} (PR #${prNumber})`,
+          );
         }
       }
     } else {

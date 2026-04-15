@@ -163,7 +163,7 @@ const config = Object.freeze({
   fcPromptsDir: path.join(fleetCommanderRoot, 'prompts'),
   fcWorkflowTemplate: path.join(fleetCommanderRoot, 'templates', 'workflow.md'),
 
-  mergeShutdownGraceMs: safeParseInt(process.env['FLEET_MERGE_SHUTDOWN_GRACE_MS'] || '120000', 'FLEET_MERGE_SHUTDOWN_GRACE_MS'),
+  mergeShutdownGraceMs: safeParseInt(process.env['FLEET_MERGE_SHUTDOWN_GRACE_MS'] || '600000', 'FLEET_MERGE_SHUTDOWN_GRACE_MS'),
 
   retryDelayMin: safeParseInt(process.env['FLEET_RETRY_DELAY_MIN'] || '60', 'FLEET_RETRY_DELAY_MIN'),
   retryMaxDailyPct: safeParseInt(process.env['FLEET_RETRY_MAX_DAILY_PCT'] || '75', 'FLEET_RETRY_MAX_DAILY_PCT'),

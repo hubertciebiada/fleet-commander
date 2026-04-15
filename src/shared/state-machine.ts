@@ -293,9 +293,14 @@ export const STATE_MACHINE_TRANSITIONS: StateMachineTransition[] = [
     trigger: 'poller',
     triggerLabel: 'CI green + auto-merge → early shutdown',
     description:
-      'CI passes, auto-merge is enabled, and no merge conflicts. Team shuts down ' +
-      'immediately without waiting for the actual merge event — GitHub handles the merge.',
-    condition: 'CI status = passing AND autoMerge = true AND mergeStatus != dirty',
+      'CI passes, auto-merge is enabled, the PR is still open, and the merge ' +
+      'state is eligible (clean or unknown — i.e. no known block). Team shuts ' +
+      'down immediately without waiting for the actual merge event — GitHub ' +
+      'handles the merge. If mergeStatus is behind, dirty, or any blocked_* ' +
+      'sub-state, the team is kept alive so the TL can unblock the PR.',
+    condition:
+      'ciStatus = passing AND autoMerge = true AND state != merged AND ' +
+      'mergeStatus IN (clean, unknown)',
     hookEvent: null,
   },
   {
