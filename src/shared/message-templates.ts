@@ -114,16 +114,16 @@ export const DEFAULT_MESSAGE_TEMPLATES: DefaultMessageTemplate[] = [
   {
     id: 'branch_behind',
     template:
-      'Your PR #{{PR_NUMBER}} is behind main. Please rebase onto origin/main and force-push: `git fetch origin main && git rebase origin/main && git push --force-with-lease`.',
-    description: 'Sent to TL when PR branch is behind main',
-    placeholders: ['PR_NUMBER'],
+      'Your PR #{{PR_NUMBER}} is behind {{BASE_BRANCH}}. Please rebase onto origin/{{BASE_BRANCH}} and force-push: `git fetch origin {{BASE_BRANCH}} && git rebase origin/{{BASE_BRANCH}} && git push --force-with-lease`.',
+    description: 'Sent to TL when PR branch is behind the base branch',
+    placeholders: ['PR_NUMBER', 'BASE_BRANCH'],
   },
   {
     id: 'branch_behind_resolved',
     template:
-      'Your PR #{{PR_NUMBER}} branch is now up-to-date with main. No rebase needed.',
-    description: 'Sent to TL when PR branch is no longer behind main',
-    placeholders: ['PR_NUMBER'],
+      'Your PR #{{PR_NUMBER}} branch is now up-to-date with {{BASE_BRANCH}}. No rebase needed.',
+    description: 'Sent to TL when PR branch is no longer behind the base branch',
+    placeholders: ['PR_NUMBER', 'BASE_BRANCH'],
   },
   {
     id: 'issue_comment_new',

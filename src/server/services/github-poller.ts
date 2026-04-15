@@ -42,6 +42,7 @@ interface GHPRViewResult {
   mergedAt?: string | null;
   autoMergeRequest?: { enabledAt?: string } | null;
   headRefName?: string;
+  baseRefName?: string;
 }
 
 interface GHPRListItem {
@@ -244,7 +245,7 @@ class GitHubPoller {
     // Use gh pr view to get PR status, CI checks, merge state, and auto-merge
     const result = await execGHAsync(
       `gh pr view ${prNumber} --repo "${githubRepo}" ` +
-        `--json number,title,state,mergeStateStatus,statusCheckRollup,autoMergeRequest,headRefName,mergedAt`
+        `--json number,title,state,mergeStateStatus,statusCheckRollup,autoMergeRequest,headRefName,baseRefName,mergedAt`
     );
     if (!result) return null; // gh CLI failed — skip this cycle
 
@@ -288,6 +289,8 @@ class GitHubPoller {
       ciFailCount = Math.max(existing?.ciFailCount ?? 0, currentUniqueFailures);
     }
 
+    const baseRefName = data.baseRefName ?? null;
+
     const prData = {
       state,
       ciStatus,
@@ -295,6 +298,7 @@ class GitHubPoller {
       autoMerge,
       ciFailCount,
       checksJson,
+      baseRefName,
     };
 
     if (existing) {
@@ -390,11 +394,13 @@ class GitHubPoller {
             } else if (mergeState === 'behind') {
               const msg = resolveMessage('branch_behind', {
                 PR_NUMBER: String(prNumber),
+                BASE_BRANCH: baseRefName ?? existing?.baseRefName ?? 'main',
               });
               if (msg) manager.sendMessage(teamId, msg, 'fc', 'branch_behind');
             } else if (existing.mergeStatus === 'behind') {
               const msg = resolveMessage('branch_behind_resolved', {
                 PR_NUMBER: String(prNumber),
+                BASE_BRANCH: baseRefName ?? existing?.baseRefName ?? 'main',
               });
               if (msg) manager.sendMessage(teamId, msg, 'fc', 'branch_behind_resolved');
             }

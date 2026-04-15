@@ -168,6 +168,7 @@ export interface PRInsert {
   autoMerge?: boolean;
   ciFailCount?: number;
   checksJson?: string | null;
+  baseRefName?: string | null;
 }
 
 export interface PRUpdate {
@@ -180,6 +181,7 @@ export interface PRUpdate {
   ciFailCount?: number;
   checksJson?: string | null;
   mergedAt?: string | null;
+  baseRefName?: string | null;
 }
 
 export interface CommandInsert {
@@ -410,6 +412,12 @@ export class FleetDatabase {
 
     // Add handoff_files table if missing (v16 migration — captured plan/changes/review files)
     this.addHandoffFilesTable();
+
+    // Add base_ref_name column to pull_requests if missing (v17 migration — PR base branch tracking)
+    this.addBaseRefNameColumn();
+
+    // Migrate branch_behind templates to use {{BASE_BRANCH}} placeholder (v17 migration)
+    this.migrateBranchBehindTemplates();
 
     // Migrate any 'paused' projects to 'active' (paused status removed in #228)
     this.migratePausedProjects();
@@ -1106,6 +1114,61 @@ export class FleetDatabase {
       this.db.exec('INSERT OR IGNORE INTO schema_version (version) VALUES (16)');
     } catch {
       // Table may already exist — safe to ignore
+    }
+  }
+
+  /**
+   * Add base_ref_name column to pull_requests if it doesn't exist.
+   * v17 migration — tracks the PR's base branch (e.g. 'main', 'develop').
+   */
+  private addBaseRefNameColumn(): void {
+    try {
+      const columns = this.db.prepare("PRAGMA table_info(pull_requests)").all() as Array<{ name: string }>;
+      const hasColumn = columns.some((c) => c.name === 'base_ref_name');
+      if (!hasColumn) {
+        this.db.exec('ALTER TABLE pull_requests ADD COLUMN base_ref_name TEXT');
+        this.db.exec('INSERT OR IGNORE INTO schema_version (version) VALUES (17)');
+        console.log('[DB] v17 migration: added base_ref_name column to pull_requests');
+      }
+    } catch {
+      // Table may not exist yet (fresh database) — schema.sql will create it
+    }
+  }
+
+  /**
+   * Migrate branch_behind and branch_behind_resolved message templates
+   * from hardcoded 'main' to use {{BASE_BRANCH}} placeholder.
+   * Only updates templates that exactly match the old defaults (user edits are preserved).
+   */
+  private migrateBranchBehindTemplates(): void {
+    try {
+      const oldBranchBehind =
+        'Your PR #{{PR_NUMBER}} is behind main. Please rebase onto origin/main and force-push: `git fetch origin main && git rebase origin/main && git push --force-with-lease`.';
+      const newBranchBehind =
+        'Your PR #{{PR_NUMBER}} is behind {{BASE_BRANCH}}. Please rebase onto origin/{{BASE_BRANCH}} and force-push: `git fetch origin {{BASE_BRANCH}} && git rebase origin/{{BASE_BRANCH}} && git push --force-with-lease`.';
+
+      const oldBranchBehindResolved =
+        'Your PR #{{PR_NUMBER}} branch is now up-to-date with main. No rebase needed.';
+      const newBranchBehindResolved =
+        'Your PR #{{PR_NUMBER}} branch is now up-to-date with {{BASE_BRANCH}}. No rebase needed.';
+
+      const result1 = this.db.prepare(
+        "UPDATE message_templates SET template = @newTemplate, updated_at = datetime('now') WHERE id = 'branch_behind' AND template = @oldTemplate"
+      ).run({ newTemplate: newBranchBehind, oldTemplate: oldBranchBehind });
+
+      const result2 = this.db.prepare(
+        "UPDATE message_templates SET template = @newTemplate, updated_at = datetime('now') WHERE id = 'branch_behind_resolved' AND template = @oldTemplate"
+      ).run({ newTemplate: newBranchBehindResolved, oldTemplate: oldBranchBehindResolved });
+
+      if (result1.changes > 0 || result2.changes > 0) {
+        console.log(
+          `[DB] Migrated branch_behind templates to use {{BASE_BRANCH}}: ` +
+          `branch_behind=${result1.changes > 0 ? 'updated' : 'skipped'}, ` +
+          `branch_behind_resolved=${result2.changes > 0 ? 'updated' : 'skipped'}`
+        );
+      }
+    } catch {
+      // Templates may not exist yet (fresh database) — seeding will handle it
     }
   }
 
@@ -2112,8 +2175,8 @@ export class FleetDatabase {
 
   insertPullRequest(data: PRInsert): PullRequest {
     const stmt = this.stmt(`
-      INSERT INTO pull_requests (pr_number, team_id, title, state, ci_status, merge_status, auto_merge, ci_fail_count, checks_json)
-      VALUES (@prNumber, @teamId, @title, @state, @ciStatus, @mergeStatus, @autoMerge, @ciFailCount, @checksJson)
+      INSERT INTO pull_requests (pr_number, team_id, title, state, ci_status, merge_status, auto_merge, ci_fail_count, checks_json, base_ref_name)
+      VALUES (@prNumber, @teamId, @title, @state, @ciStatus, @mergeStatus, @autoMerge, @ciFailCount, @checksJson, @baseRefName)
     `);
 
     stmt.run({
@@ -2126,6 +2189,7 @@ export class FleetDatabase {
       autoMerge: data.autoMerge ? 1 : 0,
       ciFailCount: data.ciFailCount ?? 0,
       checksJson: data.checksJson ?? null,
+      baseRefName: data.baseRefName ?? null,
     });
 
     return this.getPullRequest(data.prNumber)!;
@@ -2182,6 +2246,10 @@ export class FleetDatabase {
     if (fields.mergedAt !== undefined) {
       setClauses.push('merged_at = @mergedAt');
       params.mergedAt = fields.mergedAt;
+    }
+    if (fields.baseRefName !== undefined) {
+      setClauses.push('base_ref_name = @baseRefName');
+      params.baseRefName = fields.baseRefName;
     }
 
     if (setClauses.length === 0) return this.getPullRequest(prNumber);
@@ -2906,6 +2974,7 @@ export class FleetDatabase {
       checksJson: row.checks_json as string | null,
       autoMerge: (row.auto_merge as number) === 1,
       mergedAt: utcify(row.merged_at as string | null),
+      baseRefName: (row.base_ref_name as string | null) ?? null,
       updatedAt: utcify(row.updated_at as string),
     };
   }
