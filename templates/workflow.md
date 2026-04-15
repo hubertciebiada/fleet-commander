@@ -211,38 +211,7 @@ If an agent exits (SubagentStop) before sending its ping:
 
 ### Plan Format
 
-The Planner produces a plan in this format:
-
-```
-## Plan for Issue #{N}
-
-### Language/Framework
-{primary language} / {framework(s)}
-
-### Guidebooks
-- {path/to/guidebook1.md}
-- {path/to/guidebook2.md}
-- (none found)
-
-### Type
-{single | mixed} — {developer mapping}
-
-### Implementation Steps
-1. {step} — {details}
-2. {step} — {details}
-
-### Architectural Decisions
-- {decision and rationale}
-
-### Edge Cases
-- {edge case and how to handle it}
-
-### Acceptance Criteria
-- [ ] {criterion}
-
-### Blocked
-no | yes — {reason}
-```
+The planner's `plan.md` must include these sections: Language/Framework, Guidebooks, Type, Implementation Steps, Architectural Decisions, Edge Cases, Acceptance Criteria, Blocked. See the planner agent prompt for the full template.
 
 ### Edge Case: Planner Fails
 
@@ -266,90 +235,17 @@ If the Planner is unresponsive for >5 minutes or produces an unusable plan:
 
 ### Planner Task Format (sent via TaskCreate at spawn)
 
-```
-ISSUE: #{N} {title}
-PROJECT: {project_name}
+Include these fields: ISSUE (`#{N} {title}`), PROJECT, ISSUE CONTEXT (full body from `.fleet-issue-context.md`), COMMENTS (all with author/date), LABELS, DEPENDENCIES. Add note: "You already have the full issue context above — start directly with codebase exploration."
 
-ISSUE CONTEXT (from .fleet-issue-context.md):
-{paste the full issue body/description here}
-
-COMMENTS ({count}):
-{paste all comments with author and date}
-
-LABELS: {comma-separated labels}
-DEPENDENCIES: {blocked-by list if any}
-
-You already have the full issue context above — you do NOT need to run
-`gh issue view`. Start directly with codebase exploration.
-```
-
-If `.fleet-issue-context.md` was NOT available, use this format instead:
-
-```
-ISSUE: #{N} {title}
-PROJECT: {project_name}
-
-The issue context file was not available. Please fetch the full issue:
-  gh issue view {N} --repo "{github_repo}" --json title,body,comments,labels
-
-Read the issue thoroughly before starting your analysis.
-```
+If `.fleet-issue-context.md` was NOT available, omit the context fields and instead tell the planner: "Fetch the full issue via `gh issue view {N} --repo {repo} --json title,body,comments,labels`."
 
 ### Dev Task Format (sent via TaskCreate at spawn)
 
-```
-ISSUE: #{N} {title}
-BRANCH: {feat|fix|test}/{N}-{short-desc}
-BASE: {{BASE_BRANCH}}
-
-ISSUE SUMMARY:
-{1-3 sentence summary of what the issue requests}
-
-ACCEPTANCE CRITERIA:
-{bulleted list of acceptance criteria from the issue or plan}
-
-PLAN:
-{paste the full planner's plan here}
-
-GUIDEBOOKS (read these before implementing):
-{list of guidebook paths extracted from the plan}
-
-INSTRUCTIONS:
-1. Read CLAUDE.md in the project root
-2. Read each guidebook file listed above
-3. Parse the planner's plan for implementation details
-4. Implement the changes described in the plan
-5. Follow conventions from CLAUDE.md and guidebooks
-6. Run build + tests locally before reporting ready
-7. Commit atomically: "Issue #{N}: {description}"
-8. Push the branch and report "Ready for review. Branch: {branch}" to TL
-```
+Include these fields: ISSUE (`#{N} {title}`), BRANCH (`{feat|fix|test}/{N}-{short-desc}`), BASE (`{{BASE_BRANCH}}`), ISSUE SUMMARY (1-3 sentences), ACCEPTANCE CRITERIA (bulleted), PLAN (full planner plan), GUIDEBOOKS (list of paths from plan). Dev reads CLAUDE.md + guidebooks, implements per plan, runs build + tests, commits atomically (`Issue #{N}: {desc}`), pushes, and pings TL.
 
 ### Changes Report Format (written by dev to `changes.md`)
 
-```markdown
-# Changes Report
-
-## Summary
-{1-2 sentence summary of what was done}
-
-## Changed Files
-- `src/server/services/foo.ts` — Added bar() method for X
-- `tests/server/foo.test.ts` — 3 new tests for bar()
-
-## Decisions & Deviations
-- {any deviations from plan with justification}
-
-## Test Results
-- `npm test`: 45 passed, 0 failed
-- `npx tsc --noEmit`: clean
-
-## Known Limitations
-- {any TODOs or known issues}
-
-## Diff Stats
-{paste output of `git diff --stat` here}
-```
+Dev writes a summary including: what changed (files list with descriptions), any deviations from plan, test results (`npm test` + `tsc --noEmit`), known limitations, and `git diff --stat` output.
 
 ### Edge Case: Dev Gets Stuck
 
@@ -378,40 +274,7 @@ INSTRUCTIONS:
 
 ### Reviewer Task Format (sent via TaskCreate at spawn)
 
-```
-ISSUE: #{N} {title}
-BRANCH: {branch_name}
-BASE: {{BASE_BRANCH}}
-
-ACCEPTANCE CRITERIA:
-{bulleted list of acceptance criteria from the issue or plan}
-
-CHANGES (from dev's changes.md):
-{paste the full changes report here — summary, changed files, decisions, test results, diff stats}
-
-GUIDEBOOKS (read these to verify compliance):
-{list of guidebook paths from the plan}
-
-INSTRUCTIONS:
-1. Read CLAUDE.md in the project root
-2. Read each guidebook file listed above
-3. Read the dev's changes report above to understand what changed and why
-4. Verify against the actual `git diff` — the changes report is the dev's account, not a substitute for reviewing the code
-5. Two-pass review: code quality + acceptance criteria from the issue
-6. Send rejection feedback DIRECTLY to dev via SendMessage
-7. Write final verdict to review.md in the worktree root using the Write tool, then ping TL: "Review complete. Verdict in review.md."
-
-PEERS:
-- Dev agent name: dev
-- Planner agent name: planner
-- Send rejection feedback DIRECTLY to dev via SendMessage
-- Write final verdict (APPROVE or CHANGES_NEEDED) to review.md using Write tool — then ping TL (SendMessage is only the ping, NOT the verdict)
-
-If you reject, include a numbered list of specific, actionable fixes with file:line references.
-Dev will fix and message you directly when ready for re-review.
-Max 3 review rounds total (initial + 2 re-reviews).
-After 3rd round, write review.md with CHANGES_NEEDED and wait for shutdown_request.
-```
+Include these fields: ISSUE (`#{N} {title}`), BRANCH, BASE (`{{BASE_BRANCH}}`), ACCEPTANCE CRITERIA (bulleted), CHANGES (full content from dev's `changes.md`), GUIDEBOOKS (list of paths from plan). Reviewer reads CLAUDE.md + guidebooks, verifies the dev's changes report against actual `git diff`, performs two-pass review (code quality + acceptance), sends REJECT feedback directly to dev via SendMessage, and writes final verdict to `review.md` then pings TL. Peer names: dev=`dev`, planner=`planner`. Max 3 review rounds; after 3rd round write `review.md` with CHANGES_NEEDED and wait for shutdown.
 
 ### TL Reads review.md
 
@@ -513,25 +376,16 @@ Fleet Commander sends these messages directly to the TL via stdin. They arrive a
 
 ### TL Response to FC Messages
 
-**On `ci_green`**: Auto-merge will handle the merge. Acknowledge and wait for `pr_merged`.
-
-**On `ci_red`**: Forward failure details to dev. Dev fixes and pushes. This counts toward the failure limit.
-
-**On `ci_blocked`**: STOP all work. Wait for PM instructions from the dashboard.
-
-**On `pr_merged`**: Close the issue, shut down agents (`shutdown_request` to all), finish.
-
-**On `nudge_idle`**: You are being nudged because FC detected no activity for 5 minutes. This is often normal — you may be waiting for an agent's ping. **Your first action MUST be to check on the active agent via SendMessage** (e.g., ask the reviewer: "How is the review going? Do you need help?"). Do NOT skip waiting for a deliverable just because you were nudged. Do NOT "proceed to the next step" without the required file (plan.md / changes.md / review.md). Only respawn if the agent has exited without delivering.
-
-**On `nudge_stuck`**: Same as nudge_idle but more urgent. **First action: SendMessage to the active agent** asking for status. If the agent responds — wait for it to finish. If no response after 2 minutes — check if it exited (TaskList). If exited without deliverable — respawn (within budget). Do NOT skip phases.
-
-**On `issue_comment_new`**: Review the new comment for any instructions or questions from the issue reporter. If the comment contains new requirements or clarifications, forward relevant details to the dev agent. If it's just acknowledgment, no action needed.
-
-**On `issue_labels_changed`**: Check the label change for priority shifts. If a `blocking` or `urgent` label was added, prioritize accordingly. If `blocked` was added, check what's blocking and report to FC.
-
-**On `issue_closed_externally`**: The issue was closed by someone outside the team. Stop all active work immediately. Commit any pending changes, push to the branch, and shut down all agents gracefully.
-
-**On `issue_body_updated`**: Re-read the issue description for updated requirements. If the changes affect current implementation, forward the updated requirements to dev. If dev has already completed the affected work, assess whether rework is needed.
+**On `ci_green`**: Acknowledge and wait for `pr_merged` (auto-merge handles it).
+**On `ci_red`**: Forward failure details to dev. Counts toward failure limit.
+**On `ci_blocked`**: STOP all work. Wait for PM instructions.
+**On `pr_merged`**: Close issue, shut down all agents (`shutdown_request`), finish.
+**On `nudge_idle`**: First action: SendMessage to the active agent asking for status. Do NOT skip waiting for a deliverable or proceed without the required file. Only respawn if the agent has exited without delivering.
+**On `nudge_stuck`**: Same as `nudge_idle` but more urgent. If no agent response after 2 minutes, check TaskList. If exited without deliverable, respawn (within budget). Do NOT skip phases.
+**On `issue_comment_new`**: Forward new requirements/clarifications to dev if relevant. Ignore simple acknowledgments.
+**On `issue_labels_changed`**: Check for priority shifts (`blocking`/`urgent`). If `blocked` added, investigate and report to FC.
+**On `issue_closed_externally`**: Stop work, push pending changes, shut down all agents.
+**On `issue_body_updated`**: Re-read requirements, forward to dev if they affect current work.
 
 ---
 
@@ -539,50 +393,27 @@ Fleet Commander sends these messages directly to the TL via stdin. They arrive a
 
 ### Agent Spawn Failure
 
-If spawning any agent fails:
-1. **Retry once** — wait 5 seconds, attempt spawn again
-2. **If retry fails** — TL takes over that agent's role:
-   - Planner fails → TL does the analysis themselves
-   - Dev fails → TL implements the code themselves
-   - Reviewer fails → TL reviews the code themselves (still two-pass)
-3. Log the failure for FC visibility (FC sees it via hooks)
+Retry once (5 second wait). If retry fails, TL takes over that agent's role (analysis, implementation, or review). FC sees failures via hooks.
 
 ### Test Failure During Implementation
 
-1. Dev runs tests locally before reporting "ready for review"
-2. If tests fail → dev fixes and re-runs until green
-3. Dev does NOT report "ready for review" with failing tests
-4. If dev cannot fix tests after reasonable effort → dev reports blocker to TL → TL may assist or escalate
+Dev runs tests before reporting ready and does NOT report with failing tests. If dev cannot fix after reasonable effort, dev reports blocker to TL who may assist or escalate.
 
 ### Review Loop Stuck (3 Rounds Exhausted)
 
-After 3 review rounds (initial + 2 fix rounds) with REJECT:
-1. Reviewer sends `BLOCKED — 3 review rounds exhausted` to TL
-2. TL reads the latest rejection feedback and the current code
-3. TL arbitrates:
-   - If remaining issues are minor nits → TL overrides and proceeds to PR
-   - If remaining issues are substantive → TL sends specific guidance to dev for one final attempt
-   - If fundamentally broken → state Blocked, comment on issue
+After 3 REJECT rounds, TL arbitrates: override minor nits and proceed to PR, send specific guidance for one final attempt, or state Blocked if fundamentally broken.
 
 ### Dev and Reviewer Disagree
 
-If the same issue bounces back and forth between dev and reviewer:
-- After round 2, if the same point is still contested, reviewer escalates to TL
-- TL reads the diff and the reviewer's feedback
-- TL arbitrates: either side with the reviewer (dev must fix) or override the reviewer (approve with noted exception)
+After round 2 with the same contested point, reviewer escalates to TL. TL reads the diff + feedback and arbitrates.
 
 ### CI Failure Handling
 
-1. `ci_red` received → TL forwards failure details to dev
-2. Dev fixes the failing tests/checks and pushes
-3. Progress on the same failure type does NOT count as a new unique failure
-4. After 3 unique failure types → state Blocked (FC sends `ci_blocked`)
+TL forwards `ci_red` details to dev. Same failure type does NOT count as a new unique failure. After 3 unique failure types, state Blocked (FC sends `ci_blocked`).
 
 ### Rebase Conflict
 
-1. If `git stash --include-untracked && git rebase origin/{{BASE_BRANCH}}` fails with conflicts → state Blocked
-2. Comment on issue explaining the conflict
-3. STOP — do not attempt manual conflict resolution across worktrees
+If rebase on `origin/{{BASE_BRANCH}}` fails with conflicts, state Blocked, comment on issue, and STOP.
 
 ---
 
@@ -623,52 +454,3 @@ Atomic commits — each commit should be a logical unit.
 - **TL does not implement** — spawn subagents for all work (except planner fallback)
 - **Planner failure is not fatal** — TL can produce a minimal plan if planner fails
 
-## Anti-Patterns
-
-| Wrong | Right |
-|-------|-------|
-| TL relays messages between dev and reviewer | Dev and reviewer talk directly (p2p) |
-| TL asks "how's it going?" every minute | Wait for agent's ping — idle is normal |
-| TL implements code while dev is active | Let dev do the implementation |
-| TL overrides reviewer without reading feedback | Read feedback, arbitrate only after 3 rounds |
-| Dev pushes without local tests | Build + tests locally BEFORE reporting ready |
-| Dev pushes without rebase | ALWAYS stash + rebase on {{BASE_BRANCH}} before push |
-| Respawning agents endlessly | Max 5 total spawns — then TL takes over or reports BLOCKED |
-| Checking out {{BASE_BRANCH}} in a worktree | NEVER checkout {{BASE_BRANCH}} — use `origin/{{BASE_BRANCH}}` as reference |
-| Dev creates the PR | TL creates the PR after APPROVE |
-| Spawning a coordinator / 4th agent | Diamond team is exactly 3 agents: planner, dev, reviewer |
-| Spawning all 3 agents at once before analysis is done | Spawn sequentially: planner first, then dev with plan, then reviewer after dev ready |
-| Ignoring FC messages | Always respond to ci_green, ci_red, pr_merged, nudges |
-| Respawning agent after 2 min idle | Idle is normal — only act at 10min stuck threshold |
-| TL monitors CI manually | FC handles CI monitoring and sends updates via stdin |
-| TL polls TaskList in a loop while waiting | Wait for agent ping — polling wastes tool calls and makes TL impatient |
-| TL proceeds to PR without review.md | NEVER — no review.md = no PR, hard requirement |
-| TL skips waiting after FC nudge | On nudge: first ask the agent how it's going via SendMessage, then wait |
-| Planner puts plan content in SendMessage | Planner writes plan.md, pings TL: "Done. Plan in plan.md." — TL reads file directly |
-| Dev puts changes report in SendMessage | Dev writes changes.md, pings TL: "Ready. Changes in changes.md." — TL reads file directly |
-| Reviewer puts verdict in SendMessage | Reviewer writes review.md, pings TL: "Review complete. Verdict in review.md." — TL reads file directly |
-| Dev skips writing changes.md | Dev writes changes.md before pinging TL — TL passes content to reviewer |
-| TL deletes handoff files (plan.md, changes.md, review.md) | Leave them — they're in .gitignore and cleaned up with the worktree |
-| Subagents read each other's handoff files | TL is the relay — reads each file and pastes content into next spawn prompt |
-
-## Decision Summary
-
-```
-Phase 0: TL → spawn planner only → TodoWrite "Phase 0" in_progress
-Phase 1: Planner analyzes → writes plan.md → pings TL → TL reads plan.md → TodoWrite "Phase 0" completed, "Phase 1" in_progress
-         TL validates plan → spawns dev WITH the plan context
-Phase 2: Dev implements immediately (has plan) → writes changes.md → pings TL ("Ready for review")
-         TL reads changes.md → TodoWrite "Phase 1" completed, "Phase 2" in_progress → spawns reviewer WITH branch context + changes report
-Phase 3: Reviewer reviews immediately (has branch + changes report) → dev + reviewer iterate p2p → reviewer writes review.md → pings TL → TL reads review.md
-         APPROVE → TodoWrite "Phase 2" completed, "Phase 3" in_progress
-Phase 4: TL → rebase → create PR → set auto-merge → FC monitors CI
-Phase 5: TL → TodoWrite "Phase 3" completed → close issue → shutdown agents → finish
-```
-
-Edge cases:
-- Planner fails → TL does quick analysis, produces plan, spawns dev with it
-- Planner declares BLOCKED → TL reports blocked, STOP
-- Dev stuck → TL nudges, then restarts with more context
-- 3 rejections → TL arbitrates: simplify, override nits, restart dev, or abort
-- Dev/Reviewer disagree → TL arbitrates after round 2
-- CI blocked → STOP, wait for PM
