@@ -148,6 +148,7 @@ function makeGHPRViewResult(overrides?: Record<string, unknown>) {
     statusCheckRollup: [],
     autoMergeRequest: null,
     headRefName: 'feat/10-test',
+    baseRefName: 'main',
     mergedAt: null,
     ...overrides,
   });
@@ -1047,12 +1048,83 @@ describe('Branch behind notifications', () => {
 
     await githubPoller.poll();
 
+    expect(mockResolveMessage).toHaveBeenCalledWith('branch_behind', {
+      PR_NUMBER: '42',
+      BASE_BRANCH: 'main',
+    });
     expect(mockManager.sendMessage).toHaveBeenCalledWith(
       1,
       'Rebase needed',
       'fc',
       'branch_behind',
     );
+  });
+
+  it('sends branch_behind message with non-main base branch', async () => {
+    const project = makeProject();
+    const team = makeTeam({ prNumber: 42, status: 'running' });
+    mockDb.getProjects.mockReturnValue([project]);
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getPullRequest.mockReturnValue({
+      prNumber: 42,
+      state: 'open',
+      ciStatus: 'passing',
+      mergeStatus: 'clean',
+      autoMerge: false,
+      ciFailCount: 0,
+    });
+
+    (mockResolveMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      (id: string) => (id === 'branch_behind' ? 'Rebase onto develop' : null),
+    );
+
+    mockExecGHAsync.mockResolvedValue(
+      makeGHPRViewResult({ mergeStateStatus: 'BEHIND', baseRefName: 'develop' }),
+    );
+
+    await githubPoller.poll();
+
+    expect(mockResolveMessage).toHaveBeenCalledWith('branch_behind', {
+      PR_NUMBER: '42',
+      BASE_BRANCH: 'develop',
+    });
+    expect(mockManager.sendMessage).toHaveBeenCalledWith(
+      1,
+      'Rebase onto develop',
+      'fc',
+      'branch_behind',
+    );
+  });
+
+  it('falls back to main when baseRefName is null', async () => {
+    const project = makeProject();
+    const team = makeTeam({ prNumber: 42, status: 'running' });
+    mockDb.getProjects.mockReturnValue([project]);
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getPullRequest.mockReturnValue({
+      prNumber: 42,
+      state: 'open',
+      ciStatus: 'passing',
+      mergeStatus: 'clean',
+      autoMerge: false,
+      ciFailCount: 0,
+      baseRefName: null,
+    });
+
+    (mockResolveMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      (id: string) => (id === 'branch_behind' ? 'Rebase needed' : null),
+    );
+
+    mockExecGHAsync.mockResolvedValue(
+      makeGHPRViewResult({ mergeStateStatus: 'BEHIND', baseRefName: undefined }),
+    );
+
+    await githubPoller.poll();
+
+    expect(mockResolveMessage).toHaveBeenCalledWith('branch_behind', {
+      PR_NUMBER: '42',
+      BASE_BRANCH: 'main',
+    });
   });
 
   it('sends branch_behind_resolved message when merge status changes from behind to clean', async () => {
@@ -1079,6 +1151,10 @@ describe('Branch behind notifications', () => {
 
     await githubPoller.poll();
 
+    expect(mockResolveMessage).toHaveBeenCalledWith('branch_behind_resolved', {
+      PR_NUMBER: '42',
+      BASE_BRANCH: 'main',
+    });
     expect(mockManager.sendMessage).toHaveBeenCalledWith(
       1,
       'Up-to-date now',

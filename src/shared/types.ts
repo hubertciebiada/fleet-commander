@@ -253,6 +253,7 @@ export interface PullRequest {
   checksJson: string | null;
   autoMerge: boolean;
   mergedAt: string | null;
+  baseRefName: string | null;
   updatedAt: string;
 }
 

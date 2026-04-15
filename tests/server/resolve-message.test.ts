@@ -162,6 +162,63 @@ describe('Template not found', () => {
 });
 
 // =============================================================================
+// BASE_BRANCH placeholder
+// =============================================================================
+
+describe('BASE_BRANCH placeholder', () => {
+  it('substitutes BASE_BRANCH with main', () => {
+    mockDb.getMessageTemplate.mockReturnValue({
+      id: 'branch_behind',
+      template:
+        'Your PR #{{PR_NUMBER}} is behind {{BASE_BRANCH}}. Please rebase onto origin/{{BASE_BRANCH}} and force-push: `git fetch origin {{BASE_BRANCH}} && git rebase origin/{{BASE_BRANCH}} && git push --force-with-lease`.',
+      enabled: true,
+    });
+
+    const result = resolveMessage('branch_behind', {
+      PR_NUMBER: '42',
+      BASE_BRANCH: 'main',
+    });
+    expect(result).toBe(
+      'Your PR #42 is behind main. Please rebase onto origin/main and force-push: `git fetch origin main && git rebase origin/main && git push --force-with-lease`.',
+    );
+  });
+
+  it('substitutes BASE_BRANCH with a non-main branch', () => {
+    mockDb.getMessageTemplate.mockReturnValue({
+      id: 'branch_behind',
+      template:
+        'Your PR #{{PR_NUMBER}} is behind {{BASE_BRANCH}}. Please rebase onto origin/{{BASE_BRANCH}} and force-push: `git fetch origin {{BASE_BRANCH}} && git rebase origin/{{BASE_BRANCH}} && git push --force-with-lease`.',
+      enabled: true,
+    });
+
+    const result = resolveMessage('branch_behind', {
+      PR_NUMBER: '99',
+      BASE_BRANCH: 'develop',
+    });
+    expect(result).toBe(
+      'Your PR #99 is behind develop. Please rebase onto origin/develop and force-push: `git fetch origin develop && git rebase origin/develop && git push --force-with-lease`.',
+    );
+  });
+
+  it('substitutes BASE_BRANCH in branch_behind_resolved template', () => {
+    mockDb.getMessageTemplate.mockReturnValue({
+      id: 'branch_behind_resolved',
+      template:
+        'Your PR #{{PR_NUMBER}} branch is now up-to-date with {{BASE_BRANCH}}. No rebase needed.',
+      enabled: true,
+    });
+
+    const result = resolveMessage('branch_behind_resolved', {
+      PR_NUMBER: '55',
+      BASE_BRANCH: 'staging',
+    });
+    expect(result).toBe(
+      'Your PR #55 branch is now up-to-date with staging. No rebase needed.',
+    );
+  });
+});
+
+// =============================================================================
 // DB lookup
 // =============================================================================
 

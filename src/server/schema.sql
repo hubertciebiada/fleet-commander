@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
   auto_merge      INTEGER NOT NULL DEFAULT 0,     -- 0|1
   ci_fail_count   INTEGER NOT NULL DEFAULT 0,     -- unique failure types; >= 3 means blocked
   checks_json     TEXT,                           -- JSON array: [{name, status, conclusion}]
+  base_ref_name   TEXT,                           -- PR base branch name (e.g. 'main', 'develop')
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
   merged_at       TEXT
