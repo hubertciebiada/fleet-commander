@@ -350,7 +350,42 @@ class IssueUpdatePoller {
 
         // External closure triggers graceful shutdown
         if (change.type === 'closed') {
+          // Force a PR reconcile BEFORE flipping team status. When a PR
+          // auto-closes an issue via `Closes #N`, the github-poller will
+          // skip that PR once the team is `done`, leaving the PR row stale
+          // (state='open', merge_status='blocked_unknown'). Reconciling here
+          // ensures the dashboard shows the correct "merged" pill without
+          // a manual refresh. See issue #704.
+          if (team.prNumber) {
+            try {
+              const { githubPoller } = await import('./github-poller.js');
+              await githubPoller.reconcilePR(team.id);
+            } catch (err) {
+              console.error(
+                `[IssueUpdatePoller] Forced reconcilePR failed for team ${team.id} (PR #${team.prNumber}):`,
+                err instanceof Error ? err.message : err,
+              );
+              // Fall through — still mark the team done even if reconcile fails.
+            }
+          }
+
           const db = getDatabase();
+
+          // Guard against duplicate done-transition. reconcilePR → pollPR
+          // may have already flipped the team to 'done' internally via the
+          // merged-branch path (github-poller.ts:644-674). Mirrors the guard
+          // pattern at github-poller.ts:647. If the team is already done,
+          // the transition row, status update, SSE broadcast, and graceful
+          // shutdown timer have all been handled — skip the fallthrough
+          // block to avoid duplicate audit rows, duplicate SSE events, and
+          // preempting the gracefulShutdown grace timer with manager.stop().
+          const currentTeam = db.getTeam(team.id);
+          if (currentTeam && currentTeam.status === 'done') {
+            // Snapshot cleanup is still needed so we don't leak state.
+            this.snapshots.delete(team.id);
+            break;
+          }
+
           const previousStatus = team.status;
 
           db.insertTransition({

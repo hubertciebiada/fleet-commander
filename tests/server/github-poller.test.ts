@@ -253,11 +253,12 @@ describe('PR state transitions', () => {
     expect(mockManager.gracefulShutdown).not.toHaveBeenCalled();
     // processQueue should NOT be called since team is already done
     expect(mockManager.processQueue).not.toHaveBeenCalled();
-    // mergedAt should NOT be written again either
-    expect(mockDb.updatePullRequest).not.toHaveBeenCalledWith(
-      42,
-      expect.objectContaining({ mergedAt: expect.any(String) }),
-    );
+    // The "done" branch (insertTransition + mark done) must not run again —
+    // this is the protection the test actually cares about.
+    expect(mockDb.insertTransition).not.toHaveBeenCalled();
+    // Note: the standard pollPR update path still persists mergedAt every
+    // time `changed` is true (fix #704). That is intentional and safe — it
+    // only refreshes the PR row, it does not re-trigger graceful shutdown.
   });
 
   it('calls processQueue immediately on PR merge to advance queued teams', async () => {
@@ -335,6 +336,72 @@ describe('PR state transitions', () => {
 
     expect(mockDb.updatePullRequest).not.toHaveBeenCalled();
     expect(mockSseBroker.broadcast).not.toHaveBeenCalled();
+  });
+
+  it('persists mergedAt on every pollPR update when PR is merged', async () => {
+    const project = makeProject();
+    const team = makeTeam({ prNumber: 42, status: 'running' });
+    mockDb.getProjects.mockReturnValue([project]);
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getPullRequest.mockReturnValue({
+      prNumber: 42,
+      state: 'open',
+      ciStatus: 'pending',
+      mergeStatus: 'clean',
+      autoMerge: false,
+      ciFailCount: 0,
+    });
+    mockDb.getTeam.mockReturnValue({ ...team, status: 'running' });
+
+    mockExecGHAsync.mockResolvedValue(
+      makeGHPRViewResult({
+        state: 'CLOSED',
+        mergedAt: '2025-07-01T10:00:00Z',
+      }),
+    );
+
+    await githubPoller.poll();
+
+    // Standard update path must carry mergedAt forward
+    expect(mockDb.updatePullRequest).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        state: 'merged',
+        mergedAt: '2025-07-01T10:00:00Z',
+      }),
+    );
+  });
+
+  it('passes null mergedAt when PR is still open', async () => {
+    const project = makeProject();
+    const team = makeTeam({ prNumber: 42, status: 'running' });
+    mockDb.getProjects.mockReturnValue([project]);
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getPullRequest.mockReturnValue({
+      prNumber: 42,
+      state: 'open',
+      ciStatus: 'pending',
+      mergeStatus: 'clean',
+      autoMerge: false,
+      ciFailCount: 0,
+    });
+    mockDb.getTeam.mockReturnValue({ ...team, status: 'running' });
+
+    // CI flips to passing so `changed` is true and we hit the update path
+    mockExecGHAsync.mockResolvedValue(
+      makeGHPRViewResult({
+        state: 'OPEN',
+        mergedAt: null,
+        statusCheckRollup: [{ name: 'ci', conclusion: 'SUCCESS' }],
+      }),
+    );
+
+    await githubPoller.poll();
+
+    expect(mockDb.updatePullRequest).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ mergedAt: null }),
+    );
   });
 });
 

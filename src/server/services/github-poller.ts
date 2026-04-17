@@ -398,6 +398,7 @@ class GitHubPoller {
       ciFailCount,
       checksJson,
       baseRefName,
+      mergedAt: data.mergedAt ?? null,
     };
 
     if (existing) {
