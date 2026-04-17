@@ -440,6 +440,55 @@ describe('IssueUpdatePoller', () => {
     );
   });
 
+  it('does NOT double-transition when reconcilePR internally marks team done', async () => {
+    const team = makeTeam({ status: 'running', prNumber: 123 });
+    const project = makeProject();
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getProjects.mockReturnValue([project]);
+
+    // First poll — OPEN (initializes snapshot; no getTeam call expected yet)
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'OPEN' }));
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // Second poll — CLOSED. Simulate reconcilePR's internal pollPR merged-branch
+    // side-effect by having reconcilePR flip the DB: subsequent db.getTeam()
+    // returns a team already marked 'done'.
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'CLOSED' }));
+    mockResolveMessage.mockReturnValue('Issue #42 was closed externally.');
+
+    mockGithubPoller.reconcilePR.mockImplementationOnce(async () => {
+      // Pretend the internal pollPR ran its merged-branch block:
+      // - inserted a transition ('PR merged')
+      // - called updateTeamSilent({status:'done'})
+      // - scheduled gracefulShutdown
+      // From the poller's perspective, the next getTeam call must reflect done.
+      mockDb.getTeam.mockReturnValue({ ...team, status: 'done' });
+    });
+
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // reconcilePR must have been attempted
+    expect(mockGithubPoller.reconcilePR).toHaveBeenCalledWith(1);
+
+    // Guard must have kicked in: the closure-path fallthrough block is SKIPPED.
+    // - No transition inserted by issue-update-poller (reconcile's internal
+    //   pollPR mock is a no-op DB-wise in this test harness; we only assert
+    //   the poller itself did not insert).
+    expect(mockDb.insertTransition).not.toHaveBeenCalled();
+
+    // - No updateTeamSilent call from the fallthrough path
+    expect(mockDb.updateTeamSilent).not.toHaveBeenCalled();
+
+    // - No SSE broadcast from the fallthrough path
+    expect(mockSseBroker.broadcast).not.toHaveBeenCalled();
+
+    // - No manager.stop — gracefulShutdown is already scheduled by pollPR
+    expect(mockManager.stop).not.toHaveBeenCalled();
+
+    // Reset getTeam default so later tests get undefined
+    mockDb.getTeam.mockReset();
+  });
+
   it('still marks team done when reconcilePR throws', async () => {
     const team = makeTeam({ status: 'running', prNumber: 456 });
     const project = makeProject();

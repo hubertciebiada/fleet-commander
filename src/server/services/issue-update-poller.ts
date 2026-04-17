@@ -370,6 +370,22 @@ class IssueUpdatePoller {
           }
 
           const db = getDatabase();
+
+          // Guard against duplicate done-transition. reconcilePR → pollPR
+          // may have already flipped the team to 'done' internally via the
+          // merged-branch path (github-poller.ts:644-674). Mirrors the guard
+          // pattern at github-poller.ts:647. If the team is already done,
+          // the transition row, status update, SSE broadcast, and graceful
+          // shutdown timer have all been handled — skip the fallthrough
+          // block to avoid duplicate audit rows, duplicate SSE events, and
+          // preempting the gracefulShutdown grace timer with manager.stop().
+          const currentTeam = db.getTeam(team.id);
+          if (currentTeam && currentTeam.status === 'done') {
+            // Snapshot cleanup is still needed so we don't leak state.
+            this.snapshots.delete(team.id);
+            break;
+          }
+
           const previousStatus = team.status;
 
           db.insertTransition({
