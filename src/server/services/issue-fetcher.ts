@@ -519,6 +519,12 @@ export class IssueFetcher {
       }
     }
 
+    // Enrich every node with inherited blockers from ancestor chains before
+    // caching so the batch tree API, MCP tools, and every cache reader see
+    // consistent blocker info (matches the on-demand getDependenciesFromCache
+    // path).
+    this.enrichAllNodesWithInheritedBlockers(rootIssues);
+
     // Update the per-project cache
     if (fetchComplete) {
       this.cacheByProject.set(projectId, {
@@ -661,6 +667,10 @@ export class IssueFetcher {
 
       await runWithConcurrency(depTasks, 5);
     }
+
+    // Enrich every node with inherited blockers from ancestor chains before
+    // caching (same invariant as the GitHub fetch path).
+    this.enrichAllNodesWithInheritedBlockers(rootIssues);
 
     // Update the per-project cache
     if (fetchComplete) {
@@ -941,6 +951,11 @@ export class IssueFetcher {
     } else {
       node.dependencies = undefined;
     }
+
+    // Re-enrich the whole tree so inheritedBlockedBy on descendants reflects
+    // the mutation (e.g. a blocker added to a parent should propagate to
+    // children; removing one should clear it from their inherited list).
+    this.enrichAllNodesWithInheritedBlockers(cache.issues);
   }
 
   /**
@@ -1007,6 +1022,12 @@ export class IssueFetcher {
         }
       }
     }
+
+    // Re-enrich the whole tree so descendants of the closed issue (and any
+    // issue whose ancestor chain transited through it) see updated
+    // inheritedBlockedBy state: blockers that referenced this number are now
+    // closed and should no longer inflate openCount on descendants.
+    this.enrichAllNodesWithInheritedBlockers(cache.issues);
   }
 
   /**
@@ -1026,10 +1047,24 @@ export class IssueFetcher {
     const node = this.findInTree(cache.issues, issueNumber);
     if (!node) return null;
 
-    // Start with existing dependency info or build empty
+    // Start with existing dependency info or build empty. The cached
+    // dependencies may already carry inheritedBlockedBy from the post-fetch
+    // enrichment pass — strip those before we recompute below so we don't
+    // double-count openCount. (The fresh collectAncestorBlockers call
+    // produces the same result either way, so stripping is safe and keeps
+    // this method idempotent for test fixtures that bypass fetch.)
     const deps: IssueDependencyInfo = node.dependencies
-      ? { ...node.dependencies }
+      ? { ...node.dependencies, inheritedBlockedBy: undefined }
       : this.buildEmptyDependencyInfo(issueNumber);
+    if (node.dependencies?.inheritedBlockedBy) {
+      const prevInheritedOpen = node.dependencies.inheritedBlockedBy.filter(
+        (b) => b.state === 'open',
+      ).length;
+      deps.openCount = Math.max(0, deps.openCount - prevInheritedOpen);
+      // Recompute resolved from direct blockers + pendingChildren only
+      const directOpen = deps.blockedBy.filter((b) => b.state === 'open').length;
+      deps.resolved = directOpen === 0 && !deps.pendingChildren;
+    }
 
     // Check for pending children from cached subIssueSummary
     if (node.subIssueSummary && node.subIssueSummary.total > 0 && node.subIssueSummary.completed < node.subIssueSummary.total) {
@@ -1427,6 +1462,78 @@ export class IssueFetcher {
     }
 
     return deps;
+  }
+
+  /**
+   * Enrich every node in the given tree with `inheritedBlockedBy` computed
+   * from its ancestor chain. Mutates each node's `dependencies` in place so
+   * downstream readers (batch tree API, MCP, getIssuesByProject, etc.) see
+   * consistent blocker info matching the on-demand `getDependenciesFromCache`
+   * path.
+   *
+   * Called once after a full fetch (or a surgical mutation) completes, right
+   * before the cache is written/updated. For each node:
+   *   - Computes direct blocker set from node.dependencies?.blockedBy
+   *   - Walks ancestors via collectAncestorBlockers (respects depth cap, cycles,
+   *     closed ancestors, sub-issue stripping)
+   *   - If any inherited blockers exist, initializes node.dependencies lazily
+   *     via buildEmptyDependencyInfo() when absent, and recalculates
+   *     openCount/resolved to include inherited open blockers.
+   *
+   * If no inherited blockers exist, node.dependencies is left untouched so
+   * issues with no blockers at all remain `undefined` (no behavior change for
+   * the common unblocked case).
+   */
+  private enrichAllNodesWithInheritedBlockers(rootIssues: IssueNode[]): void {
+    const parentMap = this.buildParentMap(rootIssues);
+    // Transient cache view for collectAncestorBlockers lookups. cachedAt is
+    // irrelevant here — collectAncestorBlockers only reads cache.issues via
+    // findInTree.
+    const transientCache: ProjectIssueCache = { issues: rootIssues, cachedAt: null };
+
+    const allNodes = this.flattenTree(rootIssues);
+
+    // Reset any previously-computed inherited state so this method is idempotent.
+    // Re-running after surgical mutations (updateIssueDependencies /
+    // markIssueClosed) must not double-count inherited openCount.
+    for (const node of allNodes) {
+      if (node.dependencies?.inheritedBlockedBy) {
+        const prevInheritedOpen = node.dependencies.inheritedBlockedBy.filter(
+          (b) => b.state === 'open',
+        ).length;
+        node.dependencies.openCount = Math.max(
+          0,
+          node.dependencies.openCount - prevInheritedOpen,
+        );
+        node.dependencies.inheritedBlockedBy = undefined;
+        // Recompute resolved from remaining direct blockers / pending children
+        const directOpen = node.dependencies.blockedBy.filter((b) => b.state === 'open').length;
+        node.dependencies.resolved = directOpen === 0 && !node.dependencies.pendingChildren;
+      }
+    }
+
+    for (const node of allNodes) {
+      const directBlockerNumbers = new Set(
+        node.dependencies?.blockedBy.map((b) => b.number) ?? [],
+      );
+      const inherited = this.collectAncestorBlockers(
+        node.number,
+        parentMap,
+        transientCache,
+        directBlockerNumbers,
+      );
+      if (inherited.length === 0) continue;
+
+      if (!node.dependencies) {
+        node.dependencies = this.buildEmptyDependencyInfo(node.number);
+      }
+      node.dependencies.inheritedBlockedBy = inherited;
+      const inheritedOpenCount = inherited.filter((b) => b.state === 'open').length;
+      node.dependencies.openCount += inheritedOpenCount;
+      if (inheritedOpenCount > 0) {
+        node.dependencies.resolved = false;
+      }
+    }
   }
 
   /**

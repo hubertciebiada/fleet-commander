@@ -1471,3 +1471,430 @@ describe('inherited blockers (parent-child hierarchy)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Batch tree enrichment (post-fetch inheritedBlockedBy pass)
+// ---------------------------------------------------------------------------
+// These tests exercise the enrichment pass that runs at the end of
+// fetchIssueHierarchy / fetchIssueHierarchyGeneric. The pass is what makes
+// the batch tree API (GET /api/issues, GET /api/projects/:id/issues) return
+// leaf nodes with inheritedBlockedBy populated — previously only the
+// on-demand getDependenciesFromCache path did this enrichment, so the UI
+// would show a Play button for issues that should have been blocked.
+// ---------------------------------------------------------------------------
+
+describe('batch tree enrichment (inheritedBlockedBy post-pass)', () => {
+  /** Minimal IssueNode factory (mirrors the helper in "inherited blockers"). */
+  function makeNode(
+    number: number,
+    opts: {
+      state?: 'open' | 'closed';
+      children?: IssueNode[];
+      dependencies?: IssueDependencyInfo;
+      issueKey?: string;
+    } = {},
+  ): IssueNode {
+    const node: IssueNode = {
+      number,
+      title: `Issue #${number}`,
+      state: opts.state ?? 'open',
+      labels: [],
+      url: `https://github.com/test/repo/issues/${number}`,
+      children: opts.children ?? [],
+      issueKey: opts.issueKey ?? String(number),
+      issueProvider: 'github',
+    };
+    if (opts.dependencies) {
+      node.dependencies = opts.dependencies;
+    }
+    return node;
+  }
+
+  function makeDepRef(number: number, state: 'open' | 'closed' = 'open'): DependencyRef {
+    return {
+      number,
+      owner: 'test',
+      repo: 'repo',
+      state,
+      title: `Blocker #${number}`,
+    };
+  }
+
+  /**
+   * Invoke the private enrichment pass directly. This is what runs at the
+   * end of fetchIssueHierarchy, and what every cache reader (including the
+   * batch tree routes) sees after a fetch.
+   */
+  function runEnrichment(roots: IssueNode[]): void {
+    const fetcher = new IssueFetcher();
+    (fetcher as unknown as {
+      enrichAllNodesWithInheritedBlockers: (r: IssueNode[]) => void;
+    }).enrichAllNodesWithInheritedBlockers(roots);
+  }
+
+  it('should populate inheritedBlockedBy on leaf when direct parent has an open blocker', () => {
+    const leaf = makeNode(20);
+    const parent = makeNode(10, {
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [leaf],
+    });
+
+    runEnrichment([parent]);
+
+    expect(leaf.dependencies).toBeDefined();
+    expect(leaf.dependencies!.inheritedBlockedBy).toHaveLength(1);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].number).toBe(1);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].viaAncestor).toBe(10);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].state).toBe('open');
+    expect(leaf.dependencies!.resolved).toBe(false);
+    expect(leaf.dependencies!.openCount).toBe(1);
+  });
+
+  it('should populate inheritedBlockedBy via grandparent (multi-level inheritance)', () => {
+    const leaf = makeNode(20);
+    const parent = makeNode(10, { children: [leaf] });
+    const grandparent = makeNode(5, {
+      issueKey: 'PROJ-5',
+      dependencies: {
+        issueNumber: 5,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [parent],
+    });
+
+    runEnrichment([grandparent]);
+
+    expect(leaf.dependencies).toBeDefined();
+    expect(leaf.dependencies!.inheritedBlockedBy).toHaveLength(1);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].number).toBe(1);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].viaAncestor).toBe(5);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].viaAncestorKey).toBe('PROJ-5');
+  });
+
+  it('should populate inheritedBlockedBy via great-grandparent (3-level inheritance)', () => {
+    const leaf = makeNode(40);
+    const parent = makeNode(30, { children: [leaf] });
+    const grandparent = makeNode(20, { children: [parent] });
+    const greatGrandparent = makeNode(10, {
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [grandparent],
+    });
+
+    runEnrichment([greatGrandparent]);
+
+    expect(leaf.dependencies).toBeDefined();
+    expect(leaf.dependencies!.inheritedBlockedBy).toHaveLength(1);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].number).toBe(1);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].viaAncestor).toBe(10);
+    expect(leaf.dependencies!.resolved).toBe(false);
+
+    // Intermediate parent/grandparent also inherit from the higher chain
+    expect(parent.dependencies?.inheritedBlockedBy?.[0].number).toBe(1);
+    expect(grandparent.dependencies?.inheritedBlockedBy?.[0].number).toBe(1);
+  });
+
+  it('should leave dependencies undefined on nodes with no ancestor blockers', () => {
+    const leaf = makeNode(20);
+    const parent = makeNode(10, { children: [leaf] });
+    const grandparent = makeNode(5, { children: [parent] });
+
+    runEnrichment([grandparent]);
+
+    expect(leaf.dependencies).toBeUndefined();
+    expect(parent.dependencies).toBeUndefined();
+    expect(grandparent.dependencies).toBeUndefined();
+  });
+
+  it('should append inherited blockers to a node that already has direct blockers', () => {
+    const leaf = makeNode(20, {
+      dependencies: {
+        issueNumber: 20,
+        blockedBy: [makeDepRef(99, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+    });
+    const parent = makeNode(10, {
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [leaf],
+    });
+
+    runEnrichment([parent]);
+
+    expect(leaf.dependencies!.blockedBy.map((b) => b.number)).toEqual([99]);
+    expect(leaf.dependencies!.inheritedBlockedBy).toHaveLength(1);
+    expect(leaf.dependencies!.inheritedBlockedBy![0].number).toBe(1);
+    // openCount = 1 direct + 1 inherited
+    expect(leaf.dependencies!.openCount).toBe(2);
+    expect(leaf.dependencies!.resolved).toBe(false);
+  });
+
+  it('should not propagate blockers through a closed ancestor', () => {
+    const leaf = makeNode(20);
+    const parent = makeNode(10, {
+      state: 'closed',
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [leaf],
+    });
+
+    runEnrichment([parent]);
+
+    // Closed ancestor breaks the chain
+    expect(leaf.dependencies).toBeUndefined();
+  });
+
+  it('should not propagate blockers beyond MAX_ANCESTOR_DEPTH (cycle safety)', () => {
+    // Build a chain of 12 parents with a blocker at the root. The leaf is
+    // 12 levels deep — beyond MAX_ANCESTOR_DEPTH=10, so it must NOT inherit.
+    let current: IssueNode = makeNode(100);
+    const deepLeaf = current;
+    for (let i = 99; i >= 88; i--) {
+      current = makeNode(i, { children: [current] });
+    }
+    current.dependencies = {
+      issueNumber: current.number,
+      blockedBy: [makeDepRef(1, 'open')],
+      resolved: false,
+      openCount: 1,
+    };
+
+    runEnrichment([current]);
+
+    expect(deepLeaf.dependencies).toBeUndefined();
+  });
+
+  it('should enrich all siblings sharing a blocked parent', () => {
+    const sibA = makeNode(21);
+    const sibB = makeNode(22);
+    const sibC = makeNode(23);
+    const parent = makeNode(10, {
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [sibA, sibB, sibC],
+    });
+
+    runEnrichment([parent]);
+
+    for (const s of [sibA, sibB, sibC]) {
+      expect(s.dependencies?.inheritedBlockedBy).toHaveLength(1);
+      expect(s.dependencies!.inheritedBlockedBy![0].number).toBe(1);
+      expect(s.dependencies!.openCount).toBe(1);
+      expect(s.dependencies!.resolved).toBe(false);
+    }
+  });
+
+  it('should handle empty tree as a no-op', () => {
+    expect(() => runEnrichment([])).not.toThrow();
+  });
+
+  it('should be idempotent — running twice must not double-count openCount', () => {
+    const leaf = makeNode(20);
+    const parent = makeNode(10, {
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [leaf],
+    });
+
+    runEnrichment([parent]);
+    runEnrichment([parent]);
+
+    expect(leaf.dependencies!.inheritedBlockedBy).toHaveLength(1);
+    expect(leaf.dependencies!.openCount).toBe(1);
+    expect(leaf.dependencies!.resolved).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markIssueClosed cascades to inherited blockers
+// ---------------------------------------------------------------------------
+
+describe('markIssueClosed cascades to inherited blockers', () => {
+  function makeNode(
+    number: number,
+    opts: {
+      state?: 'open' | 'closed';
+      children?: IssueNode[];
+      dependencies?: IssueDependencyInfo;
+      issueKey?: string;
+    } = {},
+  ): IssueNode {
+    const node: IssueNode = {
+      number,
+      title: `Issue #${number}`,
+      state: opts.state ?? 'open',
+      labels: [],
+      url: `https://github.com/test/repo/issues/${number}`,
+      children: opts.children ?? [],
+      issueKey: opts.issueKey ?? String(number),
+      issueProvider: 'github',
+    };
+    if (opts.dependencies) node.dependencies = opts.dependencies;
+    return node;
+  }
+
+  function makeDepRef(number: number, state: 'open' | 'closed' = 'open'): DependencyRef {
+    return { number, owner: '', repo: '', state, title: `Blocker #${number}` };
+  }
+
+  function setupFetcher(issues: IssueNode[]): IssueFetcher {
+    const fetcher = new IssueFetcher();
+    const cache = { issues, cachedAt: new Date().toISOString() };
+    (fetcher as unknown as {
+      cacheByProject: Map<number, { issues: IssueNode[]; cachedAt: string | null }>;
+    }).cacheByProject.set(1, cache);
+    // Prime inherited enrichment so test starts from the post-fetch state
+    (fetcher as unknown as {
+      enrichAllNodesWithInheritedBlockers: (r: IssueNode[]) => void;
+    }).enrichAllNodesWithInheritedBlockers(issues);
+    return fetcher;
+  }
+
+  it('clears inheritedBlockedBy openCount on descendants when ancestor blocker closes', () => {
+    const leaf = makeNode(20);
+    const parent = makeNode(10, {
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [leaf],
+    });
+
+    const fetcher = setupFetcher([parent]);
+
+    // Sanity: leaf inherits the open blocker pre-close
+    expect(leaf.dependencies?.inheritedBlockedBy).toHaveLength(1);
+    expect(leaf.dependencies!.openCount).toBe(1);
+
+    // Close #1 — the blocker the ancestor depends on
+    fetcher.markIssueClosed(1, 1);
+
+    // Parent's direct blocker should now be closed
+    expect(parent.dependencies!.blockedBy[0]!.state).toBe('closed');
+    expect(parent.dependencies!.resolved).toBe(true);
+    expect(parent.dependencies!.openCount).toBe(0);
+
+    // Leaf's inherited info should reflect that the blocker is now closed —
+    // either cleared or marked resolved (openCount back to 0).
+    if (leaf.dependencies?.inheritedBlockedBy) {
+      const inheritedOpen = leaf.dependencies.inheritedBlockedBy.filter(
+        (b) => b.state === 'open',
+      ).length;
+      expect(inheritedOpen).toBe(0);
+    }
+    expect(leaf.dependencies?.openCount ?? 0).toBe(0);
+    expect(leaf.dependencies?.resolved ?? true).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateIssueDependencies re-runs inheritance enrichment
+// ---------------------------------------------------------------------------
+
+describe('updateIssueDependencies re-runs inheritance enrichment', () => {
+  function makeNode(
+    number: number,
+    opts: {
+      state?: 'open' | 'closed';
+      children?: IssueNode[];
+      dependencies?: IssueDependencyInfo;
+      issueKey?: string;
+    } = {},
+  ): IssueNode {
+    const node: IssueNode = {
+      number,
+      title: `Issue #${number}`,
+      state: opts.state ?? 'open',
+      labels: [],
+      url: `https://github.com/test/repo/issues/${number}`,
+      children: opts.children ?? [],
+      issueKey: opts.issueKey ?? String(number),
+      issueProvider: 'github',
+    };
+    if (opts.dependencies) node.dependencies = opts.dependencies;
+    return node;
+  }
+
+  function makeDepRef(number: number, state: 'open' | 'closed' = 'open'): DependencyRef {
+    return { number, owner: '', repo: '', state, title: `Blocker #${number}` };
+  }
+
+  function setupFetcher(issues: IssueNode[]): IssueFetcher {
+    const fetcher = new IssueFetcher();
+    const cache = { issues, cachedAt: new Date().toISOString() };
+    (fetcher as unknown as {
+      cacheByProject: Map<number, { issues: IssueNode[]; cachedAt: string | null }>;
+    }).cacheByProject.set(1, cache);
+    (fetcher as unknown as {
+      enrichAllNodesWithInheritedBlockers: (r: IssueNode[]) => void;
+    }).enrichAllNodesWithInheritedBlockers(issues);
+    return fetcher;
+  }
+
+  it('clears inheritedBlockedBy on children when the parent blocker is removed', () => {
+    const leaf = makeNode(20);
+    const parent = makeNode(10, {
+      dependencies: {
+        issueNumber: 10,
+        blockedBy: [makeDepRef(1, 'open')],
+        resolved: false,
+        openCount: 1,
+      },
+      children: [leaf],
+    });
+
+    const fetcher = setupFetcher([parent]);
+
+    // Sanity check after setup: leaf inherits the blocker
+    expect(leaf.dependencies?.inheritedBlockedBy).toHaveLength(1);
+
+    // Simulate removing the blocker from the parent via updateIssueDependencies
+    fetcher.updateIssueDependencies(1, '10', {
+      parent: null,
+      children: [{ key: '20', title: 'Issue #20', state: 'open' }],
+      blockedBy: [],
+      blocking: [],
+    });
+
+    // Parent now has no direct blockers
+    expect(parent.dependencies).toBeUndefined();
+
+    // Leaf's inherited list must no longer carry the removed blocker
+    const leafInherited = leaf.dependencies?.inheritedBlockedBy ?? [];
+    const stillHasOne = leafInherited.some((b) => b.number === 1 && b.state === 'open');
+    expect(stillHasOne).toBe(false);
+    expect(leaf.dependencies?.openCount ?? 0).toBe(0);
+    expect(leaf.dependencies?.resolved ?? true).toBe(true);
+  });
+});
+

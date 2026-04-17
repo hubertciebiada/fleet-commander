@@ -12,17 +12,20 @@ import { ServiceError } from '../../../src/server/services/service-error.js';
 // ---------------------------------------------------------------------------
 
 const mockRelations = {
-  parent: { key: '10', title: 'Parent issue' },
-  children: [{ key: '20', title: 'Child issue' }],
-  blockedBy: [{ key: '30', title: 'Blocker issue' }],
+  parent: { key: '10', title: 'Parent issue', state: 'open' },
+  children: [{ key: '20', title: 'Child issue', state: 'open' }],
+  blockedBy: [{ key: '30', title: 'Blocker issue', state: 'open' }],
   blocking: [],
+  inheritedBlockedBy: [
+    { key: '40', title: 'Inherited blocker', state: 'open', viaAncestorKey: '#10' },
+  ],
 };
 
-const mockGetRelations = vi.fn().mockResolvedValue(mockRelations);
+const mockGetRelationsWithInherited = vi.fn().mockResolvedValue(mockRelations);
 
 vi.mock('../../../src/server/services/issue-relations-service.js', () => ({
   getIssueRelationsService: () => ({
-    getRelations: mockGetRelations,
+    getRelationsWithInherited: mockGetRelationsWithInherited,
   }),
 }));
 
@@ -99,17 +102,32 @@ describe('fleet_get_relations MCP tool', () => {
     expect(parsed).toEqual(mockRelations);
   });
 
-  it('handler passes projectId and issueKey to getRelations', async () => {
+  it('handler passes projectId and issueKey to getRelationsWithInherited', async () => {
     registerGetRelationsTool(mockMcpServer as any);
 
     const handler = registeredTools[0]!.handler;
     await handler({ projectId: 1, issueKey: '42' });
 
-    expect(mockGetRelations).toHaveBeenCalledWith(1, '42');
+    expect(mockGetRelationsWithInherited).toHaveBeenCalledWith(1, '42');
+  });
+
+  it('handler exposes inheritedBlockedBy in the response', async () => {
+    registerGetRelationsTool(mockMcpServer as any);
+
+    const handler = registeredTools[0]!.handler;
+    const result = (await handler({ projectId: 1, issueKey: '42' })) as {
+      content: Array<{ type: string; text: string }>;
+    };
+    const parsed = JSON.parse(result.content[0]!.text);
+
+    expect(parsed).toHaveProperty('inheritedBlockedBy');
+    expect(parsed.inheritedBlockedBy).toHaveLength(1);
+    expect(parsed.inheritedBlockedBy[0].key).toBe('40');
+    expect(parsed.inheritedBlockedBy[0].viaAncestorKey).toBe('#10');
   });
 
   it('handler returns isError on ServiceError', async () => {
-    mockGetRelations.mockRejectedValueOnce(
+    mockGetRelationsWithInherited.mockRejectedValueOnce(
       new ServiceError('Project 999 not found', 'NOT_FOUND', 404),
     );
 
@@ -126,7 +144,7 @@ describe('fleet_get_relations MCP tool', () => {
   });
 
   it('handler re-throws non-ServiceError exceptions', async () => {
-    mockGetRelations.mockRejectedValueOnce(new Error('unexpected'));
+    mockGetRelationsWithInherited.mockRejectedValueOnce(new Error('unexpected'));
 
     registerGetRelationsTool(mockMcpServer as any);
 
