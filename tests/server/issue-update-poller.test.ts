@@ -54,6 +54,13 @@ vi.mock('../../src/server/services/team-manager.js', () => ({
   getTeamManager: () => mockManager,
 }));
 
+const mockGithubPoller = {
+  reconcilePR: vi.fn().mockResolvedValue(undefined),
+};
+vi.mock('../../src/server/services/github-poller.js', () => ({
+  githubPoller: mockGithubPoller,
+}));
+
 const mockExecGHAsync = vi.fn().mockResolvedValue(null);
 vi.mock('../../src/server/utils/exec-gh.js', () => ({
   execGHAsync: (...args: unknown[]) => mockExecGHAsync(...args),
@@ -367,6 +374,97 @@ describe('IssueUpdatePoller', () => {
     );
 
     // Should stop the team
+    expect(mockManager.stop).toHaveBeenCalledWith(1);
+  });
+
+  it('reconciles PR before marking team done when issue auto-closes via PR merge', async () => {
+    const team = makeTeam({ status: 'running', prNumber: 123 });
+    const project = makeProject();
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getProjects.mockReturnValue([project]);
+
+    // First poll — OPEN
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'OPEN' }));
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // Second poll — CLOSED (auto-closed by PR merge)
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'CLOSED' }));
+    mockResolveMessage.mockReturnValue('Issue #42 was closed externally.');
+
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // reconcilePR must be called with the team's id
+    expect(mockGithubPoller.reconcilePR).toHaveBeenCalledWith(1);
+
+    // Order: reconcilePR runs BEFORE updateTeamSilent flips status to 'done'
+    const reconcileCall = mockGithubPoller.reconcilePR.mock.invocationCallOrder[0]!;
+    const doneUpdateCall = mockDb.updateTeamSilent.mock.calls.findIndex(
+      (call) => (call[1] as { status?: string }).status === 'done',
+    );
+    expect(doneUpdateCall).toBeGreaterThanOrEqual(0);
+    const doneUpdateOrder =
+      mockDb.updateTeamSilent.mock.invocationCallOrder[doneUpdateCall]!;
+    expect(reconcileCall).toBeLessThan(doneUpdateOrder);
+
+    // Team still marked done and stopped
+    expect(mockDb.updateTeamSilent).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: 'done', phase: 'done' }),
+    );
+    expect(mockManager.stop).toHaveBeenCalledWith(1);
+  });
+
+  it('skips PR reconcile when team has no prNumber', async () => {
+    const team = makeTeam({ status: 'running', prNumber: null });
+    const project = makeProject();
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getProjects.mockReturnValue([project]);
+
+    // First poll — OPEN
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'OPEN' }));
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // Second poll — CLOSED
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'CLOSED' }));
+    mockResolveMessage.mockReturnValue('Issue #42 was closed externally.');
+
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // No reconcile call — no PR to reconcile
+    expect(mockGithubPoller.reconcilePR).not.toHaveBeenCalled();
+
+    // Team still marked done
+    expect(mockDb.updateTeamSilent).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: 'done', phase: 'done' }),
+    );
+  });
+
+  it('still marks team done when reconcilePR throws', async () => {
+    const team = makeTeam({ status: 'running', prNumber: 456 });
+    const project = makeProject();
+    mockDb.getActiveTeams.mockReturnValue([team]);
+    mockDb.getProjects.mockReturnValue([project]);
+
+    // First poll — OPEN
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'OPEN' }));
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // Second poll — CLOSED, but reconcilePR blows up (gh CLI down)
+    mockExecGHAsync.mockResolvedValueOnce(makeGHIssueView({ state: 'CLOSED' }));
+    mockResolveMessage.mockReturnValue('Issue #42 was closed externally.');
+    mockGithubPoller.reconcilePR.mockRejectedValueOnce(new Error('gh CLI down'));
+
+    await (issueUpdatePoller as unknown as { poll(): Promise<void> }).poll();
+
+    // Reconcile attempted
+    expect(mockGithubPoller.reconcilePR).toHaveBeenCalledWith(1);
+
+    // Team still transitions to done despite reconcile failure
+    expect(mockDb.updateTeamSilent).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: 'done', phase: 'done' }),
+    );
     expect(mockManager.stop).toHaveBeenCalledWith(1);
   });
 

@@ -350,6 +350,25 @@ class IssueUpdatePoller {
 
         // External closure triggers graceful shutdown
         if (change.type === 'closed') {
+          // Force a PR reconcile BEFORE flipping team status. When a PR
+          // auto-closes an issue via `Closes #N`, the github-poller will
+          // skip that PR once the team is `done`, leaving the PR row stale
+          // (state='open', merge_status='blocked_unknown'). Reconciling here
+          // ensures the dashboard shows the correct "merged" pill without
+          // a manual refresh. See issue #704.
+          if (team.prNumber) {
+            try {
+              const { githubPoller } = await import('./github-poller.js');
+              await githubPoller.reconcilePR(team.id);
+            } catch (err) {
+              console.error(
+                `[IssueUpdatePoller] Forced reconcilePR failed for team ${team.id} (PR #${team.prNumber}):`,
+                err instanceof Error ? err.message : err,
+              );
+              // Fall through — still mark the team done even if reconcile fails.
+            }
+          }
+
           const db = getDatabase();
           const previousStatus = team.status;
 
