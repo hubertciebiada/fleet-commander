@@ -7,7 +7,7 @@
 // touched and the error propagates to the caller.
 // =============================================================================
 
-import type { IssueRelations } from '../../shared/issue-provider.js';
+import type { IssueRelations, IssueRelationRef } from '../../shared/issue-provider.js';
 import { getDatabase } from '../db.js';
 import { getIssueProvider } from '../providers/index.js';
 import { GitHubIssueProvider } from '../providers/github-issue-provider.js';
@@ -15,6 +15,18 @@ import { JiraIssueProvider } from '../providers/jira-issue-provider.js';
 import { getIssueFetcher } from './issue-fetcher.js';
 import { sseBroker } from './sse-broker.js';
 import { validationError, notFoundError, externalError } from './service-error.js';
+
+/** A relation ref augmented with the ancestor through which it is inherited. */
+export interface InheritedRelationRef extends IssueRelationRef {
+  /** Display key of the ancestor this block is inherited through. */
+  viaAncestorKey: string;
+}
+
+/** IssueRelations plus inherited blockers from the parent-child hierarchy. */
+export interface IssueRelationsWithInherited extends IssueRelations {
+  /** Blockers inherited from ancestor issues (empty if no chain blockers). */
+  inheritedBlockedBy: InheritedRelationRef[];
+}
 
 // ---------------------------------------------------------------------------
 // Helper: resolve GitHub owner/repo from project's issue sources
@@ -92,6 +104,33 @@ class IssueRelationsService {
         `Failed to get relations for ${issueKey}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * Get relations for an issue and additionally attach any blockers inherited
+   * from its ancestor chain (parent, grandparent, ...). Reads inherited info
+   * from the in-memory issue cache populated by `IssueFetcher`. If the issue
+   * is not present in the cache (cold cache, or issue not yet fetched), the
+   * result has an empty `inheritedBlockedBy` array — the caller still gets
+   * the direct relations.
+   */
+  async getRelationsWithInherited(
+    projectId: number,
+    issueKey: string,
+  ): Promise<IssueRelationsWithInherited> {
+    const relations = await this.getRelations(projectId, issueKey);
+
+    const node = getIssueFetcher().getIssueByKey(issueKey, projectId);
+    const inheritedDeps = node?.dependencies?.inheritedBlockedBy ?? [];
+
+    const inheritedBlockedBy: InheritedRelationRef[] = inheritedDeps.map((dep) => ({
+      key: dep.issueKey ?? String(dep.number),
+      title: dep.title,
+      state: dep.state,
+      viaAncestorKey: dep.viaAncestorKey ?? `#${dep.viaAncestor}`,
+    }));
+
+    return { ...relations, inheritedBlockedBy };
   }
 
   /**
